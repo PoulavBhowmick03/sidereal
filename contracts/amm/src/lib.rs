@@ -167,6 +167,44 @@ impl AmmMarket {
         Ok(read_state(&env)?.total_lp)
     }
 
+    pub fn quote_pt_for_sy(env: Env, pt_in: i128) -> Result<i128, Error> {
+        require_positive_amount_result(pt_in)?;
+
+        let config = read_config(&env)?;
+        require_live_result(&env, &config)?;
+
+        let state = read_state(&env)?;
+        require_seeded_result(&state)?;
+
+        let comp = precompute_or_panic(&env, &config, &state);
+        Ok(exact_pt_in_sy_out_or_panic(
+            &env, &config, &state, &comp, pt_in,
+        ))
+    }
+
+    pub fn quote_sy_for_pt(env: Env, sy_in: i128) -> Result<i128, Error> {
+        require_positive_amount_result(sy_in)?;
+
+        let config = read_config(&env)?;
+        require_live_result(&env, &config)?;
+
+        let state = read_state(&env)?;
+        require_seeded_result(&state)?;
+
+        let comp = precompute_or_panic(&env, &config, &state);
+        Ok(exact_sy_in_pt_out_or_panic(
+            &env, &config, &state, &comp, sy_in,
+        ))
+    }
+
+    pub fn quote_sy_for_yt(env: Env, sy_in: i128) -> Result<i128, Error> {
+        Self::quote_sy_for_pt(env, sy_in)
+    }
+
+    pub fn quote_yt_for_sy(env: Env, yt_in: i128) -> Result<i128, Error> {
+        Self::quote_pt_for_sy(env, yt_in)
+    }
+
     pub fn spot_apy(env: Env) -> Result<i128, Error> {
         let config = read_config(&env)?;
         if env.ledger().timestamp() >= config.maturity {
@@ -465,10 +503,34 @@ fn require_seeded(env: &Env, state: &State) {
     }
 }
 
+fn require_seeded_result(state: &State) -> Result<(), Error> {
+    if state.total_lp <= 0 || state.total_pt <= 0 || state.total_sy <= 0 {
+        return Err(Error::MarketNotSeeded);
+    }
+
+    Ok(())
+}
+
 fn require_positive_amount(env: &Env, amount: i128) {
     if amount <= 0 {
         panic_with_error!(env, Error::InvalidAmount);
     }
+}
+
+fn require_positive_amount_result(amount: i128) -> Result<(), Error> {
+    if amount <= 0 {
+        return Err(Error::InvalidAmount);
+    }
+
+    Ok(())
+}
+
+fn require_live_result(env: &Env, config: &Config) -> Result<(), Error> {
+    if env.ledger().timestamp() >= config.maturity {
+        return Err(Error::MarketMatured);
+    }
+
+    Ok(())
 }
 
 fn time_to_expiry_or_panic(env: &Env, config: &Config) -> u64 {
@@ -1170,6 +1232,74 @@ mod test {
         assert_eq!(fixture.client.total_lp(), state.total_lp);
         assert_eq!(fixture.client.spot_apy(), fixture.client.implied_apy());
         assert!(fixture.client.twap_apy() > 0);
+    }
+
+    #[test]
+    fn quote_accessors_match_pt_route_execution_without_mutating_state() {
+        let first_fixture = fixture(NOW);
+        initialize(&first_fixture);
+        first_fixture
+            .client
+            .add_liquidity(&first_fixture.admin, &20_000, &20_000);
+
+        let before = first_fixture.client.state();
+        let quoted_sy_out = first_fixture.client.quote_pt_for_sy(&1_000);
+        let quoted_pt_out = first_fixture.client.quote_sy_for_pt(&1_000);
+        let after_quote = first_fixture.client.state();
+
+        assert_eq!(before, after_quote);
+        assert_eq!(
+            quoted_sy_out,
+            first_fixture
+                .client
+                .swap_pt_for_sy(&first_fixture.admin, &1_000, &1)
+        );
+
+        let second_fixture = fixture(NOW);
+        initialize(&second_fixture);
+        second_fixture
+            .client
+            .add_liquidity(&second_fixture.admin, &20_000, &20_000);
+        assert_eq!(
+            quoted_pt_out,
+            second_fixture
+                .client
+                .swap_sy_for_pt(&second_fixture.admin, &1_000, &1)
+        );
+    }
+
+    #[test]
+    fn quote_accessors_match_yt_route_execution_without_mutating_state() {
+        let first_fixture = fixture(NOW);
+        initialize(&first_fixture);
+        first_fixture
+            .client
+            .add_liquidity(&first_fixture.admin, &20_000, &20_000);
+
+        let before = first_fixture.client.state();
+        let quoted_yt_out = first_fixture.client.quote_sy_for_yt(&1_000);
+        let quoted_sy_out = first_fixture.client.quote_yt_for_sy(&1_000);
+        let after_quote = first_fixture.client.state();
+
+        assert_eq!(before, after_quote);
+        assert_eq!(
+            quoted_yt_out,
+            first_fixture
+                .client
+                .swap_sy_for_yt(&first_fixture.admin, &1_000, &1)
+        );
+
+        let second_fixture = fixture(NOW);
+        initialize(&second_fixture);
+        second_fixture
+            .client
+            .add_liquidity(&second_fixture.admin, &20_000, &20_000);
+        assert_eq!(
+            quoted_sy_out,
+            second_fixture
+                .client
+                .swap_yt_for_sy(&second_fixture.admin, &1_000, &1)
+        );
     }
 
     #[derive(Clone, Debug)]
