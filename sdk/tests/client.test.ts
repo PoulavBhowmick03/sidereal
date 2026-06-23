@@ -144,9 +144,12 @@ describe("getMarket", () => {
     expect(m.maturity).toBe(2_000_000_000);
   });
 
-  it("rejects when the RPC simulation fails", async () => {
-    state().simulationError = "boom";
-    await expect(newClient().getMarket("mkt")).rejects.toThrow(/simulation failed/);
+  it("rejects with a typed ContractError carrying the contract code", async () => {
+    state().simulationError = "HostError: Error(Contract, #10) market matured";
+    await expect(newClient().getMarket("mkt")).rejects.toMatchObject({
+      name: "ContractError",
+      code: 10,
+    });
   });
 
   it("rejects when the source account is missing", async () => {

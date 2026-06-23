@@ -14,6 +14,7 @@ import type {
 } from "./types.js";
 import { BPS_DENOMINATOR, WAD } from "./types.js";
 import { marketMethodFor, quoteMethodFor, priceImpactBps, secondsToMaturity } from "./routes.js";
+import { ContractError, parseContractErrorCode } from "./errors.js";
 
 type Operation = ReturnType<Contract["call"]>;
 
@@ -252,7 +253,7 @@ export class StellarYT {
 
     const sim = await this.server.simulateTransaction(tx);
     if (rpc.Api.isSimulationError(sim)) {
-      throw new Error(`simulation failed: ${sim.error}`);
+      throw new ContractError(sim.error, parseContractErrorCode(sim.error));
     }
     const retval = sim.result?.retval;
     if (retval === undefined) {
