@@ -120,7 +120,7 @@ The repo is public from day one and we welcome external eyes. A few notes:
 
 - The build is happening across four parallel agents (2 Codex, 2 Claude Code) per the spec in [`AGENTS.md`](./AGENTS.md). If you want to contribute, that file is the place to start.
 - Open an issue before opening a large PR. Scope is tight by design (see §12 of `AGENTS.md`).
-- Security findings: please email `<TODO-security-email>` rather than opening a public issue.
+- Security findings: please report privately via GitHub's "Report a vulnerability" (Security tab, private advisory) rather than opening a public issue. See [`SECURITY.md`](./SECURITY.md).
 
 ## Influences and prior art
 
