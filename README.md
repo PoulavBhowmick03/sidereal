@@ -37,6 +37,7 @@ What's missing is the layer that lets institutional users hedge that yield and l
 | Time-decay AMM (PT/SY pool, TWAP, quotes) | ✅ built, 15 tests incl. property suite |
 | TypeScript SDK (typed client, quote, build, submit) | ✅ built, 11 tests |
 | Frontend (mint, trade, redeem, wallet connect) | ✅ built, 12 tests |
+| Cross-contract integration tests | ✅ 3 tests (deposit/split/recombine, redeem, AMM) |
 | Integrated workspace (everything builds together) | ✅ `cargo`, SDK, and `next build` green |
 | Testnet deploy script | ✅ `scripts/deploy-testnet.sh` |
 | Live testnet end-to-end demo | 🚧 needs deploy + token settlement (see Limitations) |

@@ -15,7 +15,7 @@ npm install -g pnpm                   # JS workspace
 
 ```bash
 make install   # JS deps
-make test      # 35 contract tests, 29 SDK tests, 12 app tests
+make test      # 38 Rust tests (35 contract + 3 integration), 29 SDK, 12 app
 make build     # wasm contracts + SDK + production app build
 ```
 
