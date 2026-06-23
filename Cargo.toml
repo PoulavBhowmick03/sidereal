@@ -2,7 +2,11 @@
 
 [workspace]
 resolver = "2"
-members = ["contracts/shared/types"]
+# Root membership keeps Codex-2 contract crates verified against the shared lockfile.
+members = [
+    "contracts/shared/types",
+    "contracts/tokenizer",
+]
 
 [workspace.package]
 version = "0.1.0"
