@@ -73,7 +73,7 @@ launch_worker() {
 
   (
     cd "$path"
-    ROLE="$role" MAX_RUNS="$RUNS" SLEEP_SECONDS="$SLEEP_SECONDS" ./scripts/codex-loop.sh
+    REPO="$path" ROLE="$role" MAX_RUNS="$RUNS" SLEEP_SECONDS="$SLEEP_SECONDS" ./scripts/codex-loop.sh
   ) >"$log" 2>&1 &
   echo $!
 }
