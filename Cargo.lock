@@ -1489,7 +1489,36 @@ dependencies = [
 ]
 
 [[package]]
+name = "sidereal-pt-token"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
 name = "sidereal-shared-types"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "sidereal-sy-wrapper"
+version = "0.1.0"
+dependencies = [
+ "sidereal-shared-types",
+ "soroban-sdk",
+]
+
+[[package]]
+name = "sidereal-tokenizer"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
+name = "sidereal-yt-token"
 version = "0.1.0"
 dependencies = [
  "soroban-sdk",
