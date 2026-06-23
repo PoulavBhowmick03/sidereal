@@ -1321,6 +1321,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "sidereal-sy-wrapper"
+version = "0.1.0"
+dependencies = [
+ "sidereal-shared-types",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "sidereal-tokenizer"
 version = "0.1.0"
 dependencies = [
