@@ -37,7 +37,7 @@ fi
 
 if ! git log --all --format=%s | grep -Fxq "feat: freeze interfaces"; then
   echo "Freeze commit missing. Running bootstrap pass first."
-  ROLE=bootstrap MAX_RUNS=1 SLEEP_SECONDS="$SLEEP_SECONDS" ./scripts/codex-loop.sh
+  ALLOW_MAIN=1 ROLE=bootstrap MAX_RUNS=1 SLEEP_SECONDS="$SLEEP_SECONDS" ./scripts/codex-loop.sh
 
   if [[ -n "$(git status --porcelain)" ]]; then
     echo "Bootstrap left uncommitted changes. Resolve before parallel launch."
