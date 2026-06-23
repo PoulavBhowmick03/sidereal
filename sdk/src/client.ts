@@ -13,6 +13,7 @@ import type {
   TransactionEnvelope,
 } from "./types.js";
 import { BPS_DENOMINATOR } from "./types.js";
+import { marketMethodFor, priceImpactBps, secondsToMaturity } from "./routes.js";
 
 /**
  * Typed client for the sidereal protocol.
@@ -62,7 +63,7 @@ export class StellarYT {
       exchangeRate,
       impliedApyBps,
       maturity: maturitySec,
-      secondsToMaturity: Math.max(0, maturitySec - nowSec),
+      secondsToMaturity: secondsToMaturity(maturitySec, nowSec),
       totalPt,
       totalSy,
     };
@@ -80,20 +81,14 @@ export class StellarYT {
       new Contract(this.contracts.market).call("implied_apy"),
     );
 
-    // Price impact relative to the mid implied by current reserves. Refined
-    // once codex-1 confirms a reserves accessor; for now derived from slippage
-    // against the caller's minAmountOut floor.
-    const priceImpactBps =
-      args.minAmountOut > 0n
-        ? ((args.amountIn - amountOut) * BPS_DENOMINATOR) / args.amountIn
-        : 0n;
-
     return {
       assetIn: args.assetIn,
       assetOut: args.assetOut,
       amountIn: args.amountIn,
       amountOut,
-      priceImpactBps,
+      // Refined once codex-1 confirms a reserves accessor; for now derived from
+      // realized output vs. the input notional.
+      priceImpactBps: priceImpactBps(args.amountIn, amountOut, BPS_DENOMINATOR),
       impliedApyBps,
     };
   }
@@ -152,20 +147,8 @@ export class StellarYT {
     const from = new Address(args.from).toScVal();
     const amountIn = nativeToScVal(args.amountIn, { type: "i128" });
     const minOut = nativeToScVal(args.minAmountOut, { type: "i128" });
-    const route = `${args.assetIn}->${args.assetOut}`;
-
-    switch (route) {
-      case "PT->SY":
-        return market.call("swap_pt_for_sy", from, amountIn, minOut);
-      case "SY->PT":
-        return market.call("swap_sy_for_pt", from, amountIn, minOut);
-      case "SY->YT":
-        return market.call("swap_sy_for_yt", from, amountIn, minOut);
-      case "YT->SY":
-        return market.call("swap_yt_for_sy", from, amountIn, minOut);
-      default:
-        throw new Error(`unsupported swap route: ${route}`);
-    }
+    const method = marketMethodFor(args.assetIn, args.assetOut);
+    return market.call(method, from, amountIn, minOut);
   }
 
   /** Simulates a read-only call and decodes the ScVal result to a JS value. */
