@@ -1237,6 +1237,26 @@ mod test {
     }
 
     #[test]
+    fn rate_views_track_warmup_and_zero_at_maturity() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &20_000, &20_000);
+
+        assert!(fixture.client.twap_warming_up());
+
+        fixture.env.ledger().set_timestamp(NOW + TWAP_WINDOW);
+        assert!(!fixture.client.twap_warming_up());
+
+        fixture.env.ledger().set_timestamp(MATURITY);
+        assert_eq!(fixture.client.implied_apy(), 0);
+        assert_eq!(fixture.client.spot_apy(), 0);
+        assert_eq!(fixture.client.twap_apy(), 0);
+        assert!(!fixture.client.twap_warming_up());
+    }
+
+    #[test]
     fn quote_accessors_match_pt_route_execution_without_mutating_state() {
         let first_fixture = fixture(NOW);
         initialize(&first_fixture);
