@@ -27,6 +27,8 @@ interface WalletContextValue {
   disconnect: () => void;
   /** Signs an unsigned XDR with the connected wallet, returning signed XDR. */
   signTransaction: (xdr: string) => Promise<string>;
+  /** True when the connected wallet is on a different network than configured. */
+  networkMismatch: boolean;
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null);
@@ -42,6 +44,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const [kit, setKit] = useState<StellarWalletsKit | null>(null);
   const [address, setAddress] = useState<string | null>(null);
   const [connecting, setConnecting] = useState(false);
+  const [walletPassphrase, setWalletPassphrase] = useState<string | null>(null);
 
   // The kit touches `window`, so it can only be constructed in the browser.
   useEffect(() => {
@@ -57,7 +60,13 @@ export function WalletProvider({ children }: { children: ReactNode }) {
       instance.setWallet(savedId);
       instance
         .getAddress()
-        .then(({ address: addr }) => setAddress(addr))
+        .then(({ address: addr }) => {
+          setAddress(addr);
+          instance
+            .getNetwork()
+            .then((n) => setWalletPassphrase(n.networkPassphrase))
+            .catch(() => setWalletPassphrase(null));
+        })
         .catch(() => window.localStorage.removeItem(STORAGE_KEY));
     }
   }, [cfg.networkPassphrase]);
@@ -72,6 +81,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
           const { address: addr } = await kit.getAddress();
           setAddress(addr);
           window.localStorage.setItem(STORAGE_KEY, option.id);
+          try {
+            const n = await kit.getNetwork();
+            setWalletPassphrase(n.networkPassphrase);
+          } catch {
+            setWalletPassphrase(null);
+          }
         },
       });
     } finally {
@@ -81,6 +96,7 @@ export function WalletProvider({ children }: { children: ReactNode }) {
 
   const disconnect = useCallback(() => {
     setAddress(null);
+    setWalletPassphrase(null);
     window.localStorage.removeItem(STORAGE_KEY);
   }, []);
 
@@ -98,9 +114,12 @@ export function WalletProvider({ children }: { children: ReactNode }) {
     [kit, address, cfg.networkPassphrase],
   );
 
+  const networkMismatch =
+    address !== null && walletPassphrase !== null && walletPassphrase !== cfg.networkPassphrase;
+
   const value = useMemo(
-    () => ({ address, connecting, connect, disconnect, signTransaction }),
-    [address, connecting, connect, disconnect, signTransaction],
+    () => ({ address, connecting, connect, disconnect, signTransaction, networkMismatch }),
+    [address, connecting, connect, disconnect, signTransaction, networkMismatch],
   );
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
