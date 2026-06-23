@@ -70,6 +70,7 @@ pub enum Error {
     MarketProportionTooHigh = 14,
     ExchangeRateBelowOne = 15,
     UnsupportedRoute = 16,
+    TradeNotFound = 17,
 }
 
 struct Precompute {
@@ -237,8 +238,28 @@ impl Market for AmmMarket {
         sy_out
     }
 
-    fn swap_sy_for_pt(env: &Env, _from: Address, _sy_in: i128, _min_pt_out: i128) -> i128 {
-        panic_with_error!(env, Error::UnsupportedRoute);
+    fn swap_sy_for_pt(env: &Env, from: Address, sy_in: i128, min_pt_out: i128) -> i128 {
+        from.require_auth();
+        require_positive_amount(env, sy_in);
+
+        let config = read_config_or_panic(env);
+        require_live(env, &config);
+
+        let mut state = read_state_or_panic(env);
+        require_seeded(env, &state);
+
+        let comp = precompute_or_panic(env, &config, &state);
+        let pt_out = exact_sy_in_pt_out_or_panic(env, &config, &state, &comp, sy_in);
+        if pt_out < min_pt_out {
+            panic_with_error!(env, Error::SlippageExceeded);
+        }
+
+        let observed_ln_rate =
+            apply_exact_sy_in_trade_or_panic(env, &config, &mut state, &comp, sy_in, pt_out);
+        sync_twap(env, &config, &mut state, observed_ln_rate);
+        write_state(env, &state);
+
+        pt_out
     }
 
     fn swap_sy_for_yt(env: &Env, _from: Address, _sy_in: i128, _min_yt_out: i128) -> i128 {
@@ -460,6 +481,102 @@ fn exact_pt_in_sy_out_or_panic(
     sy_out
 }
 
+fn exact_sy_in_pt_out_or_panic(
+    env: &Env,
+    config: &Config,
+    state: &State,
+    comp: &Precompute,
+    sy_in: i128,
+) -> i128 {
+    let mut low = 1;
+    let mut high = checked_sub(env, state.total_pt, 1);
+    let mut best = 0;
+
+    while low <= high {
+        let mid = low + ((high - low) / 2);
+        match try_exact_pt_out_sy_in(env, config, state, comp, mid) {
+            Some(required_sy) if required_sy <= sy_in => {
+                best = mid;
+                low = mid + 1;
+            }
+            Some(_) | None => {
+                high = mid - 1;
+            }
+        }
+    }
+
+    if best <= 0 {
+        panic_with_error!(env, Error::TradeNotFound);
+    }
+
+    best
+}
+
+fn apply_exact_sy_in_trade_or_panic(
+    env: &Env,
+    _config: &Config,
+    state: &mut State,
+    comp: &Precompute,
+    sy_in: i128,
+    pt_out: i128,
+) -> i128 {
+    let required_sy = exact_pt_out_sy_in_or_panic(env, _config, state, comp, pt_out);
+    if required_sy > sy_in {
+        panic_with_error!(env, Error::SlippageExceeded);
+    }
+
+    state.total_pt = checked_sub(env, state.total_pt, pt_out);
+    state.total_sy = checked_add(env, state.total_sy, required_sy);
+    let observed_ln_rate = get_ln_implied_rate_or_panic(
+        env,
+        state.total_pt,
+        state.total_sy,
+        comp.rate_scalar,
+        comp.rate_anchor,
+        comp.time_to_expiry,
+    );
+    state.last_ln_implied_rate = observed_ln_rate;
+
+    observed_ln_rate
+}
+
+fn exact_pt_out_sy_in_or_panic(
+    env: &Env,
+    config: &Config,
+    state: &State,
+    comp: &Precompute,
+    pt_out: i128,
+) -> i128 {
+    match try_exact_pt_out_sy_in(env, config, state, comp, pt_out) {
+        Some(value) => value,
+        None => panic_with_error!(env, Error::TradeNotFound),
+    }
+}
+
+fn try_exact_pt_out_sy_in(
+    env: &Env,
+    config: &Config,
+    state: &State,
+    comp: &Precompute,
+    pt_out: i128,
+) -> Option<i128> {
+    if pt_out <= 0 || pt_out >= state.total_pt {
+        return None;
+    }
+
+    let exchange_rate = try_get_exchange_rate(
+        env,
+        state.total_pt,
+        comp.total_asset,
+        comp.rate_scalar,
+        comp.rate_anchor,
+        pt_out,
+    )?;
+    let pre_fee_sy_in = mul_div_up_or_panic(env, pt_out, WAD, exchange_rate);
+    let fee = mul_div_up_or_panic(env, pre_fee_sy_in, config.fee_bps, BPS_DENOMINATOR);
+    Some(checked_add(env, pre_fee_sy_in, fee))
+}
+
 fn sync_twap(env: &Env, config: &Config, state: &mut State, observed_ln_rate: i128) {
     let now = env.ledger().timestamp();
     let elapsed = now.saturating_sub(state.last_observation);
@@ -578,6 +695,41 @@ fn get_exchange_rate_or_panic(
     exchange_rate
 }
 
+fn try_get_exchange_rate(
+    env: &Env,
+    total_pt: i128,
+    total_asset: i128,
+    rate_scalar: i128,
+    rate_anchor: i128,
+    net_pt_to_account: i128,
+) -> Option<i128> {
+    let numerator = total_pt.checked_sub(net_pt_to_account)?;
+    let denominator = total_pt.checked_add(total_asset)?;
+    if numerator <= 0 || denominator <= 0 {
+        return None;
+    }
+
+    let proportion = numerator.checked_mul(WAD)?.checked_div(denominator)?;
+    if proportion <= 0 || proportion > MAX_MARKET_PROPORTION {
+        return None;
+    }
+
+    let complement = WAD.checked_sub(proportion)?;
+    if complement <= 0 {
+        return None;
+    }
+
+    let ratio = proportion.checked_mul(WAD)?.checked_div(complement)?;
+    let ln_proportion = try_ln_wad(env, ratio)?;
+    let scaled = ln_proportion.checked_mul(WAD)?.checked_div(rate_scalar)?;
+    let exchange_rate = scaled.checked_add(rate_anchor)?;
+    if exchange_rate < WAD {
+        return None;
+    }
+
+    Some(exchange_rate)
+}
+
 fn log_proportion_or_panic(env: &Env, proportion: i128) -> i128 {
     let complement = checked_sub(env, WAD, proportion);
     if complement <= 0 {
@@ -615,6 +767,16 @@ fn ln_wad_or_panic(env: &Env, value: i128) -> i128 {
     from_float_wad_or_panic(env, logged)
 }
 
+fn try_ln_wad(env: &Env, value: i128) -> Option<i128> {
+    if value <= 0 {
+        return None;
+    }
+
+    let as_float = value as f64 / WAD as f64;
+    let logged = log(as_float);
+    try_from_float_wad(env, logged)
+}
+
 fn exp_wad_or_panic(env: &Env, value: i128) -> i128 {
     let exponent = value as f64 / WAD as f64;
     from_float_wad_or_panic(env, exp(exponent))
@@ -631,6 +793,19 @@ fn from_float_wad_or_panic(env: &Env, value: f64) -> i128 {
     }
 
     floor(scaled) as i128
+}
+
+fn try_from_float_wad(_env: &Env, value: f64) -> Option<i128> {
+    if !value.is_finite() {
+        return None;
+    }
+
+    let scaled = value * WAD as f64;
+    if !scaled.is_finite() || scaled > i128::MAX as f64 || scaled < i128::MIN as f64 {
+        return None;
+    }
+
+    Some(floor(scaled) as i128)
 }
 
 fn mul_div_down_or_panic(env: &Env, lhs: i128, rhs: i128, denominator: i128) -> i128 {
@@ -827,11 +1002,30 @@ mod test {
     }
 
     #[test]
+    fn swap_sy_for_pt_updates_reserves_and_observation() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &20_000, &20_000);
+
+        fixture.env.ledger().set_timestamp(NOW + 60);
+        let pt_out = fixture.client.swap_sy_for_pt(&fixture.admin, &1_000, &1);
+        let state = fixture.client.state();
+
+        assert!(pt_out > 0);
+        assert_eq!(state.total_pt, 20_000 - pt_out);
+        assert!(state.total_sy > 20_000);
+        assert_eq!(state.last_observation, NOW + 60);
+        assert!(state.twap_ln_implied_rate > 0);
+    }
+
+    #[test]
     #[should_panic(expected = "Error(Contract, #16)")]
     fn unsupported_routes_still_revert() {
         let fixture = fixture(NOW);
         initialize(&fixture);
 
-        fixture.client.swap_sy_for_pt(&fixture.admin, &100, &1);
+        fixture.client.swap_sy_for_yt(&fixture.admin, &100, &1);
     }
 }
