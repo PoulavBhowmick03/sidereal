@@ -85,7 +85,6 @@ PROMPT
   codex exec \
     -C "$REPO" \
     -s workspace-write \
-    -a never \
     -o "$out" \
     "$prompt"
 
