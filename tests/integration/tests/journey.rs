@@ -121,3 +121,41 @@ fn amm_wires_to_the_same_market() {
     let out = amm.quote_sy_for_pt(&100_000_000_i128);
     assert!(out > 0, "a seeded market returns a positive PT quote");
 }
+
+#[test]
+fn amm_swap_round_trip_charges_fees() {
+    let env = Env::default();
+    let m = deploy(&env);
+    let amm = AmmMarketClient::new(&env, &m.amm);
+
+    let liquidity = 1_000_000_000_000_i128;
+    amm.add_liquidity(&m.user, &liquidity, &liquidity);
+
+    let sy_in = 1_000_000_000_i128;
+    let pt_out = amm.swap_sy_for_pt(&m.user, &sy_in, &0);
+    assert!(pt_out > 0, "buying PT yields PT");
+    assert!(amm.reserve_sy() > liquidity, "SY reserve grows after selling SY in");
+
+    // Selling the PT straight back returns less SY than we put in, because both
+    // legs pay the fee.
+    let sy_back = amm.swap_pt_for_sy(&m.user, &pt_out, &0);
+    assert!(sy_back > 0 && sy_back < sy_in, "round trip loses the fee");
+}
+
+#[test]
+fn amm_yt_route_executes_in_the_internal_model() {
+    // The AMM computes the YT flash route numerically against its own reserves;
+    // it does not yet mint PT+YT via the tokenizer or move real tokens. This
+    // test pins that behavior: the route returns a positive YT amount in the
+    // internal-accounting model. Real cross-contract settlement is the open gap
+    // (see README Limitations).
+    let env = Env::default();
+    let m = deploy(&env);
+    let amm = AmmMarketClient::new(&env, &m.amm);
+
+    let liquidity = 1_000_000_000_000_i128;
+    amm.add_liquidity(&m.user, &liquidity, &liquidity);
+
+    let yt_out = amm.swap_sy_for_yt(&m.user, &1_000_000_000_i128, &0);
+    assert!(yt_out > 0, "the YT route returns a positive amount in the internal model");
+}
