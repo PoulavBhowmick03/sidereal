@@ -10,6 +10,8 @@ import { bpsToPercent, formatTokenAmount, parseTokenAmount } from "../../lib/for
 import { useWallet } from "../../lib/wallet";
 import { useTxFlow } from "../../lib/tx";
 import { describeError } from "../../lib/errors";
+import { usePosition } from "../../lib/usePosition";
+import { PositionCard } from "../../components/PositionCard";
 
 // Only the four routes the single PT/SY pool exposes (YT via flash route).
 const DIRECTIONS = [
@@ -37,6 +39,7 @@ export default function TradePage() {
   const [quoteError, setQuoteError] = useState<unknown>(null);
 
   const direction = DIRECTIONS.find((d) => d.id === directionId) ?? DIRECTIONS[0];
+  const position = usePosition(address, phase.kind === "done" ? phase.hash : 0);
 
   // Debounced live quote whenever the route or amount changes.
   useEffect(() => {
@@ -99,6 +102,8 @@ export default function TradePage() {
           discount.
         </p>
       </header>
+
+      <PositionCard position={position} decimals={cfg.decimals} />
 
       <div className="space-y-4 rounded-xl border border-white/10 bg-panel p-5">
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

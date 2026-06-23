@@ -10,6 +10,8 @@ import { formatTokenAmount, parseTokenAmount } from "../../lib/format";
 import { useWallet } from "../../lib/wallet";
 import { useTxFlow } from "../../lib/tx";
 import { describeError } from "../../lib/errors";
+import { usePosition } from "../../lib/usePosition";
+import { PositionCard } from "../../components/PositionCard";
 
 export default function MintPage() {
   const cfg = useMemo(() => appConfig(), []);
@@ -20,6 +22,7 @@ export default function MintPage() {
   const [amount, setAmount] = useState("");
   const [split, setSplit] = useState(true);
   const [market, setMarket] = useState<MarketState | null>(null);
+  const position = usePosition(address, phase.kind === "done" ? phase.hash : 0);
 
   useEffect(() => {
     getMarketSafe(cfg).then(setMarket).catch(() => setMarket(null));
@@ -58,6 +61,8 @@ export default function MintPage() {
           Deposit USDC to receive SY, and optionally split it into equal amounts of PT and YT.
         </p>
       </header>
+
+      <PositionCard position={position} decimals={cfg.decimals} />
 
       <div className="space-y-4 rounded-xl border border-white/10 bg-panel p-5">
         <label className="block text-sm">

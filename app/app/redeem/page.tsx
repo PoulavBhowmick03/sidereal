@@ -3,13 +3,15 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { MarketState, Position } from "@sidereal/sdk";
+import type { MarketState } from "@sidereal/sdk";
 import { appConfig } from "../../lib/config";
 import { makeClient, getMarketSafe } from "../../lib/sdk";
-import { formatTokenAmount, parseTokenAmount } from "../../lib/format";
+import { parseTokenAmount } from "../../lib/format";
 import { useWallet } from "../../lib/wallet";
 import { useTxFlow } from "../../lib/tx";
 import { describeError } from "../../lib/errors";
+import { usePosition } from "../../lib/usePosition";
+import { PositionCard } from "../../components/PositionCard";
 
 export default function RedeemPage() {
   const cfg = useMemo(() => appConfig(), []);
@@ -19,26 +21,11 @@ export default function RedeemPage() {
 
   const [amount, setAmount] = useState("");
   const [market, setMarket] = useState<MarketState | null>(null);
-  const [position, setPosition] = useState<Position | null>(null);
+  const position = usePosition(address, phase.kind === "done" ? phase.hash : 0);
 
   useEffect(() => {
     getMarketSafe(cfg).then(setMarket).catch(() => setMarket(null));
   }, [cfg]);
-
-  useEffect(() => {
-    if (!address) {
-      setPosition(null);
-      return;
-    }
-    let cancelled = false;
-    client
-      .getPosition(address, cfg.marketId)
-      .then((p) => !cancelled && setPosition(p))
-      .catch(() => !cancelled && setPosition(null));
-    return () => {
-      cancelled = true;
-    };
-  }, [address, client, cfg.marketId]);
 
   const matured = market !== null && market.secondsToMaturity === 0;
 
@@ -65,22 +52,7 @@ export default function RedeemPage() {
         </p>
       </header>
 
-      {position ? (
-        <dl className="grid grid-cols-3 gap-3 text-sm">
-          <div className="rounded-lg border border-white/10 bg-panel p-3">
-            <dt className="text-xs uppercase text-slate-400">PT</dt>
-            <dd className="tabular-nums">{formatTokenAmount(position.ptBalance, cfg.decimals)}</dd>
-          </div>
-          <div className="rounded-lg border border-white/10 bg-panel p-3">
-            <dt className="text-xs uppercase text-slate-400">YT</dt>
-            <dd className="tabular-nums">{formatTokenAmount(position.ytBalance, cfg.decimals)}</dd>
-          </div>
-          <div className="rounded-lg border border-white/10 bg-panel p-3">
-            <dt className="text-xs uppercase text-slate-400">Claimable yield</dt>
-            <dd className="tabular-nums">{formatTokenAmount(position.claimableYield, cfg.decimals)}</dd>
-          </div>
-        </dl>
-      ) : null}
+      <PositionCard position={position} decimals={cfg.decimals} />
 
       <div className="space-y-4 rounded-xl border border-white/10 bg-panel p-5">
         <label className="block text-sm">
