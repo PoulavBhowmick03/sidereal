@@ -1010,6 +1010,7 @@ mod test {
     struct Fixture {
         env: Env,
         client: AmmMarketClient<'static>,
+        contract_id: Address,
         admin: Address,
         pt_token: Address,
         sy_token: Address,
@@ -1033,6 +1034,7 @@ mod test {
         Fixture {
             env,
             client,
+            contract_id,
             admin,
             pt_token,
             sy_token,
@@ -1299,6 +1301,78 @@ mod test {
             second_fixture
                 .client
                 .swap_yt_for_sy(&second_fixture.admin, &1_000, &1)
+        );
+    }
+
+    #[test]
+    fn quote_accessors_return_typed_errors_before_trade_execution() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+
+        assert_eq!(
+            fixture
+                .env
+                .as_contract(&fixture.contract_id, || AmmMarket::quote_pt_for_sy(
+                    fixture.env.clone(),
+                    0
+                )),
+            Err(Error::InvalidAmount)
+        );
+        assert_eq!(
+            fixture
+                .env
+                .as_contract(&fixture.contract_id, || AmmMarket::quote_sy_for_pt(
+                    fixture.env.clone(),
+                    0
+                )),
+            Err(Error::InvalidAmount)
+        );
+        assert_eq!(
+            fixture.env.as_contract(&fixture.contract_id, || {
+                AmmMarket::quote_sy_for_yt(fixture.env.clone(), 1_000)
+            }),
+            Err(Error::MarketNotSeeded)
+        );
+        assert_eq!(
+            fixture.env.as_contract(&fixture.contract_id, || {
+                AmmMarket::quote_yt_for_sy(fixture.env.clone(), 1_000)
+            }),
+            Err(Error::MarketNotSeeded)
+        );
+    }
+
+    #[test]
+    fn quote_accessors_reject_matured_market() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &20_000, &20_000);
+        fixture.env.ledger().set_timestamp(MATURITY);
+
+        assert_eq!(
+            fixture.env.as_contract(&fixture.contract_id, || {
+                AmmMarket::quote_pt_for_sy(fixture.env.clone(), 1_000)
+            }),
+            Err(Error::MarketMatured)
+        );
+        assert_eq!(
+            fixture.env.as_contract(&fixture.contract_id, || {
+                AmmMarket::quote_sy_for_pt(fixture.env.clone(), 1_000)
+            }),
+            Err(Error::MarketMatured)
+        );
+        assert_eq!(
+            fixture.env.as_contract(&fixture.contract_id, || {
+                AmmMarket::quote_sy_for_yt(fixture.env.clone(), 1_000)
+            }),
+            Err(Error::MarketMatured)
+        );
+        assert_eq!(
+            fixture.env.as_contract(&fixture.contract_id, || {
+                AmmMarket::quote_yt_for_sy(fixture.env.clone(), 1_000)
+            }),
+            Err(Error::MarketMatured)
         );
     }
 
