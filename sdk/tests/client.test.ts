@@ -268,6 +268,16 @@ describe("transaction builders", () => {
     const remove = await newClient().buildRemoveLiquidity({ marketId: "mkt", from: "G1", lpIn: 5n });
     expect(remove.xdr).toBe("PREPARED:remove_liquidity");
   });
+
+  it("rejects non-positive amounts before building", async () => {
+    const c = newClient();
+    await expect(c.buildMint({ marketId: "mkt", from: "G1", underlyingAmount: 0n, split: false })).rejects.toThrow(/positive/);
+    await expect(
+      c.buildSwap({ marketId: "mkt", from: "G1", assetIn: "PT", assetOut: "SY", amountIn: -1n, minAmountOut: 0n }),
+    ).rejects.toThrow(/positive/);
+    await expect(c.buildRedeem({ marketId: "mkt", from: "G1", amount: 0n })).rejects.toThrow(/positive/);
+    await expect(c.buildRemoveLiquidity({ marketId: "mkt", from: "G1", lpIn: 0n })).rejects.toThrow(/positive/);
+  });
 });
 
 describe("submit", () => {

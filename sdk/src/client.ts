@@ -20,6 +20,13 @@ import { ContractError, parseContractErrorCode } from "./errors.js";
 
 type Operation = ReturnType<Contract["call"]>;
 
+/** Fails fast on a non-positive amount so we never build a doomed transaction. */
+function requirePositive(label: string, value: bigint): void {
+  if (value <= 0n) {
+    throw new Error(`${label} must be a positive amount`);
+  }
+}
+
 /**
  * Typed client for the sidereal protocol.
  *
@@ -86,6 +93,7 @@ export class StellarYT {
    * errors (InvalidAmount / MarketNotSeeded / MarketMatured), not panics.
    */
   async quoteSwap(args: SwapArgs): Promise<Quote> {
+    requirePositive("amountIn", args.amountIn);
     const market = new Contract(this.contracts.market);
     const quoteMethod = quoteMethodFor(args.assetIn, args.assetOut);
     const amountIn = nativeToScVal(args.amountIn, { type: "i128" });
@@ -156,6 +164,7 @@ export class StellarYT {
    * split atomic co-sign path; flagged on the bus.
    */
   async buildMint(args: MintArgs): Promise<TransactionEnvelope> {
+    requirePositive("underlyingAmount", args.underlyingAmount);
     const from = new Address(args.from).toScVal();
     const sy = new Contract(this.contracts.sy);
     const amount = nativeToScVal(args.underlyingAmount, { type: "i128" });
@@ -177,6 +186,7 @@ export class StellarYT {
 
   /** Builds a swap transaction matching the frozen Market trait routes. */
   async buildSwap(args: SwapArgs): Promise<TransactionEnvelope> {
+    requirePositive("amountIn", args.amountIn);
     return this.buildEnvelope(args.from, [this.swapOperation(args)]);
   }
 
@@ -186,6 +196,7 @@ export class StellarYT {
    * YT back into SY via recombine (the tokenizer requires pt == yt).
    */
   async buildRedeem(args: RedeemArgs): Promise<TransactionEnvelope> {
+    requirePositive("amount", args.amount);
     const from = new Address(args.from).toScVal();
     const amount = nativeToScVal(args.amount, { type: "i128" });
     const tokenizer = new Contract(this.contracts.tokenizer);
@@ -199,6 +210,8 @@ export class StellarYT {
 
   /** Builds a transaction that adds PT/SY liquidity and mints LP tokens. */
   async buildAddLiquidity(args: AddLiquidityArgs): Promise<TransactionEnvelope> {
+    requirePositive("ptIn", args.ptIn);
+    requirePositive("syIn", args.syIn);
     const op = new Contract(this.contracts.market).call(
       "add_liquidity",
       new Address(args.from).toScVal(),
@@ -210,6 +223,7 @@ export class StellarYT {
 
   /** Builds a transaction that burns LP tokens and withdraws PT and SY. */
   async buildRemoveLiquidity(args: RemoveLiquidityArgs): Promise<TransactionEnvelope> {
+    requirePositive("lpIn", args.lpIn);
     const op = new Contract(this.contracts.market).call(
       "remove_liquidity",
       new Address(args.from).toScVal(),
