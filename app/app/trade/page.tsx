@@ -41,6 +41,14 @@ export default function TradePage() {
   const direction = DIRECTIONS.find((d) => d.id === directionId) ?? DIRECTIONS[0];
   const position = usePosition(address, phase.kind === "done" ? phase.hash : 0);
 
+  const balanceIn = position
+    ? direction.assetIn === "SY"
+      ? position.syBalance
+      : direction.assetIn === "PT"
+        ? position.ptBalance
+        : position.ytBalance
+    : 0n;
+
   // Debounced live quote whenever the route or amount changes.
   useEffect(() => {
     setQuote(null);
@@ -124,7 +132,18 @@ export default function TradePage() {
         </div>
 
         <label className="block text-sm">
-          <span className="text-slate-300">Amount in ({direction.assetIn})</span>
+          <span className="flex items-center justify-between text-slate-300">
+            <span>Amount in ({direction.assetIn})</span>
+            {balanceIn > 0n ? (
+              <button
+                type="button"
+                onClick={() => setAmount(formatTokenAmount(balanceIn, cfg.decimals))}
+                className="text-xs text-accent hover:underline"
+              >
+                Max {formatTokenAmount(balanceIn, cfg.decimals)}
+              </button>
+            ) : null}
+          </span>
           <input
             inputMode="decimal"
             value={amount}

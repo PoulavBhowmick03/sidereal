@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { MarketState } from "@sidereal/sdk";
 import { appConfig } from "../../lib/config";
 import { makeClient, getMarketSafe } from "../../lib/sdk";
-import { parseTokenAmount } from "../../lib/format";
+import { formatTokenAmount, parseTokenAmount } from "../../lib/format";
 import { useWallet } from "../../lib/wallet";
 import { useTxFlow } from "../../lib/tx";
 import { describeError } from "../../lib/errors";
@@ -28,6 +28,16 @@ export default function RedeemPage() {
   }, [cfg]);
 
   const matured = market !== null && market.secondsToMaturity === 0;
+
+  // Pre-maturity recombine needs equal PT and YT, so the max is the smaller of
+  // the two. After maturity, only PT is redeemed.
+  const maxRedeemable = position
+    ? matured
+      ? position.ptBalance
+      : position.ptBalance < position.ytBalance
+        ? position.ptBalance
+        : position.ytBalance
+    : 0n;
 
   async function onSubmit() {
     if (!address) return;
@@ -56,8 +66,17 @@ export default function RedeemPage() {
 
       <div className="space-y-4 rounded-xl border border-white/10 bg-panel p-5">
         <label className="block text-sm">
-          <span className="text-slate-300">
-            {matured ? "PT to redeem" : "PT + YT to recombine"}
+          <span className="flex items-center justify-between text-slate-300">
+            <span>{matured ? "PT to redeem" : "PT + YT to recombine"}</span>
+            {maxRedeemable > 0n ? (
+              <button
+                type="button"
+                onClick={() => setAmount(formatTokenAmount(maxRedeemable, cfg.decimals))}
+                className="text-xs text-accent hover:underline"
+              >
+                Max {formatTokenAmount(maxRedeemable, cfg.decimals)}
+              </button>
+            ) : null}
           </span>
           <input
             inputMode="decimal"
