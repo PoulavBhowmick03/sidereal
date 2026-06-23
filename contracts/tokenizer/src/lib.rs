@@ -14,10 +14,19 @@ pub struct Config {
     pub maturity: u64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[contracttype]
+pub struct Position {
+    pub pt_balance: i128,
+    pub yt_balance: i128,
+}
+
 #[derive(Clone)]
 #[contracttype]
 enum DataKey {
     Config,
+    EscrowedSy(u64),
+    Position(Address, u64),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -30,6 +39,8 @@ pub enum Error {
     InvalidAmount = 4,
     AmountMismatch = 5,
     Matured = 6,
+    InsufficientPosition = 7,
+    LiveMarket = 8,
 }
 
 #[contract]
@@ -99,6 +110,115 @@ impl Tokenizer {
         Ok(pt_amount)
     }
 
+    pub fn position(env: Env, holder: Address) -> Result<Position, Error> {
+        let config = Self::read_config(&env)?;
+        Ok(env
+            .storage()
+            .instance()
+            .get(&DataKey::Position(holder, config.maturity))
+            .unwrap_or(Position {
+                pt_balance: 0,
+                yt_balance: 0,
+            }))
+    }
+
+    pub fn escrowed_sy(env: Env) -> Result<i128, Error> {
+        let config = Self::read_config(&env)?;
+        Ok(env
+            .storage()
+            .instance()
+            .get(&DataKey::EscrowedSy(config.maturity))
+            .unwrap_or(0))
+    }
+
+    pub fn split(env: Env, from: Address, sy_amount: i128) -> Result<(i128, i128), Error> {
+        from.require_auth();
+        Self::require_live(&env)?;
+        Self::require_positive_amount(sy_amount)?;
+
+        let config = Self::read_config(&env)?;
+        let mut position = Self::position(env.clone(), from.clone())?;
+        position.pt_balance += sy_amount;
+        position.yt_balance += sy_amount;
+
+        let escrowed_sy = Self::escrowed_sy(env.clone())? + sy_amount;
+        env.storage()
+            .instance()
+            .set(&DataKey::Position(from, config.maturity), &position);
+        env.storage()
+            .instance()
+            .set(&DataKey::EscrowedSy(config.maturity), &escrowed_sy);
+
+        Ok((sy_amount, sy_amount))
+    }
+
+    pub fn recombine(
+        env: Env,
+        from: Address,
+        pt_amount: i128,
+        yt_amount: i128,
+    ) -> Result<i128, Error> {
+        from.require_auth();
+        Self::require_live(&env)?;
+        Self::require_positive_amount(pt_amount)?;
+        Self::require_positive_amount(yt_amount)?;
+
+        if pt_amount != yt_amount {
+            return Err(Error::AmountMismatch);
+        }
+
+        let config = Self::read_config(&env)?;
+        let mut position = Self::position(env.clone(), from.clone())?;
+        if position.pt_balance < pt_amount || position.yt_balance < yt_amount {
+            return Err(Error::InsufficientPosition);
+        }
+
+        position.pt_balance -= pt_amount;
+        position.yt_balance -= yt_amount;
+
+        let escrowed_sy = Self::escrowed_sy(env.clone())?;
+        let escrowed_sy = escrowed_sy
+            .checked_sub(pt_amount)
+            .ok_or(Error::InsufficientPosition)?;
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Position(from, config.maturity), &position);
+        env.storage()
+            .instance()
+            .set(&DataKey::EscrowedSy(config.maturity), &escrowed_sy);
+
+        Ok(pt_amount)
+    }
+
+    pub fn redeem_at_maturity(env: Env, from: Address, pt_amount: i128) -> Result<i128, Error> {
+        from.require_auth();
+        Self::require_matured(&env)?;
+        Self::require_positive_amount(pt_amount)?;
+
+        let config = Self::read_config(&env)?;
+        let mut position = Self::position(env.clone(), from.clone())?;
+        if position.pt_balance < pt_amount {
+            return Err(Error::InsufficientPosition);
+        }
+
+        position.pt_balance -= pt_amount;
+
+        let escrowed_sy = Self::escrowed_sy(env.clone())?;
+        let escrowed_sy = escrowed_sy
+            .checked_sub(pt_amount)
+            .ok_or(Error::InsufficientPosition)?;
+
+        env.storage()
+            .instance()
+            .set(&DataKey::Position(from, config.maturity), &position);
+        env.storage()
+            .instance()
+            .set(&DataKey::EscrowedSy(config.maturity), &escrowed_sy);
+
+        Ok(pt_amount)
+    }
+
     fn read_config(env: &Env) -> Result<Config, Error> {
         env.storage()
             .instance()
@@ -110,6 +230,15 @@ impl Tokenizer {
         let config = Self::read_config(env)?;
         if env.ledger().timestamp() >= config.maturity {
             return Err(Error::Matured);
+        }
+
+        Ok(())
+    }
+
+    fn require_matured(env: &Env) -> Result<(), Error> {
+        let config = Self::read_config(env)?;
+        if env.ledger().timestamp() < config.maturity {
+            return Err(Error::LiveMarket);
         }
 
         Ok(())
@@ -244,5 +373,66 @@ mod test {
         fixture.env.ledger().set_timestamp(MATURITY);
 
         fixture.client.preview_split(&100);
+    }
+
+    #[test]
+    fn split_tracks_holder_position_and_escrow() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+
+        assert_eq!(fixture.client.split(&fixture.admin, &100), (100, 100));
+        assert_eq!(
+            fixture.client.position(&fixture.admin),
+            Position {
+                pt_balance: 100,
+                yt_balance: 100,
+            }
+        );
+        assert_eq!(fixture.client.escrowed_sy(), 100);
+    }
+
+    #[test]
+    fn recombine_burns_equal_pt_and_yt_for_sy() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture.client.split(&fixture.admin, &100);
+
+        assert_eq!(fixture.client.recombine(&fixture.admin, &40, &40), 40);
+        assert_eq!(
+            fixture.client.position(&fixture.admin),
+            Position {
+                pt_balance: 60,
+                yt_balance: 60,
+            }
+        );
+        assert_eq!(fixture.client.escrowed_sy(), 60);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #7)")]
+    fn recombine_rejects_when_holder_lacks_position() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture.client.split(&fixture.admin, &10);
+
+        fixture.client.recombine(&fixture.admin, &11, &11);
+    }
+
+    #[test]
+    fn redeem_at_maturity_burns_pt_and_leaves_yt_worthless() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture.client.split(&fixture.admin, &100);
+        fixture.env.ledger().set_timestamp(MATURITY);
+
+        assert_eq!(fixture.client.redeem_at_maturity(&fixture.admin, &70), 70);
+        assert_eq!(
+            fixture.client.position(&fixture.admin),
+            Position {
+                pt_balance: 30,
+                yt_balance: 100,
+            }
+        );
+        assert_eq!(fixture.client.escrowed_sy(), 30);
     }
 }
