@@ -63,3 +63,22 @@ jobs:
       - run: pnpm --filter @sidereal/app run typecheck
       - run: pnpm --filter @sidereal/app test
       - run: pnpm --filter @sidereal/app run build
+
+  e2e:
+    name: app e2e (playwright smoke)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @sidereal/sdk build
+      - name: Install Playwright Chromium
+        run: pnpm --filter @sidereal/app exec playwright install --with-deps chromium
+      - name: Run smoke e2e
+        run: pnpm --filter @sidereal/app exec playwright test --project=desktop-chromium
