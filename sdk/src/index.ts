@@ -15,5 +15,7 @@ export type {
   Position,
   MintArgs,
   RedeemArgs,
+  AddLiquidityArgs,
+  RemoveLiquidityArgs,
   TransactionEnvelope,
 } from "./types.js";

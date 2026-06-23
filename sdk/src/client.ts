@@ -2,12 +2,14 @@
 
 import { Contract, TransactionBuilder, rpc, scValToNative, nativeToScVal, Address } from "@stellar/stellar-sdk";
 import type {
+  AddLiquidityArgs,
   ContractAddresses,
   MarketState,
   MintArgs,
   Position,
   Quote,
   RedeemArgs,
+  RemoveLiquidityArgs,
   StellarYTOptions,
   SwapArgs,
   TransactionEnvelope,
@@ -192,6 +194,27 @@ export class StellarYT {
     const op = matured
       ? tokenizer.call("redeem_at_maturity", from, amount)
       : tokenizer.call("recombine", from, amount, amount);
+    return this.buildEnvelope(args.from, [op]);
+  }
+
+  /** Builds a transaction that adds PT/SY liquidity and mints LP tokens. */
+  async buildAddLiquidity(args: AddLiquidityArgs): Promise<TransactionEnvelope> {
+    const op = new Contract(this.contracts.market).call(
+      "add_liquidity",
+      new Address(args.from).toScVal(),
+      nativeToScVal(args.ptIn, { type: "i128" }),
+      nativeToScVal(args.syIn, { type: "i128" }),
+    );
+    return this.buildEnvelope(args.from, [op]);
+  }
+
+  /** Builds a transaction that burns LP tokens and withdraws PT and SY. */
+  async buildRemoveLiquidity(args: RemoveLiquidityArgs): Promise<TransactionEnvelope> {
+    const op = new Contract(this.contracts.market).call(
+      "remove_liquidity",
+      new Address(args.from).toScVal(),
+      nativeToScVal(args.lpIn, { type: "i128" }),
+    );
     return this.buildEnvelope(args.from, [op]);
   }
 

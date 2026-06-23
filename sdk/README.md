@@ -51,6 +51,7 @@ const { hash } = await client.submit(signedXdr);
 - `buildMint(args)` deposit, optionally split into PT + YT.
 - `buildSwap(args)` PT/SY swaps and YT flash routes.
 - `buildRedeem(args)` recombine before maturity, redeem PT after.
+- `buildAddLiquidity(args)` / `buildRemoveLiquidity(args)` provide or withdraw PT/SY liquidity.
 - `submit(signedXdr)` broadcast a wallet-signed transaction and await it.
 
 All amounts are `bigint` base units. APYs and price impact are basis points.

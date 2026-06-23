@@ -120,6 +120,22 @@ export interface RedeemArgs {
   amount: bigint;
 }
 
+export interface AddLiquidityArgs {
+  marketId: string;
+  from: string;
+  /** PT to deposit into the pool, in base units. */
+  ptIn: bigint;
+  /** SY to deposit into the pool, in base units. */
+  syIn: bigint;
+}
+
+export interface RemoveLiquidityArgs {
+  marketId: string;
+  from: string;
+  /** LP tokens to burn, in base units. */
+  lpIn: bigint;
+}
+
 /** A built, unsigned Soroban transaction the caller hands to a wallet. */
 export interface TransactionEnvelope {
   /** Base64 XDR of the unsigned transaction envelope. */

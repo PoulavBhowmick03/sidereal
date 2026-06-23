@@ -260,6 +260,14 @@ describe("transaction builders", () => {
     const post = await newClient().buildRedeem({ marketId: "mkt", from: "G1", amount: 5n });
     expect(post.xdr).toBe("PREPARED:redeem_at_maturity");
   });
+
+  it("buildAddLiquidity and buildRemoveLiquidity hit the Market methods", async () => {
+    const add = await newClient().buildAddLiquidity({ marketId: "mkt", from: "G1", ptIn: 10n, syIn: 10n });
+    expect(add.xdr).toBe("PREPARED:add_liquidity");
+
+    const remove = await newClient().buildRemoveLiquidity({ marketId: "mkt", from: "G1", lpIn: 5n });
+    expect(remove.xdr).toBe("PREPARED:remove_liquidity");
+  });
 });
 
 describe("submit", () => {
