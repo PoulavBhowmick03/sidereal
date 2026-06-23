@@ -8,18 +8,17 @@ import { appConfig } from "../../lib/config";
 import { makeClient, getMarketSafe } from "../../lib/sdk";
 import { formatTokenAmount, parseTokenAmount } from "../../lib/format";
 import { useWallet } from "../../lib/wallet";
-
-type Phase = { kind: "idle" } | { kind: "working"; step: string } | { kind: "done"; hash: string } | { kind: "error"; message: string };
+import { useTxFlow } from "../../lib/tx";
 
 export default function MintPage() {
   const cfg = useMemo(() => appConfig(), []);
   const client = useMemo(() => makeClient(cfg), [cfg]);
   const { address, signTransaction } = useWallet();
+  const { phase, run } = useTxFlow();
 
   const [amount, setAmount] = useState("");
   const [split, setSplit] = useState(true);
   const [market, setMarket] = useState<MarketState | null>(null);
-  const [phase, setPhase] = useState<Phase>({ kind: "idle" });
 
   useEffect(() => {
     getMarketSafe(cfg).then(setMarket).catch(() => setMarket(null));
@@ -42,18 +41,12 @@ export default function MintPage() {
 
   async function onSubmit() {
     if (!address) return;
-    try {
-      const underlyingAmount = parseTokenAmount(amount, cfg.decimals);
-      setPhase({ kind: "working", step: "Building transaction" });
-      const env = await client.buildMint({ marketId: cfg.marketId, from: address, underlyingAmount, split });
-      setPhase({ kind: "working", step: "Awaiting signature" });
-      const signed = await signTransaction(env.xdr);
-      setPhase({ kind: "working", step: "Submitting" });
-      const { hash } = await client.submit(signed);
-      setPhase({ kind: "done", hash });
-    } catch (err) {
-      setPhase({ kind: "error", message: err instanceof Error ? err.message : String(err) });
-    }
+    const underlyingAmount = parseTokenAmount(amount, cfg.decimals);
+    await run({
+      build: () => client.buildMint({ marketId: cfg.marketId, from: address, underlyingAmount, split }),
+      sign: signTransaction,
+      submit: (signed) => client.submit(signed),
+    });
   }
 
   return (
