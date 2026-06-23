@@ -2,7 +2,7 @@
 
 [workspace]
 resolver = "2"
-members = ["contracts/shared/types"]
+members = ["contracts/amm", "contracts/shared/types"]
 
 [workspace.package]
 version = "0.1.0"
