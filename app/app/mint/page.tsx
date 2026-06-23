@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { WAD, type MarketState } from "@sidereal/sdk";
 import { appConfig } from "../../lib/config";
 import { makeClient, getMarketSafe } from "../../lib/sdk";
-import { formatTokenAmount, parseTokenAmount } from "../../lib/format";
+import { amountError, formatTokenAmount, parseTokenAmount } from "../../lib/format";
 import { useWallet } from "../../lib/wallet";
 import { useTxFlow } from "../../lib/tx";
 import { describeError } from "../../lib/errors";
@@ -41,7 +41,8 @@ export default function MintPage() {
     }
   }, [amount, market, cfg.decimals]);
 
-  const canSubmit = address !== null && preview !== null && phase.kind !== "working";
+  const amtError = amountError(amount, cfg.decimals);
+  const canSubmit = address !== null && preview !== null && !amtError && phase.kind !== "working";
 
   async function onSubmit() {
     if (!address) return;
@@ -80,6 +81,8 @@ export default function MintPage() {
           <input type="checkbox" checked={split} onChange={(e) => setSplit(e.target.checked)} />
           <span className="text-slate-300">Split into PT + YT</span>
         </label>
+
+        {amtError ? <p className="text-xs text-red-400">{amtError}</p> : null}
 
         {preview ? (
           <div className="rounded-lg border border-white/10 bg-ink p-3 text-sm">

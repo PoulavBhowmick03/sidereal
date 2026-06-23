@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { MarketState } from "@sidereal/sdk";
 import { appConfig } from "../../lib/config";
 import { makeClient, getMarketSafe } from "../../lib/sdk";
-import { formatTokenAmount, parseTokenAmount } from "../../lib/format";
+import { amountError, formatTokenAmount, parseTokenAmount } from "../../lib/format";
 import { useWallet } from "../../lib/wallet";
 import { useTxFlow } from "../../lib/tx";
 import { describeError } from "../../lib/errors";
@@ -49,7 +49,8 @@ export default function RedeemPage() {
     });
   }
 
-  const canSubmit = address !== null && amount !== "" && phase.kind !== "working";
+  const amtError = amountError(amount, cfg.decimals, position ? maxRedeemable : undefined);
+  const canSubmit = address !== null && amount !== "" && !amtError && phase.kind !== "working";
 
   return (
     <div className="space-y-6">
@@ -86,6 +87,8 @@ export default function RedeemPage() {
             className="mt-1 w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-lg tabular-nums outline-none focus:border-accent"
           />
         </label>
+
+        {amtError ? <p className="text-xs text-red-400">{amtError}</p> : null}
 
         <p className="text-xs text-slate-400">
           {matured

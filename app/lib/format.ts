@@ -55,6 +55,25 @@ export function parseTokenAmount(value: string, decimals: number): bigint {
   return BigInt(scaled);
 }
 
+/**
+ * Validates a user-entered amount. Returns an error message, or null when the
+ * input is acceptable (including empty, which simply leaves the action
+ * disabled). `max`, when provided, is the holder's available balance in base
+ * units.
+ */
+export function amountError(value: string, decimals: number, max?: bigint): string | null {
+  if (value.trim() === "") return null;
+  let parsed: bigint;
+  try {
+    parsed = parseTokenAmount(value, decimals);
+  } catch (err) {
+    return err instanceof Error ? err.message : "invalid amount";
+  }
+  if (parsed <= 0n) return "Enter an amount greater than zero.";
+  if (max !== undefined && parsed > max) return "Amount exceeds your balance.";
+  return null;
+}
+
 /** Whole days between now and a Unix-second maturity, floored at zero. */
 export function daysToMaturity(maturitySec: number, nowSec = Math.floor(Date.now() / 1000)): number {
   return Math.max(0, Math.floor((maturitySec - nowSec) / 86_400));

@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { Asset, Quote } from "@sidereal/sdk";
 import { appConfig } from "../../lib/config";
 import { makeClient } from "../../lib/sdk";
-import { bpsToPercent, formatTokenAmount, parseTokenAmount } from "../../lib/format";
+import { amountError, bpsToPercent, formatTokenAmount, parseTokenAmount } from "../../lib/format";
 import { useWallet } from "../../lib/wallet";
 import { useTxFlow } from "../../lib/tx";
 import { describeError } from "../../lib/errors";
@@ -79,7 +79,8 @@ export default function TradePage() {
     };
   }, [amount, address, direction.assetIn, direction.assetOut, cfg, client]);
 
-  const canSubmit = address !== null && quote !== null && phase.kind !== "working";
+  const amtError = amountError(amount, cfg.decimals, position ? balanceIn : undefined);
+  const canSubmit = address !== null && quote !== null && !amtError && phase.kind !== "working";
 
   async function onSubmit() {
     if (!address || !quote) return;
@@ -152,6 +153,8 @@ export default function TradePage() {
             className="mt-1 w-full rounded-lg border border-white/15 bg-ink px-3 py-2 text-lg tabular-nums outline-none focus:border-accent"
           />
         </label>
+
+        {amtError ? <p className="text-xs text-red-400">{amtError}</p> : null}
 
         {quote ? (
           <dl className="space-y-1 rounded-lg border border-white/10 bg-ink p-3 text-sm">

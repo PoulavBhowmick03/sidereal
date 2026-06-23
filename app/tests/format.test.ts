@@ -5,6 +5,7 @@ import {
   bpsToPercent,
   formatTokenAmount,
   parseTokenAmount,
+  amountError,
   daysToMaturity,
 } from "../lib/format";
 
@@ -62,6 +63,29 @@ describe("parseTokenAmount", () => {
   it("round-trips with formatTokenAmount", () => {
     const base = parseTokenAmount("123.456789", 7);
     expect(formatTokenAmount(base, 7)).toBe("123.456789");
+  });
+});
+
+describe("amountError", () => {
+  it("treats empty input as no error (action stays disabled)", () => {
+    expect(amountError("", 7)).toBeNull();
+    expect(amountError("   ", 7)).toBeNull();
+  });
+
+  it("rejects malformed and non-positive amounts", () => {
+    expect(amountError("abc", 7)).toMatch(/invalid amount/);
+    expect(amountError("1.23456789", 7)).toMatch(/too many decimals/);
+    expect(amountError("0", 7)).toMatch(/greater than zero/);
+  });
+
+  it("flags amounts over the available balance", () => {
+    const max = 5_0000000n; // 5.0 at 7 decimals
+    expect(amountError("5", 7, max)).toBeNull();
+    expect(amountError("5.0000001", 7, max)).toMatch(/exceeds your balance/);
+  });
+
+  it("ignores the balance check when no max is given", () => {
+    expect(amountError("1000000", 7)).toBeNull();
   });
 });
 
