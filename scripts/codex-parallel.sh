@@ -73,10 +73,8 @@ launch_worker() {
   local role="$2"
   local log="$3"
 
-  (
-    cd "$path"
-    REPO="$path" ROLE="$role" MAX_RUNS="$RUNS" SLEEP_SECONDS="$SLEEP_SECONDS" ./scripts/codex-loop.sh
-  ) >"$log" 2>&1 &
+  nohup env REPO="$path" ROLE="$role" MAX_RUNS="$RUNS" SLEEP_SECONDS="$SLEEP_SECONDS" \
+    "$path/scripts/codex-loop.sh" >"$log" 2>&1 </dev/null &
   echo $!
 }
 
