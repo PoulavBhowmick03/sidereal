@@ -84,7 +84,7 @@ PROMPT
   echo "==> Codex run $run/$MAX_RUNS as $ROLE"
   codex exec \
     -C "$REPO" \
-    -s workspace-write \
+    -s danger-full-access \
     -o "$out" \
     "$prompt"
 
