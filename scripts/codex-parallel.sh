@@ -35,7 +35,9 @@ if ! command -v codex >/dev/null 2>&1; then
   exit 5
 fi
 
-if ! git log --all --format=%s | grep -Fxq "feat: freeze interfaces"; then
+FREEZE_COMMIT="$(git rev-list --all --grep='^feat: freeze interfaces$' -n 1)"
+
+if [[ -z "$FREEZE_COMMIT" ]]; then
   echo "Freeze commit missing. Running bootstrap pass first."
   ALLOW_MAIN=1 ROLE=bootstrap MAX_RUNS=1 SLEEP_SECONDS="$SLEEP_SECONDS" ./scripts/codex-loop.sh
 

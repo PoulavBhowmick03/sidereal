@@ -86,7 +86,7 @@ PROMPT
     -C "$REPO" \
     -s danger-full-access \
     -o "$out" \
-    "$prompt"
+    "$prompt" </dev/null
 
   if grep -q "LOOP_STOP:" "$out"; then
     echo "Codex requested stop:"
