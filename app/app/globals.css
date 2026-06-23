@@ -1,0 +1,13 @@
+/* SPDX-License-Identifier: Apache-2.0 */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+body {
+  @apply bg-ink text-slate-100 antialiased;
+}
