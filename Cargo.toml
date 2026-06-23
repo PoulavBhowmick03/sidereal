@@ -4,8 +4,10 @@
 resolver = "2"
 # Root membership keeps Codex-2 contract crates verified against the shared lockfile.
 members = [
+    "contracts/pt-token",
     "contracts/shared/types",
     "contracts/tokenizer",
+    "contracts/yt-token",
 ]
 
 [workspace.package]
