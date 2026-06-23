@@ -1,0 +1,65 @@
+# SPDX-License-Identifier: Apache-2.0
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts:
+    name: contracts (cargo test + wasm build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup target add wasm32v1-none
+      - uses: Swatinem/rust-cache@v2
+      - name: Test workspace
+        run: cargo test --workspace --locked
+      - name: Build contracts to wasm
+        run: |
+          cargo build --release --target wasm32v1-none --locked \
+            -p sidereal-sy-wrapper -p sidereal-pt-token -p sidereal-yt-token \
+            -p sidereal-tokenizer -p sidereal-amm
+
+  sdk:
+    name: sdk (typecheck + test + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @sidereal/sdk run typecheck
+      - run: pnpm --filter @sidereal/sdk test
+      - run: pnpm --filter @sidereal/sdk build
+
+  app:
+    name: app (typecheck + test + build)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @sidereal/sdk build
+      - run: pnpm --filter @sidereal/app run typecheck
+      - run: pnpm --filter @sidereal/app test
+      - run: pnpm --filter @sidereal/app run build
