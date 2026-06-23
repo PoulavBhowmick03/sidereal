@@ -216,22 +216,8 @@ impl Market for AmmMarket {
         require_seeded(env, &state);
 
         let comp = precompute_or_panic(env, &config, &state);
-        let sy_out = exact_pt_in_sy_out_or_panic(env, &config, &state, &comp, pt_in);
-        if sy_out < min_sy_out {
-            panic_with_error!(env, Error::SlippageExceeded);
-        }
-
-        state.total_pt = checked_add(env, state.total_pt, pt_in);
-        state.total_sy = checked_sub(env, state.total_sy, sy_out);
-        state.last_ln_implied_rate = get_ln_implied_rate_or_panic(
-            env,
-            state.total_pt,
-            state.total_sy,
-            comp.rate_scalar,
-            comp.rate_anchor,
-            comp.time_to_expiry,
-        );
-        let observed_ln_rate = state.last_ln_implied_rate;
+        let (sy_out, observed_ln_rate) =
+            apply_exact_pt_in_trade_or_panic(env, &config, &mut state, &comp, pt_in, min_sy_out);
         sync_twap(env, &config, &mut state, observed_ln_rate);
         write_state(env, &state);
 
@@ -263,11 +249,48 @@ impl Market for AmmMarket {
     }
 
     fn swap_sy_for_yt(env: &Env, _from: Address, _sy_in: i128, _min_yt_out: i128) -> i128 {
-        panic_with_error!(env, Error::UnsupportedRoute);
+        let from = _from;
+        from.require_auth();
+        require_positive_amount(env, _sy_in);
+
+        let config = read_config_or_panic(env);
+        require_live(env, &config);
+
+        let mut state = read_state_or_panic(env);
+        require_seeded(env, &state);
+
+        let comp = precompute_or_panic(env, &config, &state);
+        let yt_out = exact_sy_in_pt_out_or_panic(env, &config, &state, &comp, _sy_in);
+        if yt_out < _min_yt_out {
+            panic_with_error!(env, Error::SlippageExceeded);
+        }
+
+        let observed_ln_rate =
+            apply_exact_sy_in_trade_or_panic(env, &config, &mut state, &comp, _sy_in, yt_out);
+        sync_twap(env, &config, &mut state, observed_ln_rate);
+        write_state(env, &state);
+
+        yt_out
     }
 
     fn swap_yt_for_sy(env: &Env, _from: Address, _yt_in: i128, _min_sy_out: i128) -> i128 {
-        panic_with_error!(env, Error::UnsupportedRoute);
+        let from = _from;
+        from.require_auth();
+        require_positive_amount(env, _yt_in);
+
+        let config = read_config_or_panic(env);
+        require_live(env, &config);
+
+        let mut state = read_state_or_panic(env);
+        require_seeded(env, &state);
+
+        let comp = precompute_or_panic(env, &config, &state);
+        let (sy_out, observed_ln_rate) =
+            apply_exact_pt_in_trade_or_panic(env, &config, &mut state, &comp, _yt_in, _min_sy_out);
+        sync_twap(env, &config, &mut state, observed_ln_rate);
+        write_state(env, &state);
+
+        sy_out
     }
 
     fn add_liquidity(env: &Env, from: Address, pt_in: i128, sy_in: i128) -> i128 {
@@ -479,6 +502,34 @@ fn exact_pt_in_sy_out_or_panic(
     }
 
     sy_out
+}
+
+fn apply_exact_pt_in_trade_or_panic(
+    env: &Env,
+    config: &Config,
+    state: &mut State,
+    comp: &Precompute,
+    pt_in: i128,
+    min_sy_out: i128,
+) -> (i128, i128) {
+    let sy_out = exact_pt_in_sy_out_or_panic(env, config, state, comp, pt_in);
+    if sy_out < min_sy_out {
+        panic_with_error!(env, Error::SlippageExceeded);
+    }
+
+    state.total_pt = checked_add(env, state.total_pt, pt_in);
+    state.total_sy = checked_sub(env, state.total_sy, sy_out);
+    let observed_ln_rate = get_ln_implied_rate_or_panic(
+        env,
+        state.total_pt,
+        state.total_sy,
+        comp.rate_scalar,
+        comp.rate_anchor,
+        comp.time_to_expiry,
+    );
+    state.last_ln_implied_rate = observed_ln_rate;
+
+    (sy_out, observed_ln_rate)
 }
 
 fn exact_sy_in_pt_out_or_panic(
@@ -857,7 +908,9 @@ extern crate std;
 #[cfg(test)]
 mod test {
     use super::*;
-    use soroban_sdk::testutils::{Address as _, Ledger};
+    use proptest::prelude::*;
+    use soroban_sdk::testutils::{Address as _, EnvTestConfig, Ledger};
+    use std::panic::{catch_unwind, AssertUnwindSafe};
 
     const NOW: u64 = 1_770_000_000;
     const MATURITY: u64 = NOW + 90 * DAY;
@@ -876,7 +929,9 @@ mod test {
     }
 
     fn fixture(now: u64) -> Fixture {
-        let env = Env::default();
+        let env = Env::new_with_config(EnvTestConfig {
+            capture_snapshot_at_drop: false,
+        });
         env.ledger().set_timestamp(now);
         env.mock_all_auths();
 
@@ -1021,11 +1076,209 @@ mod test {
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #16)")]
-    fn unsupported_routes_still_revert() {
+    fn swap_sy_for_yt_routes_through_same_market_state_as_pt_purchase() {
         let fixture = fixture(NOW);
         initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &20_000, &20_000);
 
-        fixture.client.swap_sy_for_yt(&fixture.admin, &100, &1);
+        fixture.env.ledger().set_timestamp(NOW + 60);
+        let yt_out = fixture.client.swap_sy_for_yt(&fixture.admin, &1_000, &1);
+        let state = fixture.client.state();
+
+        assert!(yt_out > 0);
+        assert_eq!(state.total_pt, 20_000 - yt_out);
+        assert!(state.total_sy > 20_000);
+        assert_eq!(state.last_observation, NOW + 60);
+    }
+
+    #[test]
+    fn swap_yt_for_sy_routes_through_same_market_state_as_pt_sale() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &20_000, &20_000);
+
+        fixture.env.ledger().set_timestamp(NOW + 60);
+        let sy_out = fixture.client.swap_yt_for_sy(&fixture.admin, &1_000, &1);
+        let state = fixture.client.state();
+
+        assert!(sy_out > 0);
+        assert_eq!(state.total_pt, 21_000);
+        assert_eq!(state.total_sy, 20_000 - sy_out);
+        assert_eq!(state.last_observation, NOW + 60);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #11)")]
+    fn swap_sy_for_yt_respects_min_out() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &20_000, &20_000);
+
+        fixture.client.swap_sy_for_yt(&fixture.admin, &100, &10_000);
+    }
+
+    #[derive(Clone, Debug)]
+    enum ModelOp {
+        Split(i128),
+        Recombine(i128),
+        BuyPt(i128),
+        SellPt(i128),
+        BuyYt(i128),
+        SellYt(i128),
+    }
+
+    #[derive(Clone, Debug)]
+    struct PositionModel {
+        free_sy: i128,
+        free_pt: i128,
+        free_yt: i128,
+        escrowed_sy: i128,
+        total_pt_supply: i128,
+        total_yt_supply: i128,
+    }
+
+    impl PositionModel {
+        fn new(free_sy: i128) -> Self {
+            Self {
+                free_sy,
+                free_pt: 0,
+                free_yt: 0,
+                escrowed_sy: 0,
+                total_pt_supply: 0,
+                total_yt_supply: 0,
+            }
+        }
+
+        fn assert_invariant(&self) {
+            assert_eq!(self.escrowed_sy, self.total_pt_supply);
+            assert_eq!(self.escrowed_sy, self.total_yt_supply);
+            assert!(self.free_sy >= 0);
+            assert!(self.free_pt >= 0);
+            assert!(self.free_yt >= 0);
+            assert!(self.escrowed_sy >= 0);
+        }
+    }
+
+    fn arb_op() -> impl Strategy<Value = ModelOp> {
+        (0u8..6, 1i128..100i128).prop_map(|(kind, amount)| match kind {
+            0 => ModelOp::Split(amount),
+            1 => ModelOp::Recombine(amount),
+            2 => ModelOp::BuyPt(amount),
+            3 => ModelOp::SellPt(amount),
+            4 => ModelOp::BuyYt(amount),
+            _ => ModelOp::SellYt(amount),
+        })
+    }
+
+    fn quote_sy_for_pt(fixture: &Fixture, sy_in: i128) -> Option<i128> {
+        let config = fixture.client.config();
+        let state = fixture.client.state();
+        let comp = precompute_or_panic(&fixture.env, &config, &state);
+
+        catch_unwind(AssertUnwindSafe(|| {
+            exact_sy_in_pt_out_or_panic(&fixture.env, &config, &state, &comp, sy_in)
+        }))
+        .ok()
+    }
+
+    fn quote_pt_for_sy(fixture: &Fixture, pt_in: i128) -> Option<i128> {
+        let config = fixture.client.config();
+        let state = fixture.client.state();
+        let comp = precompute_or_panic(&fixture.env, &config, &state);
+
+        catch_unwind(AssertUnwindSafe(|| {
+            exact_pt_in_sy_out_or_panic(&fixture.env, &config, &state, &comp, pt_in)
+        }))
+        .ok()
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig {
+            cases: 10_000,
+            .. ProptestConfig::default()
+        })]
+
+        #[test]
+        fn pt_yt_sy_invariant_holds_across_random_sequences(ops in prop::collection::vec(arb_op(), 1..64)) {
+            let fixture = fixture(NOW);
+            initialize(&fixture);
+            fixture.client.add_liquidity(&fixture.admin, &1_000_000, &1_000_000);
+
+            let mut model = PositionModel::new(1_000_000);
+
+            for op in ops {
+                match op {
+                    ModelOp::Split(amount) if model.free_sy >= amount => {
+                        let (pt_out, yt_out) = (amount, amount);
+                        model.free_sy -= amount;
+                        model.free_pt += pt_out;
+                        model.free_yt += yt_out;
+                        model.escrowed_sy += amount;
+                        model.total_pt_supply += pt_out;
+                        model.total_yt_supply += yt_out;
+                    }
+                    ModelOp::Recombine(amount)
+                        if model.free_pt >= amount
+                            && model.free_yt >= amount
+                            && model.escrowed_sy >= amount =>
+                    {
+                        model.free_pt -= amount;
+                        model.free_yt -= amount;
+                        model.free_sy += amount;
+                        model.escrowed_sy -= amount;
+                        model.total_pt_supply -= amount;
+                        model.total_yt_supply -= amount;
+                    }
+                    ModelOp::BuyPt(amount)
+                        if model.free_sy >= amount && quote_sy_for_pt(&fixture, amount).is_some() =>
+                    {
+                        let pt_out = fixture.client.swap_sy_for_pt(&fixture.admin, &amount, &1);
+                        model.free_sy -= amount;
+                        model.free_pt += pt_out;
+                    }
+                    ModelOp::SellPt(amount)
+                        if model.free_pt >= amount && quote_pt_for_sy(&fixture, amount).is_some() =>
+                    {
+                        let sy_out = fixture.client.swap_pt_for_sy(&fixture.admin, &amount, &1);
+                        model.free_pt -= amount;
+                        model.free_sy += sy_out;
+                    }
+                    ModelOp::BuyYt(amount)
+                        if model.free_sy >= amount && quote_sy_for_pt(&fixture, amount).is_some() =>
+                    {
+                        let yt_out = fixture.client.swap_sy_for_yt(&fixture.admin, &amount, &1);
+                        model.free_sy -= amount;
+                        model.free_yt += yt_out;
+                        model.escrowed_sy += yt_out;
+                        model.total_pt_supply += yt_out;
+                        model.total_yt_supply += yt_out;
+                    }
+                    ModelOp::SellYt(amount)
+                        if model.free_yt >= amount
+                            && model.escrowed_sy >= amount
+                            && model.total_pt_supply >= amount
+                            && model.total_yt_supply >= amount =>
+                    {
+                        if quote_pt_for_sy(&fixture, amount).is_some() {
+                            let sy_out = fixture.client.swap_yt_for_sy(&fixture.admin, &amount, &1);
+                            model.free_yt -= amount;
+                            model.free_sy += sy_out;
+                            model.escrowed_sy -= amount;
+                            model.total_pt_supply -= amount;
+                            model.total_yt_supply -= amount;
+                        }
+                    }
+                    _ => {}
+                }
+
+                model.assert_invariant();
+            }
+        }
     }
 }
