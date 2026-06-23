@@ -9,7 +9,7 @@ export type TxPhase =
   | { kind: "idle" }
   | { kind: "working"; step: string }
   | { kind: "done"; hash: string }
-  | { kind: "error"; message: string };
+  | { kind: "error"; error: unknown };
 
 export interface TxSteps {
   build: () => Promise<TransactionEnvelope>;
@@ -34,7 +34,7 @@ export function useTxFlow() {
       const { hash } = await steps.submit(signed);
       setPhase({ kind: "done", hash });
     } catch (err) {
-      setPhase({ kind: "error", message: err instanceof Error ? err.message : String(err) });
+      setPhase({ kind: "error", error: err });
     }
   }, []);
 

@@ -9,6 +9,7 @@ import { makeClient, getMarketSafe } from "../../lib/sdk";
 import { formatTokenAmount, parseTokenAmount } from "../../lib/format";
 import { useWallet } from "../../lib/wallet";
 import { useTxFlow } from "../../lib/tx";
+import { describeError } from "../../lib/errors";
 
 export default function RedeemPage() {
   const cfg = useMemo(() => appConfig(), []);
@@ -121,7 +122,9 @@ export default function RedeemPage() {
             Confirmed. Tx <span className="font-mono">{phase.hash.slice(0, 10)}...</span>
           </p>
         ) : null}
-        {phase.kind === "error" ? <p className="text-sm text-red-400">{phase.message}</p> : null}
+        {phase.kind === "error" ? (
+          <p className="text-sm text-red-400">{describeError(phase.error, "tokenizer")}</p>
+        ) : null}
       </div>
     </div>
   );

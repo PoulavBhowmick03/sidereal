@@ -9,6 +9,7 @@ import { makeClient } from "../../lib/sdk";
 import { bpsToPercent, formatTokenAmount, parseTokenAmount } from "../../lib/format";
 import { useWallet } from "../../lib/wallet";
 import { useTxFlow } from "../../lib/tx";
+import { describeError } from "../../lib/errors";
 
 // Only the four routes the single PT/SY pool exposes (YT via flash route).
 const DIRECTIONS = [
@@ -33,7 +34,7 @@ export default function TradePage() {
   const [directionId, setDirectionId] = useState<(typeof DIRECTIONS)[number]["id"]>("buy-pt");
   const [amount, setAmount] = useState("");
   const [quote, setQuote] = useState<Quote | null>(null);
-  const [quoteError, setQuoteError] = useState<string | null>(null);
+  const [quoteError, setQuoteError] = useState<unknown>(null);
 
   const direction = DIRECTIONS.find((d) => d.id === directionId) ?? DIRECTIONS[0];
 
@@ -57,7 +58,7 @@ export default function TradePage() {
         });
         if (!cancelled) setQuote(q);
       } catch (err) {
-        if (!cancelled) setQuoteError(err instanceof Error ? err.message : String(err));
+        if (!cancelled) setQuoteError(err);
       }
     }, 350);
 
@@ -148,7 +149,7 @@ export default function TradePage() {
             </div>
           </dl>
         ) : quoteError ? (
-          <p className="text-xs text-amber-400">Quote unavailable: {quoteError}</p>
+          <p className="text-xs text-amber-400">Quote unavailable: {describeError(quoteError, "amm")}</p>
         ) : null}
 
         <button
@@ -169,7 +170,9 @@ export default function TradePage() {
             Confirmed. Tx <span className="font-mono">{phase.hash.slice(0, 10)}...</span>
           </p>
         ) : null}
-        {phase.kind === "error" ? <p className="text-sm text-red-400">{phase.message}</p> : null}
+        {phase.kind === "error" ? (
+          <p className="text-sm text-red-400">{describeError(phase.error, "amm")}</p>
+        ) : null}
       </div>
     </div>
   );
