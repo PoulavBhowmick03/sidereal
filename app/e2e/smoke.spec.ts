@@ -8,22 +8,24 @@ import { test, expect } from "@playwright/test";
 test("landing page renders the protocol pitch and pool stats section", async ({ page }) => {
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /fix or trade your stellar yield/i })).toBeVisible();
-  await expect(page.getByText(/pool stats/i)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Pool stats" })).toBeVisible();
   await expect(page.getByRole("button", { name: /connect wallet/i })).toBeVisible();
 });
 
 test("nav reaches mint, trade, and redeem", async ({ page }) => {
   await page.goto("/");
+  // Scope to the header nav: the landing page also has CTA links named Mint/Trade.
+  const nav = page.locator("header nav");
 
-  await page.getByRole("link", { name: "Mint" }).click();
+  await nav.getByRole("link", { name: "Mint" }).click();
   await expect(page.getByRole("heading", { name: "Mint" })).toBeVisible();
   await expect(page.getByRole("button", { name: /connect wallet to mint/i })).toBeVisible();
 
-  await page.getByRole("link", { name: "Trade" }).click();
+  await nav.getByRole("link", { name: "Trade" }).click();
   await expect(page.getByRole("heading", { name: "Trade" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /buy pt/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Buy PT" })).toBeVisible();
 
-  await page.getByRole("link", { name: "Redeem" }).click();
+  await nav.getByRole("link", { name: "Redeem" }).click();
   await expect(page.getByRole("heading", { name: "Redeem" })).toBeVisible();
 });
 
