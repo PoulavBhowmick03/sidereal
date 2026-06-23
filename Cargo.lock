@@ -1489,6 +1489,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sidereal-integration-tests"
+version = "0.1.0"
+dependencies = [
+ "sidereal-amm",
+ "sidereal-pt-token",
+ "sidereal-shared-types",
+ "sidereal-sy-wrapper",
+ "sidereal-tokenizer",
+ "sidereal-yt-token",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "sidereal-pt-token"
 version = "0.1.0"
 dependencies = [

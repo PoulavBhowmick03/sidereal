@@ -1,0 +1,20 @@
+# SPDX-License-Identifier: Apache-2.0
+[package]
+name = "sidereal-integration-tests"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+doctest = false
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+sidereal-shared-types = { path = "../../contracts/shared/types" }
+sidereal-sy-wrapper = { path = "../../contracts/sy-wrapper" }
+sidereal-pt-token = { path = "../../contracts/pt-token" }
+sidereal-yt-token = { path = "../../contracts/yt-token" }
+sidereal-tokenizer = { path = "../../contracts/tokenizer" }
+sidereal-amm = { path = "../../contracts/amm" }
