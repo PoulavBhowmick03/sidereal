@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: Apache-2.0
+
+[workspace]
+resolver = "2"
+members = ["contracts/shared/types"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.91.0"
+license = "Apache-2.0"
+repository = "https://github.com/PoulavBhowmick03/sidereal"
+
+[workspace.dependencies]
+soroban-sdk = { version = "=26.0.0", default-features = false }
