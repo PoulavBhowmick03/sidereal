@@ -3,6 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   marketMethodFor,
+  quoteMethodFor,
   priceImpactBps,
   secondsToMaturity,
   BPS_DENOMINATOR,
@@ -31,6 +32,26 @@ describe("marketMethodFor", () => {
     ];
     for (const [a, b] of invalid) {
       expect(() => marketMethodFor(a, b)).toThrow(/unsupported swap route/);
+    }
+  });
+});
+
+describe("quoteMethodFor", () => {
+  it("maps each valid route to its read-only quote accessor", () => {
+    expect(quoteMethodFor("PT", "SY")).toBe("quote_pt_for_sy");
+    expect(quoteMethodFor("SY", "PT")).toBe("quote_sy_for_pt");
+    expect(quoteMethodFor("SY", "YT")).toBe("quote_sy_for_yt");
+    expect(quoteMethodFor("YT", "SY")).toBe("quote_yt_for_sy");
+  });
+
+  it("rejects routes the pool does not expose", () => {
+    const invalid: [Asset, Asset][] = [
+      ["PT", "YT"],
+      ["YT", "PT"],
+      ["SY", "SY"],
+    ];
+    for (const [a, b] of invalid) {
+      expect(() => quoteMethodFor(a, b)).toThrow(/unsupported swap route/);
     }
   });
 });

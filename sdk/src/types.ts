@@ -49,8 +49,12 @@ export interface MarketState {
   underlying: string;
   /** SY per underlying, 18-decimal fixed point (the SY exchange rate). */
   exchangeRate: bigint;
-  /** Internal TWAP implied APY, in basis points. */
+  /** Internal TWAP implied APY, in basis points (what integrators should read). */
   impliedApyBps: bigint;
+  /** Spot implied APY, in basis points (single-block, manipulable; display-only). */
+  spotApyBps: bigint;
+  /** True while the TWAP window is still filling; gate "rate stabilizing" UX. */
+  twapWarmingUp: boolean;
   /** Maturity as a Unix timestamp in seconds. */
   maturity: number;
   /** Seconds remaining until maturity (0 once matured). */

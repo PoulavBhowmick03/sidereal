@@ -9,6 +9,34 @@ export type MarketMethod =
   | "swap_sy_for_yt"
   | "swap_yt_for_sy";
 
+/** The four read-only quote accessors codex-1 exposed on the AMM (feat/amm). */
+export type QuoteMethod =
+  | "quote_pt_for_sy"
+  | "quote_sy_for_pt"
+  | "quote_sy_for_yt"
+  | "quote_yt_for_sy";
+
+/**
+ * Maps an (assetIn, assetOut) pair to the AMM's read-only quote accessor. These
+ * return typed contract errors (InvalidAmount / MarketNotSeeded / MarketMatured)
+ * rather than panicking, so they are safe to call before signing.
+ */
+export function quoteMethodFor(assetIn: Asset, assetOut: Asset): QuoteMethod {
+  const route = `${assetIn}->${assetOut}`;
+  switch (route) {
+    case "PT->SY":
+      return "quote_pt_for_sy";
+    case "SY->PT":
+      return "quote_sy_for_pt";
+    case "SY->YT":
+      return "quote_sy_for_yt";
+    case "YT->SY":
+      return "quote_yt_for_sy";
+    default:
+      throw new Error(`unsupported swap route: ${route}`);
+  }
+}
+
 /**
  * Maps an (assetIn, assetOut) pair to the frozen Market trait method.
  *

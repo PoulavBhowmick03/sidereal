@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 export { StellarYT } from "./client.js";
-export { marketMethodFor, priceImpactBps, secondsToMaturity } from "./routes.js";
-export type { MarketMethod } from "./routes.js";
+export { marketMethodFor, quoteMethodFor, priceImpactBps, secondsToMaturity } from "./routes.js";
+export type { MarketMethod, QuoteMethod } from "./routes.js";
 export { WAD, BPS_DENOMINATOR } from "./types.js";
 export type {
   Asset,
