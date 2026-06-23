@@ -194,6 +194,36 @@ export class StellarYT {
     return this.buildEnvelope(args.from, [op]);
   }
 
+  // --- submit --------------------------------------------------------------
+
+  /**
+   * Broadcasts a transaction the user has already signed in their wallet and
+   * waits for it to land. This is not signing: the SDK never holds keys; it
+   * only relays the signed envelope and polls for the result.
+   */
+  async submit(signedXdr: string): Promise<{ hash: string; status: string }> {
+    const tx = TransactionBuilder.fromXDR(signedXdr, this.networkPassphrase);
+    const sent = await this.server.sendTransaction(tx);
+    if (sent.status === "ERROR") {
+      throw new Error(`submit rejected: ${JSON.stringify(sent.errorResult)}`);
+    }
+
+    let result = await this.server.getTransaction(sent.hash);
+    const deadline = Date.now() + 30_000;
+    while (
+      result.status === rpc.Api.GetTransactionStatus.NOT_FOUND &&
+      Date.now() < deadline
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      result = await this.server.getTransaction(sent.hash);
+    }
+
+    if (result.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
+      throw new Error(`transaction ${sent.hash} did not succeed: ${result.status}`);
+    }
+    return { hash: sent.hash, status: result.status };
+  }
+
   // --- internals -----------------------------------------------------------
 
   /** Maps an (assetIn, assetOut) pair to the right frozen Market route. */
