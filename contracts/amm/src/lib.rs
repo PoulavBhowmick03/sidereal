@@ -155,6 +155,32 @@ impl AmmMarket {
         read_state(&env)
     }
 
+    pub fn reserve_pt(env: Env) -> Result<i128, Error> {
+        Ok(read_state(&env)?.total_pt)
+    }
+
+    pub fn reserve_sy(env: Env) -> Result<i128, Error> {
+        Ok(read_state(&env)?.total_sy)
+    }
+
+    pub fn total_lp(env: Env) -> Result<i128, Error> {
+        Ok(read_state(&env)?.total_lp)
+    }
+
+    pub fn spot_apy(env: Env) -> Result<i128, Error> {
+        let config = read_config(&env)?;
+        if env.ledger().timestamp() >= config.maturity {
+            return Ok(0);
+        }
+
+        let state = read_state(&env)?;
+        if state.total_lp == 0 {
+            return Ok(0);
+        }
+
+        Ok(ln_rate_to_bps(state.last_ln_implied_rate))
+    }
+
     pub fn twap_apy(env: Env) -> Result<i128, Error> {
         let config = read_config(&env)?;
         let state = read_state(&env)?;
@@ -999,6 +1025,10 @@ mod test {
             }
         );
         assert_eq!(fixture.client.implied_apy(), 0);
+        assert_eq!(fixture.client.spot_apy(), 0);
+        assert_eq!(fixture.client.reserve_pt(), 0);
+        assert_eq!(fixture.client.reserve_sy(), 0);
+        assert_eq!(fixture.client.total_lp(), 0);
     }
 
     #[test]
@@ -1121,6 +1151,25 @@ mod test {
             .add_liquidity(&fixture.admin, &20_000, &20_000);
 
         fixture.client.swap_sy_for_yt(&fixture.admin, &100, &10_000);
+    }
+
+    #[test]
+    fn read_accessors_match_state_and_rate_views() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &20_000, &20_000);
+        fixture.env.ledger().set_timestamp(NOW + 60);
+        fixture.client.swap_sy_for_pt(&fixture.admin, &1_000, &1);
+
+        let state = fixture.client.state();
+
+        assert_eq!(fixture.client.reserve_pt(), state.total_pt);
+        assert_eq!(fixture.client.reserve_sy(), state.total_sy);
+        assert_eq!(fixture.client.total_lp(), state.total_lp);
+        assert_eq!(fixture.client.spot_apy(), fixture.client.implied_apy());
+        assert!(fixture.client.twap_apy() > 0);
     }
 
     #[derive(Clone, Debug)]
