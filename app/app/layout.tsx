@@ -5,6 +5,7 @@ import Link from "next/link";
 import "./globals.css";
 import { WalletProvider } from "../lib/wallet";
 import { WalletButton } from "../components/WalletButton";
+import { DeploymentBanner } from "../components/DeploymentBanner";
 
 export const metadata: Metadata = {
   title: "sidereal",
@@ -41,6 +42,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <WalletButton />
             </nav>
           </header>
+          <DeploymentBanner />
           <main className="mx-auto max-w-3xl px-4 py-8">{children}</main>
         </WalletProvider>
       </body>
