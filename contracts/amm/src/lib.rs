@@ -748,8 +748,6 @@ fn sync_twap(env: &Env, config: &Config, state: &mut State, observed_ln_rate: i1
     let elapsed = now.saturating_sub(state.last_observation);
 
     if elapsed == 0 {
-        state.twap_ln_implied_rate = observed_ln_rate;
-        state.last_observation = now;
         return;
     }
 
@@ -1211,6 +1209,32 @@ mod test {
         assert!(state.total_sy > 20_000);
         assert_eq!(state.last_observation, NOW + 60);
         assert!(state.twap_ln_implied_rate > 0);
+    }
+
+    #[test]
+    fn same_timestamp_swaps_do_not_overwrite_twap() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &20_000, &20_000);
+
+        fixture.env.ledger().set_timestamp(NOW + 60);
+        fixture.client.swap_sy_for_pt(&fixture.admin, &1_000, &1);
+        let after_first = fixture.client.state();
+
+        fixture.client.swap_sy_for_pt(&fixture.admin, &1_500, &1);
+        let after_second = fixture.client.state();
+
+        assert_ne!(
+            after_second.last_ln_implied_rate, after_first.twap_ln_implied_rate,
+            "second swap must move spot so this test proves TWAP did not follow it"
+        );
+        assert_eq!(after_second.last_observation, after_first.last_observation);
+        assert_eq!(
+            after_second.twap_ln_implied_rate,
+            after_first.twap_ln_implied_rate
+        );
     }
 
     #[test]
