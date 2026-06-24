@@ -40,7 +40,7 @@ What's missing is the layer that lets institutional users hedge that yield and l
 | Cross-contract integration tests | ✅ 3 tests (deposit/split/recombine, redeem, AMM) |
 | Integrated workspace (everything builds together) | ✅ `cargo`, SDK, and `next build` green |
 | Testnet deploy script | ✅ `scripts/deploy-testnet.sh` |
-| Live testnet end-to-end demo | 🚧 needs deploy + token settlement (see Limitations) |
+| Live testnet end-to-end demo | 🚧 needs token settlement (plan in [docs/REMAINING.md](./docs/REMAINING.md)) |
 
 All layers compile and test together on one branch. The remaining work for a
 live on-chain demo is documented under [Limitations](#current-limitations).
@@ -113,6 +113,9 @@ before a live on-chain demo:
    cross-contract settlement surface above, so YT trades are wired in the SDK
    and UI but not yet functional on chain. PT/SY swaps, mint, and redeem are
    complete paths.
+
+The detailed plan to close both gaps (six workstreams, ownership, sequencing,
+and acceptance criteria) is in [`docs/REMAINING.md`](./docs/REMAINING.md).
 
 ## Contributing
 
