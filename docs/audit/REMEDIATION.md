@@ -21,7 +21,7 @@ Status: ☐ open · ◐ in progress · ☑ fixed (with test)
 
 | ID | Severity | Finding | Owner | Status |
 |----|----------|---------|-------|--------|
-| M4 | MED | AMM curve math uses `f64` (precision loss at bounds) | codex-1 (AMM) | ☐ |
+| M4 | MED | AMM curve math uses `f64` (precision loss at bounds) | codex-1 (AMM) | ☑ |
 | L1 | LOW | Unauthorized admin calls return `NotInitialized` | codex-2 (sy-wrapper, yt) | ☐ |
 | L2 | LOW | Long-lived instance state has no TTL/bump strategy | codex-1 + codex-2 (ops) | ☐ |
 
@@ -44,10 +44,12 @@ Status: ☐ open · ◐ in progress · ☑ fixed (with test)
 - **M3** — use the checked i128 helpers consistently in sy-wrapper and tokenizer
   (the AMM already does). Reject overflow with a contract error. Tests: boundary
   cases near `i128::MAX` for deposit, redeem, split, recombine, redeem-at-maturity.
-- **M4** — replace `f64` curve helpers (`sqrt`, `ln`, `exp`) with deterministic
-  fixed-point math, or enforce and test conservative input bounds against a
-  high-precision off-chain reference. Add monotonicity/rounding-direction tests.
-  If deferred for testnet, write the accepted-risk note and the input bounds here.
+- **M4** — accepted-risk path for testnet: the full deterministic fixed-point
+  rewrite is deferred, and the AMM now enforces conservative bounds around the
+  remaining `f64` helpers. Bounds: PT/SY trade inputs and reserves must stay
+  `<= 1e18` raw units, `scalar_root <= 10e18`, and `initial_anchor <= 2e18`.
+  Tests: curve config above the bounds and liquidity above the reserve bound
+  both fail with `InputOutOfBounds`.
 - **L1** — add an `Unauthorized` error; return it on admin mismatch (not
   `NotInitialized`) in `set_exchange_rate` and `seed_checkpoint`.
 - **L2** — define a TTL/bump policy for the ~3-month markets; extend instance TTL

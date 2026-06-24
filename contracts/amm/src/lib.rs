@@ -16,6 +16,9 @@ const DAY: u64 = 86_400;
 const IMPLIED_RATE_TIME: u64 = 365 * DAY;
 const MINIMUM_LIQUIDITY: i128 = 1_000;
 const MAX_MARKET_PROPORTION: i128 = (WAD * 96) / 100;
+const MAX_FLOAT_HELPER_BALANCE: i128 = WAD;
+const MAX_FLOAT_HELPER_SCALAR_ROOT: i128 = 10 * WAD;
+const MAX_FLOAT_HELPER_ANCHOR: i128 = 2 * WAD;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -72,6 +75,7 @@ pub enum Error {
     ExchangeRateBelowOne = 15,
     UnsupportedRoute = 16,
     TradeNotFound = 17,
+    InputOutOfBounds = 18,
 }
 
 struct Precompute {
@@ -111,8 +115,14 @@ impl AmmMarket {
         if scalar_root <= 0 {
             return Err(Error::InvalidScalarRoot);
         }
+        if scalar_root > MAX_FLOAT_HELPER_SCALAR_ROOT {
+            return Err(Error::InputOutOfBounds);
+        }
         if initial_anchor < WAD {
             return Err(Error::InvalidAnchor);
+        }
+        if initial_anchor > MAX_FLOAT_HELPER_ANCHOR {
+            return Err(Error::InputOutOfBounds);
         }
         if !(0..BPS_DENOMINATOR).contains(&fee_bps) {
             return Err(Error::InvalidFee);
@@ -174,7 +184,7 @@ impl AmmMarket {
     }
 
     pub fn quote_pt_for_sy(env: Env, pt_in: i128) -> Result<i128, Error> {
-        require_positive_amount_result(pt_in)?;
+        require_bounded_amount_result(pt_in)?;
 
         let config = read_config(&env)?;
         require_live_result(&env, &config)?;
@@ -189,7 +199,7 @@ impl AmmMarket {
     }
 
     pub fn quote_sy_for_pt(env: Env, sy_in: i128) -> Result<i128, Error> {
-        require_positive_amount_result(sy_in)?;
+        require_bounded_amount_result(sy_in)?;
 
         let config = read_config(&env)?;
         require_live_result(&env, &config)?;
@@ -277,7 +287,7 @@ impl AmmMarket {
 impl Market for AmmMarket {
     fn swap_pt_for_sy(env: &Env, from: Address, pt_in: i128, min_sy_out: i128) -> i128 {
         from.require_auth();
-        require_positive_amount(env, pt_in);
+        require_bounded_amount(env, pt_in);
 
         let config = read_config_or_panic(env);
         require_live(env, &config);
@@ -296,7 +306,7 @@ impl Market for AmmMarket {
 
     fn swap_sy_for_pt(env: &Env, from: Address, sy_in: i128, min_pt_out: i128) -> i128 {
         from.require_auth();
-        require_positive_amount(env, sy_in);
+        require_bounded_amount(env, sy_in);
 
         let config = read_config_or_panic(env);
         require_live(env, &config);
@@ -321,7 +331,7 @@ impl Market for AmmMarket {
     fn swap_sy_for_yt(env: &Env, _from: Address, _sy_in: i128, _min_yt_out: i128) -> i128 {
         let from = _from;
         from.require_auth();
-        require_positive_amount(env, _sy_in);
+        require_bounded_amount(env, _sy_in);
 
         let config = read_config_or_panic(env);
         require_live(env, &config);
@@ -346,7 +356,7 @@ impl Market for AmmMarket {
     fn swap_yt_for_sy(env: &Env, _from: Address, _yt_in: i128, _min_sy_out: i128) -> i128 {
         let from = _from;
         from.require_auth();
-        require_positive_amount(env, _yt_in);
+        require_bounded_amount(env, _yt_in);
 
         let config = read_config_or_panic(env);
         require_live(env, &config);
@@ -365,8 +375,8 @@ impl Market for AmmMarket {
 
     fn add_liquidity(env: &Env, from: Address, pt_in: i128, sy_in: i128) -> i128 {
         from.require_auth();
-        require_positive_amount(env, pt_in);
-        require_positive_amount(env, sy_in);
+        require_bounded_amount(env, pt_in);
+        require_bounded_amount(env, sy_in);
 
         let config = read_config_or_panic(env);
         require_live(env, &config);
@@ -408,8 +418,8 @@ impl Market for AmmMarket {
             let pt_used = mul_div_up_or_panic(env, state.total_pt, lp_out, state.total_lp);
             let sy_used = mul_div_up_or_panic(env, state.total_sy, lp_out, state.total_lp);
 
-            state.total_pt = checked_add(env, state.total_pt, pt_used);
-            state.total_sy = checked_add(env, state.total_sy, sy_used);
+            state.total_pt = checked_bounded_reserve_add(env, state.total_pt, pt_used);
+            state.total_sy = checked_bounded_reserve_add(env, state.total_sy, sy_used);
             state.total_lp = checked_add(env, state.total_lp, lp_out);
 
             lp_out
@@ -423,7 +433,7 @@ impl Market for AmmMarket {
 
     fn remove_liquidity(env: &Env, from: Address, lp_in: i128) -> (i128, i128) {
         from.require_auth();
-        require_positive_amount(env, lp_in);
+        require_bounded_amount(env, lp_in);
 
         let config = read_config_or_panic(env);
         let mut state = read_state_or_panic(env);
@@ -552,6 +562,26 @@ fn require_positive_amount_result(amount: i128) -> Result<(), Error> {
     Ok(())
 }
 
+fn require_bounded_amount(env: &Env, amount: i128) {
+    require_positive_amount(env, amount);
+    require_within_float_helper_bounds(env, amount);
+}
+
+fn require_bounded_amount_result(amount: i128) -> Result<(), Error> {
+    require_positive_amount_result(amount)?;
+    if amount > MAX_FLOAT_HELPER_BALANCE {
+        return Err(Error::InputOutOfBounds);
+    }
+
+    Ok(())
+}
+
+fn require_within_float_helper_bounds(env: &Env, amount: i128) {
+    if amount > MAX_FLOAT_HELPER_BALANCE {
+        panic_with_error!(env, Error::InputOutOfBounds);
+    }
+}
+
 fn require_live_result(env: &Env, config: &Config) -> Result<(), Error> {
     if env.ledger().timestamp() >= config.maturity {
         return Err(Error::MarketMatured);
@@ -632,7 +662,7 @@ fn apply_exact_pt_in_trade_or_panic(
         panic_with_error!(env, Error::SlippageExceeded);
     }
 
-    state.total_pt = checked_add(env, state.total_pt, pt_in);
+    state.total_pt = checked_bounded_reserve_add(env, state.total_pt, pt_in);
     state.total_sy = checked_sub(env, state.total_sy, sy_out);
     let observed_ln_rate = get_ln_implied_rate_or_panic(
         env,
@@ -692,7 +722,7 @@ fn apply_exact_sy_in_trade_or_panic(
     }
 
     state.total_pt = checked_sub(env, state.total_pt, pt_out);
-    state.total_sy = checked_add(env, state.total_sy, sy_in);
+    state.total_sy = checked_bounded_reserve_add(env, state.total_sy, sy_in);
     let observed_ln_rate = get_ln_implied_rate_or_panic(
         env,
         state.total_pt,
@@ -1001,6 +1031,12 @@ fn checked_add(env: &Env, lhs: i128, rhs: i128) -> i128 {
     }
 }
 
+fn checked_bounded_reserve_add(env: &Env, lhs: i128, rhs: i128) -> i128 {
+    let value = checked_add(env, lhs, rhs);
+    require_within_float_helper_bounds(env, value);
+    value
+}
+
 fn checked_sub(env: &Env, lhs: i128, rhs: i128) -> i128 {
     match lhs.checked_sub(rhs) {
         Some(value) if value >= 0 => value,
@@ -1121,6 +1157,34 @@ mod test {
         assert_eq!(fixture.client.reserve_pt(), 0);
         assert_eq!(fixture.client.reserve_sy(), 0);
         assert_eq!(fixture.client.total_lp(), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #18)")]
+    fn initialize_rejects_curve_inputs_above_testnet_bounds() {
+        let fixture = fixture(NOW);
+        fixture.client.initialize(
+            &fixture.admin,
+            &fixture.pt_token,
+            &fixture.sy_token,
+            &fixture.tokenizer,
+            &MATURITY,
+            &(MAX_FLOAT_HELPER_SCALAR_ROOT + 1),
+            &INITIAL_ANCHOR,
+            &FEE_BPS,
+            &TWAP_WINDOW,
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #18)")]
+    fn liquidity_rejects_amounts_above_testnet_bounds() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &(MAX_FLOAT_HELPER_BALANCE + 1), &10_000);
     }
 
     #[test]
