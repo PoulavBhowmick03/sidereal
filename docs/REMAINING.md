@@ -22,12 +22,14 @@ coordination note in the PR.
 ## 1. The model we are moving to
 
 Today (internal accounting):
+
 - SY wrapper mints "shares" in its own storage; no underlying is pulled in.
 - Tokenizer holds PT/YT balances in a `Position(holder, maturity)` struct.
 - PT/YT contracts have no balances at all.
 - AMM tracks `reserve_pt`/`reserve_sy` as numbers; no tokens move on a swap.
 
 Target (real settlement):
+
 - SY wrapper is a vault: `deposit` pulls the underlying SEP-41 token from the
   user into the wrapper; `redeem` sends it back. SY itself becomes a real
   balance the wrapper mints/burns.
@@ -42,7 +44,7 @@ Target (real settlement):
 
 ## 2. Workstreams
 
-### WS-1 — SY wrapper becomes a real vault  ☐  (owner: codex-2)
+### WS-1 — SY wrapper becomes a real vault ☐ (owner: codex-2)
 
 - Make SY a SEP-41 token (balance/transfer/allowance), minted on `deposit`,
   burned on `redeem`. Use the OpenZeppelin Soroban fungible vault extension
@@ -59,7 +61,7 @@ Target (real settlement):
 Acceptance: `cargo test -p sidereal-sy-wrapper` green; a test asserts the
 wrapper's underlying balance equals total deposits minus redemptions.
 
-### WS-2 — PT and YT become SEP-41 tokens  ☐  (owner: codex-2)
+### WS-2 — PT and YT become SEP-41 tokens ☐ (owner: codex-2)
 
 - Add the SEP-41 surface to both: `balance`, `transfer`, `transfer_from`,
   `approve`, `allowance`, `decimals`, `name`, `symbol`.
@@ -75,7 +77,7 @@ wrapper's underlying balance equals total deposits minus redemptions.
 Acceptance: `cargo test -p sidereal-pt-token -p sidereal-yt-token` green;
 unauthorized mint/burn rejected.
 
-### WS-3 — Tokenizer custodies SY and drives PT/YT  ☐  (owner: codex-2)
+### WS-3 — Tokenizer custodies SY and drives PT/YT ☐ (owner: codex-2)
 
 - `split(from, sy_amount)`: pull SY from `from` into the tokenizer
   (`sy.transfer(from, this, sy_amount)`), then `pt.mint(from, sy_amount)` and
@@ -92,7 +94,7 @@ unauthorized mint/burn rejected.
 Acceptance: `cargo test -p sidereal-tokenizer` and the integration suite green;
 a test asserts `tokenizer SY balance == sum of outstanding PT (== YT)`.
 
-### WS-4 — AMM custodies PT/SY for liquidity and swaps  ☐  (owner: codex-1)
+### WS-4 — AMM custodies PT/SY for liquidity and swaps ☐ (owner: codex-1)
 
 - `add_liquidity`/`remove_liquidity`: move real PT and SY between the user and
   the pool; mint/burn LP (LP can stay internal for the MVP or become SEP-41).
@@ -105,9 +107,10 @@ a test asserts `tokenizer SY balance == sum of outstanding PT (== YT)`.
 Acceptance: `cargo test -p sidereal-amm` green including the property suite
 (PT+YT=SY across 10k swaps) against real token movements.
 
-### WS-5 — YT flash route settles atomically  ☐  (owner: codex-1, needs WS-2/3)
+### WS-5 — YT flash route settles atomically ☐ (owner: codex-1, needs WS-2/3)
 
 The hard one (AGENTS.md section 4). `swap_sy_for_yt(from, sy_in, min_yt_out)`:
+
 1. take `sy_in` SY from the user,
 2. flash-borrow additional SY from the pool against the curve,
 3. `tokenizer.split` the combined SY into PT + YT,
@@ -120,7 +123,7 @@ Soroban auth + a single transaction: if any step fails, everything reverts.
 Acceptance: integration test buys YT with SY and the user ends with real YT and
 the pool is made whole; `swap_yt_for_sy` round-trips; property test still holds.
 
-### WS-6 — Plumb settlement through SDK + frontend  ☐  (owner: claude-1/claude-2)
+### WS-6 — Plumb settlement through SDK + frontend ☐ (owner: claude-1/claude-2)
 
 - SDK: `getPosition` reads PT/YT via the token `balance` methods (not the
   tokenizer Position); add `buildApprove` if a swap needs an allowance first;
@@ -155,3 +158,13 @@ cross-column coordination note; keep every existing test green at each step.
   and YT) -> recombine -> redeem end to end.
 - README "Current limitations" reduced to the genuinely out-of-scope items
   (multiple maturities/underlyings, governance, mainnet, audit).
+
+NEXT_PUBLIC_SOROBAN_RPC_URL = https://soroban-testnet.stellar.org
+NEXT_PUBLIC_NETWORK_PASSPHRASE = Test SDF Network ; September 2015  
+NEXT_PUBLIC_MARKET_ID = blend-usdc-q3  
+NEXT_PUBLIC_TOKEN_DECIMALS = 7
+NEXT_PUBLIC_SY_ADDRESS = <SY contract id>
+NEXT_PUBLIC_PT_ADDRESS = <PT contract id>
+NEXT_PUBLIC_YT_ADDRESS = <YT contract id>
+NEXT_PUBLIC_TOKENIZER_ADDRESS = <tokenizer contract id>
+NEXT_PUBLIC_MARKET_ADDRESS = <AMM contract id>

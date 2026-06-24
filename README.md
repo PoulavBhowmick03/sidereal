@@ -90,10 +90,11 @@ order, and writes the contract addresses to `app/.env.local`.
 
 ## Deploying the frontend (Vercel)
 
-The repo root has a `vercel.json` that pins the monorepo build, so you can
-import the repo with the **Root Directory left at the repo root** (not `app/`).
-It installs the workspace, builds the SDK, then builds the app, with output at
-`app/.next`. No further build config is needed.
+Set the Vercel project's **Root Directory to `app`** (Settings > General > Root
+Directory). Vercel then detects Next.js and reads `app/vercel.json`, which
+builds the workspace SDK before the app (`pnpm --filter @sidereal/sdk build &&
+next build`). Vercel runs the install at the pnpm workspace root automatically,
+so `@sidereal/sdk` resolves. Use Node 20+.
 
 Set the contract addresses as environment variables in the Vercel project (all
 public `NEXT_PUBLIC_*`, no secrets); see `app/.env.example` for the full list.
