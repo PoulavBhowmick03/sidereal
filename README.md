@@ -88,6 +88,18 @@ This builds the contracts to wasm, generates and funds a deployer identity (no
 hardcoded keys), deploys SY/PT/YT/tokenizer/AMM, initializes them in dependency
 order, and writes the contract addresses to `app/.env.local`.
 
+## Deploying the frontend (Vercel)
+
+The repo root has a `vercel.json` that pins the monorepo build, so you can
+import the repo with the **Root Directory left at the repo root** (not `app/`).
+It installs the workspace, builds the SDK, then builds the app, with output at
+`app/.next`. No further build config is needed.
+
+Set the contract addresses as environment variables in the Vercel project (all
+public `NEXT_PUBLIC_*`, no secrets); see `app/.env.example` for the full list.
+Without them the site builds and runs but shows the "no market configured"
+banner.
+
 ## Testing
 
 ```bash
