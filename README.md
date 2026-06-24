@@ -31,12 +31,19 @@ What's missing is the layer that lets institutional users hedge that yield and l
 
 | Component | Status |
 |---|---|
-| SY wrapper (Blend USDC) | 🚧 |
-| Tokenizer (PT/YT mint, redeem) | 🚧 |
-| Time-decay AMM | 🚧 |
-| TypeScript SDK | 🚧 |
-| Frontend (mint, trade, redeem) | 🚧 |
-| End-to-end testnet demo | 🚧 |
+| SY wrapper (shares, exchange rate, accrued yield) | ✅ built, 4 tests |
+| Tokenizer (split, recombine, redeem at maturity) | ✅ built, 10 tests |
+| PT / YT tokens | ✅ built, 3 tests each |
+| Time-decay AMM (PT/SY pool, TWAP, quotes) | ✅ built, 15 tests incl. property suite |
+| TypeScript SDK (typed client, quote, build, submit) | ✅ built, 11 tests |
+| Frontend (mint, trade, redeem, wallet connect) | ✅ built, 12 tests |
+| Cross-contract integration tests | ✅ 3 tests (deposit/split/recombine, redeem, AMM) |
+| Integrated workspace (everything builds together) | ✅ `cargo`, SDK, and `next build` green |
+| Testnet deploy script | ✅ `scripts/deploy-testnet.sh` |
+| Live testnet end-to-end demo | 🚧 needs deploy + token settlement (see Limitations) |
+
+All layers compile and test together on one branch. The remaining work for a
+live on-chain demo is documented under [Limitations](#current-limitations).
 
 ## Architecture
 
@@ -47,55 +54,65 @@ See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the protocol design, math, and So
 Prerequisites:
 
 ```bash
-# Rust + Soroban
+# Rust toolchain and the Soroban wasm target (SDK 26 needs wasm32v1-none)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-rustup target add wasm32-unknown-unknown
-cargo install --locked soroban-cli
+rustup target add wasm32v1-none
 
-# Node + pnpm
+# Stellar CLI (only needed to deploy)
+cargo install --locked stellar-cli
+
+# Node and pnpm
 nvm install 20
 npm install -g pnpm
 ```
 
-Clone and build:
+Clone, build, and test the whole monorepo with the Makefile:
 
 ```bash
-git clone https://github.com/<TODO-org>/sidereal
+git clone https://github.com/PoulavBhowmick03/sidereal
 cd sidereal
 
-# Contracts
-cd contracts
-cargo build --target wasm32-unknown-unknown --release
-
-# SDK + frontend
-cd ..
-pnpm install
-pnpm -F sdk build
-pnpm -F app dev
+make install   # install JS workspace deps
+make test      # contracts + SDK + app test suites
+make build     # wasm contracts, SDK, and a production app build
+make dev       # run the frontend dev server
 ```
 
-Deploy to testnet:
+Deploy to testnet and wire the frontend:
 
 ```bash
-./scripts/deploy-testnet.sh
+make deploy    # or: bash scripts/deploy-testnet.sh
 ```
 
-This creates a fresh testnet account, deploys all contracts, configures a Blend USDC SY wrapper, and prints the contract addresses for the frontend's `.env.local`.
+This builds the contracts to wasm, generates and funds a deployer identity (no
+hardcoded keys), deploys SY/PT/YT/tokenizer/AMM, initializes them in dependency
+order, and writes the contract addresses to `app/.env.local`.
 
 ## Testing
 
 ```bash
-# Contract unit + property tests
-cd contracts && cargo test
-
-# SDK
-pnpm -F sdk test
-
-# End-to-end (deploys to local Soroban network)
-pnpm -F app test:e2e
+make contracts-test   # cargo test --workspace
+make sdk-test         # SDK typecheck + vitest
+make app-test         # app typecheck + vitest
 ```
 
-The AMM has property tests verifying that `PT + YT = SY` holds across 10,000 random swap sequences. If a contract change causes any of those to fail, the change does not ship.
+The AMM has property tests verifying that `PT + YT = SY` holds across random
+swap sequences. If a contract change causes any of those to fail, the change
+does not ship. CI (`.github/workflows/ci.yml`) runs all three layers on every PR.
+
+## Current limitations
+
+The protocol compiles, tests, and is wired end to end, with two known gaps
+before a live on-chain demo:
+
+1. **Token settlement.** The SY wrapper, tokenizer, and AMM currently track
+   balances with internal accounting rather than moving real SEP-41 tokens
+   between contracts. A deploy will run and the UI will drive it, but value is
+   not yet custodied or transferred on chain.
+2. **YT flash route.** `swap_sy_for_yt` / `swap_yt_for_sy` depend on the
+   cross-contract settlement surface above, so YT trades are wired in the SDK
+   and UI but not yet functional on chain. PT/SY swaps, mint, and redeem are
+   complete paths.
 
 ## Contributing
 
@@ -103,7 +120,7 @@ The repo is public from day one and we welcome external eyes. A few notes:
 
 - The build is happening across four parallel agents (2 Codex, 2 Claude Code) per the spec in [`AGENTS.md`](./AGENTS.md). If you want to contribute, that file is the place to start.
 - Open an issue before opening a large PR. Scope is tight by design (see §12 of `AGENTS.md`).
-- Security findings: please email `<TODO-security-email>` rather than opening a public issue.
+- Security findings: please report privately via GitHub's "Report a vulnerability" (Security tab, private advisory) rather than opening a public issue. See [`SECURITY.md`](./SECURITY.md).
 
 ## Influences and prior art
 

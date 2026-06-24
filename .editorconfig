@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: Apache-2.0
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+
+# Rust follows rustfmt defaults (4-space).
+[*.rs]
+indent_size = 4
+
+# JS/TS, JSON, YAML, and the frontend use 2-space.
+[*.{ts,tsx,js,jsx,mjs,json,yml,yaml,css}]
+indent_size = 2
+
+[*.md]
+indent_size = 2
+trim_trailing_whitespace = false  # trailing spaces are meaningful (hard line breaks)
+
+[Makefile]
+indent_style = tab
+
+[*.sh]
+indent_size = 2

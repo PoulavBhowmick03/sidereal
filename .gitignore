@@ -1,2 +1,11 @@
 .codex/logs/
 /target/
+
+# JS/TS
+node_modules/
+dist/
+.next/
+next-env.d.ts
+*.tsbuildinfo
+playwright-report/
+test-results/

@@ -5,6 +5,9 @@ REPO="${REPO:-/Users/odinson/Developer/sidereal}"
 ROLE="${ROLE:-codex-1}"          # bootstrap | codex-1 | codex-2
 MAX_RUNS="${MAX_RUNS:-6}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-20}"
+# Shared cross-worktree message board. Lives outside every worktree so any
+# agent on any branch can read/write it by absolute path. See its header.
+BUS_FILE="${BUS_FILE:-/Users/odinson/Developer/.sidereal-bus/BUS.md}"
 
 cd "$REPO"
 
@@ -58,6 +61,10 @@ for run in $(seq 1 "$MAX_RUNS"); do
   prompt="$(cat <<PROMPT
 Read AGENTS.md at the repo root before doing anything. Also read any deeper AGENTS.md for directories you touch.
 
+Then read the shared agent bus at $BUS_FILE in full. It is the cross-worktree
+message board (see its own header for the protocol). Act on anything addressed
+to you ($ROLE) or to "all" under "Open threads" or in recent log entries.
+
 You are running as: $ROLE
 $ROLE_SPEC
 
@@ -74,6 +81,10 @@ Rules for this invocation:
 
 $TRAILER
 
+- After committing (or if you hit LOOP_STOP), APPEND one status entry to the
+  shared bus at $BUS_FILE using the entry format documented in that file's
+  header. Never rewrite another agent's entry. Address claude-1/claude-2 in the
+  TO field when you need something from the SDK or frontend side.
 - If blocked, if tests fail, if you need product input, or if you leave uncommitted changes for review, end your final answer with:
 LOOP_STOP: <reason>
 

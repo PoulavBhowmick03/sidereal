@@ -2,7 +2,16 @@
 
 [workspace]
 resolver = "2"
-members = ["contracts/shared/types"]
+# All contract crates plus the shared interface, integrated across columns.
+members = [
+    "contracts/amm",
+    "contracts/pt-token",
+    "contracts/sy-wrapper",
+    "contracts/shared/types",
+    "contracts/tokenizer",
+    "contracts/yt-token",
+    "tests/integration",
+]
 
 [workspace.package]
 version = "0.1.0"
