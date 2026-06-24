@@ -39,6 +39,9 @@ dev: ## Run the frontend dev server
 deploy: ## Deploy the protocol to testnet and wire the frontend
 	bash scripts/deploy-testnet.sh
 
+seed: ## Seed the deployed market with activity so the demo shows live numbers
+	bash scripts/seed-demo.sh
+
 clean: ## Remove build artifacts
 	cargo clean
 	rm -rf sdk/dist app/.next

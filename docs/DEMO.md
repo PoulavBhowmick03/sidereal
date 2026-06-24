@@ -33,6 +33,14 @@ SY wrapper, PT, YT, tokenizer, and AMM, initializes them in dependency order
 with a 90 day maturity, and writes the addresses to `app/.env.local`. The
 deployer public key and all five contract IDs are printed.
 
+Then seed the fresh market with some activity (a deposit, a split, and AMM
+liquidity) so the UI shows real numbers, otherwise the pool is empty and quotes
+fail with `MarketNotSeeded`:
+
+```bash
+make seed
+```
+
 ## 3. Run the frontend
 
 ```bash
