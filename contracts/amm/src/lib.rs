@@ -692,7 +692,7 @@ fn apply_exact_sy_in_trade_or_panic(
     }
 
     state.total_pt = checked_sub(env, state.total_pt, pt_out);
-    state.total_sy = checked_add(env, state.total_sy, required_sy);
+    state.total_sy = checked_add(env, state.total_sy, sy_in);
     let observed_ln_rate = get_ln_implied_rate_or_panic(
         env,
         state.total_pt,
@@ -1206,9 +1206,39 @@ mod test {
 
         assert!(pt_out > 0);
         assert_eq!(state.total_pt, 20_000 - pt_out);
-        assert!(state.total_sy > 20_000);
+        assert_eq!(state.total_sy, 21_000);
         assert_eq!(state.last_observation, NOW + 60);
         assert!(state.twap_ln_implied_rate > 0);
+    }
+
+    #[test]
+    fn sy_exact_in_swaps_credit_full_input_to_reserves() {
+        let pt_fixture = fixture(NOW);
+        initialize(&pt_fixture);
+        pt_fixture
+            .client
+            .add_liquidity(&pt_fixture.admin, &20_000, &20_000);
+        let (sy_in, required_sy) = sy_in_with_rounding_gap(&pt_fixture);
+        assert!(required_sy < sy_in);
+
+        let before = pt_fixture.client.state();
+        pt_fixture
+            .client
+            .swap_sy_for_pt(&pt_fixture.admin, &sy_in, &1);
+        let after = pt_fixture.client.state();
+        assert_eq!(after.total_sy, before.total_sy + sy_in);
+
+        let yt_fixture = fixture(NOW);
+        initialize(&yt_fixture);
+        yt_fixture
+            .client
+            .add_liquidity(&yt_fixture.admin, &20_000, &20_000);
+        let before = yt_fixture.client.state();
+        yt_fixture
+            .client
+            .swap_sy_for_yt(&yt_fixture.admin, &sy_in, &1);
+        let after = yt_fixture.client.state();
+        assert_eq!(after.total_sy, before.total_sy + sy_in);
     }
 
     #[test]
@@ -1251,7 +1281,7 @@ mod test {
 
         assert!(yt_out > 0);
         assert_eq!(state.total_pt, 20_000 - yt_out);
-        assert!(state.total_sy > 20_000);
+        assert_eq!(state.total_sy, 21_000);
         assert_eq!(state.last_observation, NOW + 60);
     }
 
@@ -1537,6 +1567,29 @@ mod test {
             exact_pt_in_sy_out_or_panic(&fixture.env, &config, &state, &comp, pt_in)
         }))
         .ok()
+    }
+
+    fn sy_in_with_rounding_gap(fixture: &Fixture) -> (i128, i128) {
+        let config = fixture.client.config();
+        let state = fixture.client.state();
+        let comp = precompute_or_panic(&fixture.env, &config, &state);
+
+        for sy_in in 1..5_000 {
+            let Some(pt_out) = quote_sy_for_pt(fixture, sy_in) else {
+                continue;
+            };
+            let required_sy = catch_unwind(AssertUnwindSafe(|| {
+                exact_pt_out_sy_in_or_panic(&fixture.env, &config, &state, &comp, pt_out)
+            }));
+            let Ok(required_sy) = required_sy else {
+                continue;
+            };
+            if required_sy < sy_in {
+                return (sy_in, required_sy);
+            }
+        }
+
+        panic!("expected a SY input with rounding gap");
     }
 
     proptest! {
