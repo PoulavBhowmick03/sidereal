@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="${REPO:-/Users/odinson/Developer/sidereal}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="${REPO:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 BASE_BRANCH="${BASE_BRANCH:-main}"
 ROOT_NAME="${ROOT_NAME:-sidereal}"
 RUNS="${RUNS:-6}"

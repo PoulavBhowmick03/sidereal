@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="${REPO:-/Users/odinson/Developer/sidereal}"
+# Repo root: default to this script's parent dir so it works on any machine.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO="${REPO:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 ROLE="${ROLE:-codex-1}"          # bootstrap | codex-1 | codex-2
 MAX_RUNS="${MAX_RUNS:-6}"
 SLEEP_SECONDS="${SLEEP_SECONDS:-20}"
 # Shared cross-worktree message board. Lives outside every worktree so any
-# agent on any branch can read/write it by absolute path. See its header.
-BUS_FILE="${BUS_FILE:-/Users/odinson/Developer/.sidereal-bus/BUS.md}"
+# agent on any branch can read/write it by absolute path. Defaults next to the
+# repo; override with BUS_FILE=... for a custom location.
+BUS_FILE="${BUS_FILE:-$(dirname "$REPO")/.sidereal-bus/BUS.md}"
 
 cd "$REPO"
 
