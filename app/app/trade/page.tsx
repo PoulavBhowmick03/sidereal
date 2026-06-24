@@ -132,6 +132,14 @@ export default function TradePage() {
           ))}
         </div>
 
+        {direction.assetIn === "YT" || direction.assetOut === "YT" ? (
+          <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            YT routes flash through the pool and depend on cross-contract
+            settlement that is not live on chain yet. Quotes are indicative; the
+            swap may not settle. PT and SY swaps are complete.
+          </p>
+        ) : null}
+
         <label className="block text-sm">
           <span className="flex items-center justify-between text-slate-300">
             <span>Amount in ({direction.assetIn})</span>

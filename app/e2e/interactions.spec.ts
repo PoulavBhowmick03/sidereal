@@ -43,3 +43,12 @@ test("trade gates submission on wallet connection", async ({ page }) => {
   await page.getByPlaceholder("0.0").fill("5");
   await expect(page.getByRole("button", { name: /connect wallet to trade/i })).toBeDisabled();
 });
+
+test("trade warns that YT routes may not settle", async ({ page }) => {
+  await page.goto("/trade");
+  // PT route: no warning.
+  await expect(page.getByText(/YT routes flash through the pool/i)).toHaveCount(0);
+  // YT route: warning appears.
+  await page.getByRole("button", { name: "Buy YT" }).click();
+  await expect(page.getByText(/YT routes flash through the pool/i)).toBeVisible();
+});
