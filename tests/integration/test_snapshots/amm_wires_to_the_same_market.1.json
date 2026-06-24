@@ -715,6 +715,21 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "LpBalance"
+                          },
+                          {
+                            "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "i128": "999999999000"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "State"
                           }
                         ]

@@ -48,6 +48,7 @@ pub struct State {
 enum DataKey {
     Config,
     State,
+    LpBalance(Address),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -165,6 +166,11 @@ impl AmmMarket {
 
     pub fn total_lp(env: Env) -> Result<i128, Error> {
         Ok(read_state(&env)?.total_lp)
+    }
+
+    pub fn lp_balance(env: Env, holder: Address) -> Result<i128, Error> {
+        read_config(&env)?;
+        Ok(read_lp_balance(&env, holder))
     }
 
     pub fn quote_pt_for_sy(env: Env, pt_in: i128) -> Result<i128, Error> {
@@ -409,6 +415,8 @@ impl Market for AmmMarket {
             lp_out
         };
 
+        let current_lp = read_lp_balance(env, from.clone());
+        write_lp_balance(env, from, checked_add(env, current_lp, lp_out));
         write_state(env, &state);
         lp_out
     }
@@ -422,6 +430,11 @@ impl Market for AmmMarket {
         require_live(env, &config);
         require_seeded(env, &state);
 
+        let holder_lp = read_lp_balance(env, from.clone());
+        if lp_in > holder_lp {
+            panic_with_error!(env, Error::InsufficientLiquidity);
+        }
+
         if lp_in >= state.total_lp {
             panic_with_error!(env, Error::InsufficientLiquidity);
         }
@@ -432,6 +445,7 @@ impl Market for AmmMarket {
             panic_with_error!(env, Error::InsufficientLiquidity);
         }
 
+        write_lp_balance(env, from, checked_sub(env, holder_lp, lp_in));
         state.total_lp = checked_sub(env, state.total_lp, lp_in);
         state.total_sy = checked_sub(env, state.total_sy, sy_out);
         state.total_pt = checked_sub(env, state.total_pt, pt_out);
@@ -489,6 +503,19 @@ fn read_state_or_panic(env: &Env) -> State {
 
 fn write_state(env: &Env, state: &State) {
     env.storage().instance().set(&DataKey::State, state);
+}
+
+fn read_lp_balance(env: &Env, holder: Address) -> i128 {
+    env.storage()
+        .instance()
+        .get(&DataKey::LpBalance(holder))
+        .unwrap_or(0)
+}
+
+fn write_lp_balance(env: &Env, holder: Address, balance: i128) {
+    env.storage()
+        .instance()
+        .set(&DataKey::LpBalance(holder), &balance);
 }
 
 fn require_live(env: &Env, config: &Config) {
@@ -1015,6 +1042,7 @@ mod test {
         pt_token: Address,
         sy_token: Address,
         tokenizer: Address,
+        bob: Address,
     }
 
     fn fixture(now: u64) -> Fixture {
@@ -1030,6 +1058,7 @@ mod test {
         let pt_token = Address::generate(&env);
         let sy_token = Address::generate(&env);
         let tokenizer = Address::generate(&env);
+        let bob = Address::generate(&env);
 
         Fixture {
             env,
@@ -1039,6 +1068,7 @@ mod test {
             pt_token,
             sy_token,
             tokenizer,
+            bob,
         }
     }
 
@@ -1109,6 +1139,7 @@ mod test {
         assert_eq!(state.total_pt, 10_000);
         assert_eq!(state.total_sy, 10_000);
         assert_eq!(state.total_lp, 10_000);
+        assert_eq!(fixture.client.lp_balance(&fixture.admin), 9_000);
         assert!(state.last_ln_implied_rate > 0);
         assert_eq!(state.last_ln_implied_rate, state.twap_ln_implied_rate);
         assert!(fixture.client.implied_apy() > 0);
@@ -1129,6 +1160,19 @@ mod test {
         assert_eq!(state.total_pt, 1_000);
         assert_eq!(state.total_sy, 1_000);
         assert_eq!(state.total_lp, 1_000);
+        assert_eq!(fixture.client.lp_balance(&fixture.admin), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #12)")]
+    fn non_lp_cannot_remove_liquidity() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &10_000, &10_000);
+
+        fixture.client.remove_liquidity(&fixture.bob, &1_000);
     }
 
     #[test]
