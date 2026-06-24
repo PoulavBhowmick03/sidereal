@@ -23,7 +23,7 @@ Status: ☐ open · ◐ in progress · ☑ fixed (with test)
 |----|----------|---------|-------|--------|
 | M4 | MED | AMM curve math uses `f64` (precision loss at bounds) | codex-1 (AMM) | ☑ |
 | L1 | LOW | Unauthorized admin calls return `NotInitialized` | codex-2 (sy-wrapper, yt) | ☐ |
-| L2 | LOW | Long-lived instance state has no TTL/bump strategy | codex-1 + codex-2 (ops) | ☐ |
+| L2 | LOW | Long-lived instance state has no TTL/bump strategy | codex-1 + codex-2 (ops) | ◐ AMM fixed; tokenization pending |
 
 ## Fix notes (acceptance = the fix lands AND a test proves it)
 
@@ -53,7 +53,12 @@ Status: ☐ open · ◐ in progress · ☑ fixed (with test)
 - **L1** — add an `Unauthorized` error; return it on admin mismatch (not
   `NotInitialized`) in `set_exchange_rate` and `seed_checkpoint`.
 - **L2** — define a TTL/bump policy for the ~3-month markets; extend instance TTL
-  on mutating entrypoints and document the maintenance expectation.
+  on mutating entrypoints and document the maintenance expectation. AMM policy:
+  `bump_ttl` is a public keepalive entrypoint, and AMM initialization/state
+  writes extend instance+code TTL when remaining TTL falls below 30 days, back to
+  120 days. Operators should call `bump_ttl` at least monthly for idle markets;
+  active markets are bumped by normal AMM mutations. Codex-2 still needs to apply
+  the equivalent policy to SY/tokenizer/PT/YT state before L2 is fully closed.
 
 ## Process
 

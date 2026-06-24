@@ -19,6 +19,9 @@ const MAX_MARKET_PROPORTION: i128 = (WAD * 96) / 100;
 const MAX_FLOAT_HELPER_BALANCE: i128 = WAD;
 const MAX_FLOAT_HELPER_SCALAR_ROOT: i128 = 10 * WAD;
 const MAX_FLOAT_HELPER_ANCHOR: i128 = 2 * WAD;
+const LEDGERS_PER_DAY: u32 = 17_280;
+const AMM_INSTANCE_TTL_THRESHOLD_LEDGERS: u32 = 30 * LEDGERS_PER_DAY;
+const AMM_INSTANCE_TTL_EXTEND_TO_LEDGERS: u32 = 120 * LEDGERS_PER_DAY;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -154,6 +157,7 @@ impl AmmMarket {
 
         env.storage().instance().set(&DataKey::Config, &config);
         env.storage().instance().set(&DataKey::State, &state);
+        bump_instance_ttl(&env);
 
         Ok(())
     }
@@ -176,6 +180,12 @@ impl AmmMarket {
 
     pub fn total_lp(env: Env) -> Result<i128, Error> {
         Ok(read_state(&env)?.total_lp)
+    }
+
+    pub fn bump_ttl(env: Env) -> Result<(), Error> {
+        read_config(&env)?;
+        bump_instance_ttl(&env);
+        Ok(())
     }
 
     pub fn lp_balance(env: Env, holder: Address) -> Result<i128, Error> {
@@ -513,6 +523,14 @@ fn read_state_or_panic(env: &Env) -> State {
 
 fn write_state(env: &Env, state: &State) {
     env.storage().instance().set(&DataKey::State, state);
+    bump_instance_ttl(env);
+}
+
+fn bump_instance_ttl(env: &Env) {
+    env.storage().instance().extend_ttl(
+        AMM_INSTANCE_TTL_THRESHOLD_LEDGERS,
+        AMM_INSTANCE_TTL_EXTEND_TO_LEDGERS,
+    );
 }
 
 fn read_lp_balance(env: &Env, holder: Address) -> i128 {
@@ -1058,7 +1076,7 @@ extern crate std;
 mod test {
     use super::*;
     use proptest::prelude::*;
-    use soroban_sdk::testutils::{Address as _, EnvTestConfig, Ledger};
+    use soroban_sdk::testutils::{Address as _, Deployer, EnvTestConfig, Ledger};
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
     const NOW: u64 = 1_770_000_000;
@@ -1185,6 +1203,42 @@ mod test {
         fixture
             .client
             .add_liquidity(&fixture.admin, &(MAX_FLOAT_HELPER_BALANCE + 1), &10_000);
+    }
+
+    #[test]
+    fn bump_ttl_extends_idle_market_instance_ttl() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        lower_instance_ttl_below_threshold(&fixture);
+
+        fixture.client.bump_ttl();
+
+        assert!(
+            fixture
+                .env
+                .deployer()
+                .get_contract_instance_ttl(&fixture.contract_id)
+                >= AMM_INSTANCE_TTL_EXTEND_TO_LEDGERS
+        );
+    }
+
+    #[test]
+    fn mutating_entrypoints_extend_instance_ttl() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        lower_instance_ttl_below_threshold(&fixture);
+
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &10_000, &10_000);
+
+        assert!(
+            fixture
+                .env
+                .deployer()
+                .get_contract_instance_ttl(&fixture.contract_id)
+                >= AMM_INSTANCE_TTL_EXTEND_TO_LEDGERS
+        );
     }
 
     #[test]
@@ -1654,6 +1708,28 @@ mod test {
         }
 
         panic!("expected a SY input with rounding gap");
+    }
+
+    fn lower_instance_ttl_below_threshold(fixture: &Fixture) {
+        let ttl = fixture
+            .env
+            .deployer()
+            .get_contract_instance_ttl(&fixture.contract_id);
+        assert!(ttl > AMM_INSTANCE_TTL_THRESHOLD_LEDGERS);
+
+        let target_ttl = AMM_INSTANCE_TTL_THRESHOLD_LEDGERS - 1;
+        let ledgers_to_advance = ttl - target_ttl;
+        fixture
+            .env
+            .ledger()
+            .set_sequence_number(fixture.env.ledger().sequence() + ledgers_to_advance);
+        assert!(
+            fixture
+                .env
+                .deployer()
+                .get_contract_instance_ttl(&fixture.contract_id)
+                < AMM_INSTANCE_TTL_THRESHOLD_LEDGERS
+        );
     }
 
     proptest! {
