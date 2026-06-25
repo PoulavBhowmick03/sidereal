@@ -45,7 +45,12 @@ fn deploy(env: &Env) -> Market {
     env.mock_all_auths();
     let admin = Address::generate(env);
     let user = Address::generate(env);
-    let underlying = Address::generate(env);
+    // The SY wrapper is a real vault now, so the underlying must be a live
+    // token the user actually holds.
+    let underlying = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    token::StellarAssetClient::new(env, &underlying).mint(&user, &2_000_000_000_i128);
 
     let sy = env.register(SyWrapper, ());
     let pt = env.register(PtToken, ());
