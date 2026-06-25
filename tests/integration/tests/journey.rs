@@ -11,7 +11,7 @@ use sidereal_tokenizer::{Tokenizer, TokenizerClient};
 use sidereal_yt_token::YtToken;
 use soroban_sdk::{
     testutils::{Address as _, Ledger as _},
-    Address, Env,
+    token, Address, Env,
 };
 
 const WAD: i128 = 1_000_000_000_000_000_000;
@@ -29,6 +29,15 @@ struct Market {
     pt: Address,
     yt: Address,
     tokenizer: Address,
+    amm: Address,
+}
+
+#[allow(dead_code)]
+struct SettlementMarket {
+    admin: Address,
+    user: Address,
+    pt: Address,
+    sy: Address,
     amm: Address,
 }
 
@@ -60,7 +69,53 @@ fn deploy(env: &Env) -> Market {
         &TWAP_WINDOW,
     );
 
-    Market { admin, user, sy, pt, yt, tokenizer, amm }
+    Market {
+        admin,
+        user,
+        sy,
+        pt,
+        yt,
+        tokenizer,
+        amm,
+    }
+}
+
+fn deploy_settlement_amm(env: &Env) -> SettlementMarket {
+    env.mock_all_auths();
+    let admin = Address::generate(env);
+    let user = Address::generate(env);
+    let tokenizer = Address::generate(env);
+
+    let pt = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let sy = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let amm = env.register(AmmMarket, ());
+
+    token::StellarAssetClient::new(env, &pt).mint(&user, &2_000_000_000_000_i128);
+    token::StellarAssetClient::new(env, &sy).mint(&user, &2_000_000_000_000_i128);
+
+    AmmMarketClient::new(env, &amm).initialize(
+        &admin,
+        &pt,
+        &sy,
+        &tokenizer,
+        &MATURITY,
+        &SCALAR_ROOT,
+        &INITIAL_ANCHOR,
+        &FEE_BPS,
+        &TWAP_WINDOW,
+    );
+
+    SettlementMarket {
+        admin,
+        user,
+        pt,
+        sy,
+        amm,
+    }
 }
 
 #[test]
@@ -111,13 +166,15 @@ fn pt_redeems_one_to_one_after_maturity() {
 #[test]
 fn amm_wires_to_the_same_market() {
     let env = Env::default();
-    let m = deploy(&env);
+    let m = deploy_settlement_amm(&env);
     let amm = AmmMarketClient::new(&env, &m.amm);
+    let pt = token::TokenClient::new(&env, &m.pt);
+    let sy = token::TokenClient::new(&env, &m.sy);
 
-    // The AMM was initialized against the same PT/SY/tokenizer; its config
-    // should reflect that and a quote on a seeded market should be readable.
     let liquidity = 1_000_000_000_000_i128;
     amm.add_liquidity(&m.user, &liquidity, &liquidity);
+    assert_eq!(pt.balance(&m.amm), liquidity);
+    assert_eq!(sy.balance(&m.amm), liquidity);
     let out = amm.quote_sy_for_pt(&100_000_000_i128);
     assert!(out > 0, "a seeded market returns a positive PT quote");
 }
@@ -125,37 +182,43 @@ fn amm_wires_to_the_same_market() {
 #[test]
 fn amm_swap_round_trip_charges_fees() {
     let env = Env::default();
-    let m = deploy(&env);
+    let m = deploy_settlement_amm(&env);
     let amm = AmmMarketClient::new(&env, &m.amm);
+    let pt = token::TokenClient::new(&env, &m.pt);
+    let sy = token::TokenClient::new(&env, &m.sy);
 
     let liquidity = 1_000_000_000_000_i128;
     amm.add_liquidity(&m.user, &liquidity, &liquidity);
 
     let sy_in = 1_000_000_000_i128;
+    let user_pt_before = pt.balance(&m.user);
+    let user_sy_before = sy.balance(&m.user);
     let pt_out = amm.swap_sy_for_pt(&m.user, &sy_in, &0);
     assert!(pt_out > 0, "buying PT yields PT");
-    assert!(amm.reserve_sy() > liquidity, "SY reserve grows after selling SY in");
+    assert!(
+        amm.reserve_sy() > liquidity,
+        "SY reserve grows after selling SY in"
+    );
+    assert_eq!(pt.balance(&m.user), user_pt_before + pt_out);
+    assert_eq!(sy.balance(&m.user), user_sy_before - sy_in);
 
     // Selling the PT straight back returns less SY than we put in, because both
     // legs pay the fee.
     let sy_back = amm.swap_pt_for_sy(&m.user, &pt_out, &0);
     assert!(sy_back > 0 && sy_back < sy_in, "round trip loses the fee");
+    assert_eq!(pt.balance(&m.amm), amm.reserve_pt());
+    assert_eq!(sy.balance(&m.amm), amm.reserve_sy());
 }
 
 #[test]
-fn amm_yt_route_executes_in_the_internal_model() {
-    // The AMM computes the YT flash route numerically against its own reserves;
-    // it does not yet mint PT+YT via the tokenizer or move real tokens. This
-    // test pins that behavior: the route returns a positive YT amount in the
-    // internal-accounting model. Real cross-contract settlement is the open gap
-    // (see README Limitations).
+#[should_panic(expected = "Error(Contract, #16)")]
+fn amm_yt_route_waits_for_ws5_settlement() {
     let env = Env::default();
-    let m = deploy(&env);
+    let m = deploy_settlement_amm(&env);
     let amm = AmmMarketClient::new(&env, &m.amm);
 
     let liquidity = 1_000_000_000_000_i128;
     amm.add_liquidity(&m.user, &liquidity, &liquidity);
 
-    let yt_out = amm.swap_sy_for_yt(&m.user, &1_000_000_000_i128, &0);
-    assert!(yt_out > 0, "the YT route returns a positive amount in the internal model");
+    amm.swap_sy_for_yt(&m.user, &1_000_000_000_i128, &0);
 }

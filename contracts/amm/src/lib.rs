@@ -7,7 +7,9 @@ use core::cmp::min;
 use libm::{exp, floor, log, sqrt};
 use sidereal_shared_types::Market;
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, panic_with_error, Address, Env,
+    auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
+    contract, contracterror, contractimpl, contracttype, panic_with_error, token, vec, Address,
+    Env, IntoVal, MuxedAddress, Symbol,
 };
 
 const WAD: i128 = 1_000_000_000_000_000_000;
@@ -171,11 +173,13 @@ impl AmmMarket {
     }
 
     pub fn reserve_pt(env: Env) -> Result<i128, Error> {
-        Ok(read_state(&env)?.total_pt)
+        let config = read_config(&env)?;
+        Ok(pool_token_balance(&env, &config.pt_token))
     }
 
     pub fn reserve_sy(env: Env) -> Result<i128, Error> {
-        Ok(read_state(&env)?.total_sy)
+        let config = read_config(&env)?;
+        Ok(pool_token_balance(&env, &config.sy_token))
     }
 
     pub fn total_lp(env: Env) -> Result<i128, Error> {
@@ -223,12 +227,14 @@ impl AmmMarket {
         ))
     }
 
-    pub fn quote_sy_for_yt(env: Env, sy_in: i128) -> Result<i128, Error> {
-        Self::quote_sy_for_pt(env, sy_in)
+    pub fn quote_sy_for_yt(_env: Env, sy_in: i128) -> Result<i128, Error> {
+        let _ = sy_in;
+        Err(Error::UnsupportedRoute)
     }
 
-    pub fn quote_yt_for_sy(env: Env, yt_in: i128) -> Result<i128, Error> {
-        Self::quote_pt_for_sy(env, yt_in)
+    pub fn quote_yt_for_sy(_env: Env, yt_in: i128) -> Result<i128, Error> {
+        let _ = yt_in;
+        Err(Error::UnsupportedRoute)
     }
 
     pub fn spot_apy(env: Env) -> Result<i128, Error> {
@@ -308,6 +314,9 @@ impl Market for AmmMarket {
         let comp = precompute_or_panic(env, &config, &state);
         let (sy_out, observed_ln_rate) =
             apply_exact_pt_in_trade_or_panic(env, &config, &mut state, &comp, pt_in, min_sy_out);
+        transfer_into_pool(env, &config.pt_token, &from, pt_in);
+        transfer_out_of_pool(env, &config.sy_token, &from, sy_out);
+        reconcile_reserves(env, &config, &mut state);
         sync_twap(env, &config, &mut state, observed_ln_rate);
         write_state(env, &state);
 
@@ -332,6 +341,9 @@ impl Market for AmmMarket {
 
         let observed_ln_rate =
             apply_exact_sy_in_trade_or_panic(env, &config, &mut state, &comp, sy_in, pt_out);
+        transfer_into_pool(env, &config.sy_token, &from, sy_in);
+        transfer_out_of_pool(env, &config.pt_token, &from, pt_out);
+        reconcile_reserves(env, &config, &mut state);
         sync_twap(env, &config, &mut state, observed_ln_rate);
         write_state(env, &state);
 
@@ -339,48 +351,13 @@ impl Market for AmmMarket {
     }
 
     fn swap_sy_for_yt(env: &Env, _from: Address, _sy_in: i128, _min_yt_out: i128) -> i128 {
-        let from = _from;
-        from.require_auth();
-        require_bounded_amount(env, _sy_in);
-
-        let config = read_config_or_panic(env);
-        require_live(env, &config);
-
-        let mut state = read_state_or_panic(env);
-        require_seeded(env, &state);
-
-        let comp = precompute_or_panic(env, &config, &state);
-        let yt_out = exact_sy_in_pt_out_or_panic(env, &config, &state, &comp, _sy_in);
-        if yt_out < _min_yt_out {
-            panic_with_error!(env, Error::SlippageExceeded);
-        }
-
-        let observed_ln_rate =
-            apply_exact_sy_in_trade_or_panic(env, &config, &mut state, &comp, _sy_in, yt_out);
-        sync_twap(env, &config, &mut state, observed_ln_rate);
-        write_state(env, &state);
-
-        yt_out
+        let _ = (_from, _sy_in, _min_yt_out);
+        panic_with_error!(env, Error::UnsupportedRoute)
     }
 
     fn swap_yt_for_sy(env: &Env, _from: Address, _yt_in: i128, _min_sy_out: i128) -> i128 {
-        let from = _from;
-        from.require_auth();
-        require_bounded_amount(env, _yt_in);
-
-        let config = read_config_or_panic(env);
-        require_live(env, &config);
-
-        let mut state = read_state_or_panic(env);
-        require_seeded(env, &state);
-
-        let comp = precompute_or_panic(env, &config, &state);
-        let (sy_out, observed_ln_rate) =
-            apply_exact_pt_in_trade_or_panic(env, &config, &mut state, &comp, _yt_in, _min_sy_out);
-        sync_twap(env, &config, &mut state, observed_ln_rate);
-        write_state(env, &state);
-
-        sy_out
+        let _ = (_from, _yt_in, _min_sy_out);
+        panic_with_error!(env, Error::UnsupportedRoute)
     }
 
     fn add_liquidity(env: &Env, from: Address, pt_in: i128, sy_in: i128) -> i128 {
@@ -393,8 +370,7 @@ impl Market for AmmMarket {
 
         let mut state = read_state_or_panic(env);
         let now = env.ledger().timestamp();
-
-        let lp_out = if state.total_lp == 0 {
+        let (pt_used, sy_used, lp_out) = if state.total_lp == 0 {
             let gross_lp = integer_sqrt_or_panic(env, checked_mul(env, pt_in, sy_in));
             if gross_lp <= MINIMUM_LIQUIDITY {
                 panic_with_error!(env, Error::InsufficientLiquidity);
@@ -416,7 +392,7 @@ impl Market for AmmMarket {
             state.twap_ln_implied_rate = state.last_ln_implied_rate;
             state.last_observation = now;
 
-            gross_lp - MINIMUM_LIQUIDITY
+            (pt_in, sy_in, gross_lp - MINIMUM_LIQUIDITY)
         } else {
             let lp_by_pt = mul_div_down_or_panic(env, pt_in, state.total_lp, state.total_pt);
             let lp_by_sy = mul_div_down_or_panic(env, sy_in, state.total_lp, state.total_sy);
@@ -432,11 +408,14 @@ impl Market for AmmMarket {
             state.total_sy = checked_bounded_reserve_add(env, state.total_sy, sy_used);
             state.total_lp = checked_add(env, state.total_lp, lp_out);
 
-            lp_out
+            (pt_used, sy_used, lp_out)
         };
 
         let current_lp = read_lp_balance(env, from.clone());
-        write_lp_balance(env, from, checked_add(env, current_lp, lp_out));
+        write_lp_balance(env, from.clone(), checked_add(env, current_lp, lp_out));
+        transfer_into_pool(env, &config.pt_token, &from, pt_used);
+        transfer_into_pool(env, &config.sy_token, &from, sy_used);
+        reconcile_reserves(env, &config, &mut state);
         write_state(env, &state);
         lp_out
     }
@@ -465,10 +444,13 @@ impl Market for AmmMarket {
             panic_with_error!(env, Error::InsufficientLiquidity);
         }
 
-        write_lp_balance(env, from, checked_sub(env, holder_lp, lp_in));
+        write_lp_balance(env, from.clone(), checked_sub(env, holder_lp, lp_in));
         state.total_lp = checked_sub(env, state.total_lp, lp_in);
         state.total_sy = checked_sub(env, state.total_sy, sy_out);
         state.total_pt = checked_sub(env, state.total_pt, pt_out);
+        transfer_out_of_pool(env, &config.pt_token, &from, pt_out);
+        transfer_out_of_pool(env, &config.sy_token, &from, sy_out);
+        reconcile_reserves(env, &config, &mut state);
         write_state(env, &state);
 
         (pt_out, sy_out)
@@ -544,6 +526,43 @@ fn write_lp_balance(env: &Env, holder: Address, balance: i128) {
     env.storage()
         .instance()
         .set(&DataKey::LpBalance(holder), &balance);
+}
+
+fn pool_token_balance(env: &Env, token_id: &Address) -> i128 {
+    token::TokenClient::new(env, token_id).balance(&env.current_contract_address())
+}
+
+fn reconcile_reserves(env: &Env, config: &Config, state: &mut State) {
+    state.total_pt = pool_token_balance(env, &config.pt_token);
+    state.total_sy = pool_token_balance(env, &config.sy_token);
+}
+
+fn transfer_into_pool(env: &Env, token_id: &Address, from: &Address, amount: i128) {
+    let pool = env.current_contract_address();
+    let to = MuxedAddress::from(&pool);
+    token::TokenClient::new(env, token_id).transfer(from, &to, &amount);
+}
+
+fn transfer_out_of_pool(env: &Env, token_id: &Address, to: &Address, amount: i128) {
+    let pool = env.current_contract_address();
+    let to_muxed = MuxedAddress::from(to);
+    env.authorize_as_current_contract(vec![
+        env,
+        InvokerContractAuthEntry::Contract(SubContractInvocation {
+            context: ContractContext {
+                contract: token_id.clone(),
+                fn_name: Symbol::new(env, "transfer"),
+                args: vec![
+                    env,
+                    pool.clone().into_val(env),
+                    to_muxed.clone().into_val(env),
+                    amount.into_val(env),
+                ],
+            },
+            sub_invocations: vec![env],
+        }),
+    ]);
+    token::TokenClient::new(env, token_id).transfer(&pool, &to_muxed, &amount);
 }
 
 fn require_live(env: &Env, config: &Config) {
@@ -1085,6 +1104,7 @@ mod test {
     const INITIAL_ANCHOR: i128 = 1_050_000_000_000_000_000;
     const FEE_BPS: i128 = 10;
     const TWAP_WINDOW: u64 = 30 * 60;
+    const INITIAL_TOKEN_BALANCE: i128 = 10_000_000;
 
     struct Fixture {
         env: Env,
@@ -1107,10 +1127,17 @@ mod test {
         let contract_id = env.register(AmmMarket, ());
         let client = AmmMarketClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
-        let pt_token = Address::generate(&env);
-        let sy_token = Address::generate(&env);
+        let pt_token = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
+        let sy_token = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let tokenizer = Address::generate(&env);
         let bob = Address::generate(&env);
+
+        token::StellarAssetClient::new(&env, &pt_token).mint(&admin, &INITIAL_TOKEN_BALANCE);
+        token::StellarAssetClient::new(&env, &sy_token).mint(&admin, &INITIAL_TOKEN_BALANCE);
 
         Fixture {
             env,
@@ -1122,6 +1149,38 @@ mod test {
             tokenizer,
             bob,
         }
+    }
+
+    fn pt_balance(fixture: &Fixture, holder: &Address) -> i128 {
+        token::TokenClient::new(&fixture.env, &fixture.pt_token).balance(holder)
+    }
+
+    fn sy_balance(fixture: &Fixture, holder: &Address) -> i128 {
+        token::TokenClient::new(&fixture.env, &fixture.sy_token).balance(holder)
+    }
+
+    fn pool_pt_balance(fixture: &Fixture) -> i128 {
+        pt_balance(fixture, &fixture.contract_id)
+    }
+
+    fn pool_sy_balance(fixture: &Fixture) -> i128 {
+        sy_balance(fixture, &fixture.contract_id)
+    }
+
+    fn mint_pt(fixture: &Fixture, holder: &Address, amount: i128) {
+        token::StellarAssetClient::new(&fixture.env, &fixture.pt_token).mint(holder, &amount);
+    }
+
+    fn mint_sy(fixture: &Fixture, holder: &Address, amount: i128) {
+        token::StellarAssetClient::new(&fixture.env, &fixture.sy_token).mint(holder, &amount);
+    }
+
+    fn burn_pt(fixture: &Fixture, holder: &Address, amount: i128) {
+        token::TokenClient::new(&fixture.env, &fixture.pt_token).burn(holder, &amount);
+    }
+
+    fn burn_sy(fixture: &Fixture, holder: &Address, amount: i128) {
+        token::TokenClient::new(&fixture.env, &fixture.sy_token).burn(holder, &amount);
     }
 
     fn initialize(fixture: &Fixture) {
@@ -1245,6 +1304,8 @@ mod test {
     fn first_liquidity_seeds_market_state() {
         let fixture = fixture(NOW);
         initialize(&fixture);
+        let admin_pt_before = pt_balance(&fixture, &fixture.admin);
+        let admin_sy_before = sy_balance(&fixture, &fixture.admin);
 
         let lp_out = fixture
             .client
@@ -1259,12 +1320,24 @@ mod test {
         assert!(state.last_ln_implied_rate > 0);
         assert_eq!(state.last_ln_implied_rate, state.twap_ln_implied_rate);
         assert!(fixture.client.implied_apy() > 0);
+        assert_eq!(pool_pt_balance(&fixture), state.total_pt);
+        assert_eq!(pool_sy_balance(&fixture), state.total_sy);
+        assert_eq!(
+            pt_balance(&fixture, &fixture.admin),
+            admin_pt_before - 10_000
+        );
+        assert_eq!(
+            sy_balance(&fixture, &fixture.admin),
+            admin_sy_before - 10_000
+        );
     }
 
     #[test]
     fn remove_liquidity_returns_pro_rata_assets() {
         let fixture = fixture(NOW);
         initialize(&fixture);
+        let admin_pt_before = pt_balance(&fixture, &fixture.admin);
+        let admin_sy_before = sy_balance(&fixture, &fixture.admin);
         fixture
             .client
             .add_liquidity(&fixture.admin, &10_000, &10_000);
@@ -1277,6 +1350,16 @@ mod test {
         assert_eq!(state.total_sy, 1_000);
         assert_eq!(state.total_lp, 1_000);
         assert_eq!(fixture.client.lp_balance(&fixture.admin), 0);
+        assert_eq!(pool_pt_balance(&fixture), 1_000);
+        assert_eq!(pool_sy_balance(&fixture), 1_000);
+        assert_eq!(
+            pt_balance(&fixture, &fixture.admin),
+            admin_pt_before - 1_000
+        );
+        assert_eq!(
+            sy_balance(&fixture, &fixture.admin),
+            admin_sy_before - 1_000
+        );
     }
 
     #[test]
@@ -1298,6 +1381,9 @@ mod test {
         fixture
             .client
             .add_liquidity(&fixture.admin, &20_000, &20_000);
+        mint_pt(&fixture, &fixture.admin, 1_000);
+        let admin_pt_before = pt_balance(&fixture, &fixture.admin);
+        let admin_sy_before = sy_balance(&fixture, &fixture.admin);
 
         fixture.env.ledger().set_timestamp(NOW + 60);
         let sy_out = fixture.client.swap_pt_for_sy(&fixture.admin, &1_000, &1);
@@ -1308,6 +1394,16 @@ mod test {
         assert_eq!(state.total_sy, 20_000 - sy_out);
         assert_eq!(state.last_observation, NOW + 60);
         assert!(state.twap_ln_implied_rate > 0);
+        assert_eq!(pool_pt_balance(&fixture), state.total_pt);
+        assert_eq!(pool_sy_balance(&fixture), state.total_sy);
+        assert_eq!(
+            pt_balance(&fixture, &fixture.admin),
+            admin_pt_before - 1_000
+        );
+        assert_eq!(
+            sy_balance(&fixture, &fixture.admin),
+            admin_sy_before + sy_out
+        );
     }
 
     #[test]
@@ -1317,6 +1413,9 @@ mod test {
         fixture
             .client
             .add_liquidity(&fixture.admin, &20_000, &20_000);
+        mint_sy(&fixture, &fixture.admin, 1_000);
+        let admin_pt_before = pt_balance(&fixture, &fixture.admin);
+        let admin_sy_before = sy_balance(&fixture, &fixture.admin);
 
         fixture.env.ledger().set_timestamp(NOW + 60);
         let pt_out = fixture.client.swap_sy_for_pt(&fixture.admin, &1_000, &1);
@@ -1327,6 +1426,16 @@ mod test {
         assert_eq!(state.total_sy, 21_000);
         assert_eq!(state.last_observation, NOW + 60);
         assert!(state.twap_ln_implied_rate > 0);
+        assert_eq!(pool_pt_balance(&fixture), state.total_pt);
+        assert_eq!(pool_sy_balance(&fixture), state.total_sy);
+        assert_eq!(
+            pt_balance(&fixture, &fixture.admin),
+            admin_pt_before + pt_out
+        );
+        assert_eq!(
+            sy_balance(&fixture, &fixture.admin),
+            admin_sy_before - 1_000
+        );
     }
 
     #[test]
@@ -1344,18 +1453,6 @@ mod test {
             .client
             .swap_sy_for_pt(&pt_fixture.admin, &sy_in, &1);
         let after = pt_fixture.client.state();
-        assert_eq!(after.total_sy, before.total_sy + sy_in);
-
-        let yt_fixture = fixture(NOW);
-        initialize(&yt_fixture);
-        yt_fixture
-            .client
-            .add_liquidity(&yt_fixture.admin, &20_000, &20_000);
-        let before = yt_fixture.client.state();
-        yt_fixture
-            .client
-            .swap_sy_for_yt(&yt_fixture.admin, &sy_in, &1);
-        let after = yt_fixture.client.state();
         assert_eq!(after.total_sy, before.total_sy + sy_in);
     }
 
@@ -1386,7 +1483,8 @@ mod test {
     }
 
     #[test]
-    fn swap_sy_for_yt_routes_through_same_market_state_as_pt_purchase() {
+    #[should_panic(expected = "Error(Contract, #16)")]
+    fn swap_sy_for_yt_is_held_for_ws5() {
         let fixture = fixture(NOW);
         initialize(&fixture);
         fixture
@@ -1394,17 +1492,12 @@ mod test {
             .add_liquidity(&fixture.admin, &20_000, &20_000);
 
         fixture.env.ledger().set_timestamp(NOW + 60);
-        let yt_out = fixture.client.swap_sy_for_yt(&fixture.admin, &1_000, &1);
-        let state = fixture.client.state();
-
-        assert!(yt_out > 0);
-        assert_eq!(state.total_pt, 20_000 - yt_out);
-        assert_eq!(state.total_sy, 21_000);
-        assert_eq!(state.last_observation, NOW + 60);
+        fixture.client.swap_sy_for_yt(&fixture.admin, &1_000, &1);
     }
 
     #[test]
-    fn swap_yt_for_sy_routes_through_same_market_state_as_pt_sale() {
+    #[should_panic(expected = "Error(Contract, #16)")]
+    fn swap_yt_for_sy_is_held_for_ws5() {
         let fixture = fixture(NOW);
         initialize(&fixture);
         fixture
@@ -1412,25 +1505,19 @@ mod test {
             .add_liquidity(&fixture.admin, &20_000, &20_000);
 
         fixture.env.ledger().set_timestamp(NOW + 60);
-        let sy_out = fixture.client.swap_yt_for_sy(&fixture.admin, &1_000, &1);
-        let state = fixture.client.state();
-
-        assert!(sy_out > 0);
-        assert_eq!(state.total_pt, 21_000);
-        assert_eq!(state.total_sy, 20_000 - sy_out);
-        assert_eq!(state.last_observation, NOW + 60);
+        fixture.client.swap_yt_for_sy(&fixture.admin, &1_000, &1);
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #11)")]
-    fn swap_sy_for_yt_respects_min_out() {
+    #[should_panic(expected = "Error(Contract, #16)")]
+    fn swap_sy_for_yt_rejects_until_flash_route_lands() {
         let fixture = fixture(NOW);
         initialize(&fixture);
         fixture
             .client
             .add_liquidity(&fixture.admin, &20_000, &20_000);
 
-        fixture.client.swap_sy_for_yt(&fixture.admin, &100, &10_000);
+        fixture.client.swap_sy_for_yt(&fixture.admin, &100, &1);
     }
 
     #[test]
@@ -1450,6 +1537,8 @@ mod test {
         assert_eq!(fixture.client.total_lp(), state.total_lp);
         assert_eq!(fixture.client.spot_apy(), fixture.client.implied_apy());
         assert!(fixture.client.twap_apy() > 0);
+        assert_eq!(fixture.client.reserve_pt(), pool_pt_balance(&fixture));
+        assert_eq!(fixture.client.reserve_sy(), pool_sy_balance(&fixture));
     }
 
     #[test]
@@ -1508,36 +1597,28 @@ mod test {
 
     #[test]
     fn quote_accessors_match_yt_route_execution_without_mutating_state() {
-        let first_fixture = fixture(NOW);
-        initialize(&first_fixture);
-        first_fixture
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
             .client
-            .add_liquidity(&first_fixture.admin, &20_000, &20_000);
+            .add_liquidity(&fixture.admin, &20_000, &20_000);
 
-        let before = first_fixture.client.state();
-        let quoted_yt_out = first_fixture.client.quote_sy_for_yt(&1_000);
-        let quoted_sy_out = first_fixture.client.quote_yt_for_sy(&1_000);
-        let after_quote = first_fixture.client.state();
+        let before = fixture.client.state();
+        assert_eq!(
+            fixture.env.as_contract(&fixture.contract_id, || {
+                AmmMarket::quote_sy_for_yt(fixture.env.clone(), 1_000)
+            }),
+            Err(Error::UnsupportedRoute)
+        );
+        assert_eq!(
+            fixture.env.as_contract(&fixture.contract_id, || {
+                AmmMarket::quote_yt_for_sy(fixture.env.clone(), 1_000)
+            }),
+            Err(Error::UnsupportedRoute)
+        );
+        let after_quote = fixture.client.state();
 
         assert_eq!(before, after_quote);
-        assert_eq!(
-            quoted_yt_out,
-            first_fixture
-                .client
-                .swap_sy_for_yt(&first_fixture.admin, &1_000, &1)
-        );
-
-        let second_fixture = fixture(NOW);
-        initialize(&second_fixture);
-        second_fixture
-            .client
-            .add_liquidity(&second_fixture.admin, &20_000, &20_000);
-        assert_eq!(
-            quoted_sy_out,
-            second_fixture
-                .client
-                .swap_yt_for_sy(&second_fixture.admin, &1_000, &1)
-        );
     }
 
     #[test]
@@ -1567,13 +1648,13 @@ mod test {
             fixture.env.as_contract(&fixture.contract_id, || {
                 AmmMarket::quote_sy_for_yt(fixture.env.clone(), 1_000)
             }),
-            Err(Error::MarketNotSeeded)
+            Err(Error::UnsupportedRoute)
         );
         assert_eq!(
             fixture.env.as_contract(&fixture.contract_id, || {
                 AmmMarket::quote_yt_for_sy(fixture.env.clone(), 1_000)
             }),
-            Err(Error::MarketNotSeeded)
+            Err(Error::UnsupportedRoute)
         );
     }
 
@@ -1602,13 +1683,13 @@ mod test {
             fixture.env.as_contract(&fixture.contract_id, || {
                 AmmMarket::quote_sy_for_yt(fixture.env.clone(), 1_000)
             }),
-            Err(Error::MarketMatured)
+            Err(Error::UnsupportedRoute)
         );
         assert_eq!(
             fixture.env.as_contract(&fixture.contract_id, || {
                 AmmMarket::quote_yt_for_sy(fixture.env.clone(), 1_000)
             }),
-            Err(Error::MarketMatured)
+            Err(Error::UnsupportedRoute)
         );
     }
 
@@ -1618,8 +1699,6 @@ mod test {
         Recombine(i128),
         BuyPt(i128),
         SellPt(i128),
-        BuyYt(i128),
-        SellYt(i128),
     }
 
     #[derive(Clone, Debug)]
@@ -1655,13 +1734,11 @@ mod test {
     }
 
     fn arb_op() -> impl Strategy<Value = ModelOp> {
-        (0u8..6, 1i128..100i128).prop_map(|(kind, amount)| match kind {
+        (0u8..4, 1i128..100i128).prop_map(|(kind, amount)| match kind {
             0 => ModelOp::Split(amount),
             1 => ModelOp::Recombine(amount),
             2 => ModelOp::BuyPt(amount),
-            3 => ModelOp::SellPt(amount),
-            4 => ModelOp::BuyYt(amount),
-            _ => ModelOp::SellYt(amount),
+            _ => ModelOp::SellPt(amount),
         })
     }
 
@@ -1739,12 +1816,18 @@ mod test {
         })]
 
         #[test]
-        fn pt_yt_sy_invariant_holds_across_random_sequences(ops in prop::collection::vec(arb_op(), 1..64)) {
+        fn pt_yt_sy_invariant_holds_across_random_sequences(ops in prop::collection::vec(arb_op(), 1..8)) {
             let fixture = fixture(NOW);
             initialize(&fixture);
+            burn_pt(&fixture, &fixture.admin, INITIAL_TOKEN_BALANCE);
+            burn_sy(&fixture, &fixture.admin, INITIAL_TOKEN_BALANCE);
+            mint_pt(&fixture, &fixture.admin, 2_000_000);
+            mint_sy(&fixture, &fixture.admin, 2_000_000);
             fixture.client.add_liquidity(&fixture.admin, &1_000_000, &1_000_000);
 
             let mut model = PositionModel::new(1_000_000);
+            let mut wallet_pt = 1_000_000;
+            let mut wallet_sy = 1_000_000;
 
             for op in ops {
                 match op {
@@ -1770,49 +1853,37 @@ mod test {
                         model.total_yt_supply -= amount;
                     }
                     ModelOp::BuyPt(amount)
-                        if model.free_sy >= amount && quote_sy_for_pt(&fixture, amount).is_some() =>
+                        if wallet_sy >= amount
+                            && model.free_sy >= amount
+                            && quote_sy_for_pt(&fixture, amount).is_some() =>
                     {
                         let pt_out = fixture.client.swap_sy_for_pt(&fixture.admin, &amount, &1);
+                        wallet_sy -= amount;
+                        wallet_pt += pt_out;
                         model.free_sy -= amount;
                         model.free_pt += pt_out;
                     }
                     ModelOp::SellPt(amount)
-                        if model.free_pt >= amount && quote_pt_for_sy(&fixture, amount).is_some() =>
+                        if wallet_pt >= amount
+                            && model.free_pt >= amount
+                            && quote_pt_for_sy(&fixture, amount).is_some() =>
                     {
                         let sy_out = fixture.client.swap_pt_for_sy(&fixture.admin, &amount, &1);
+                        wallet_pt -= amount;
+                        wallet_sy += sy_out;
                         model.free_pt -= amount;
                         model.free_sy += sy_out;
-                    }
-                    ModelOp::BuyYt(amount)
-                        if model.free_sy >= amount && quote_sy_for_pt(&fixture, amount).is_some() =>
-                    {
-                        let yt_out = fixture.client.swap_sy_for_yt(&fixture.admin, &amount, &1);
-                        model.free_sy -= amount;
-                        model.free_yt += yt_out;
-                        model.escrowed_sy += yt_out;
-                        model.total_pt_supply += yt_out;
-                        model.total_yt_supply += yt_out;
-                    }
-                    ModelOp::SellYt(amount)
-                        if model.free_yt >= amount
-                            && model.escrowed_sy >= amount
-                            && model.total_pt_supply >= amount
-                            && model.total_yt_supply >= amount =>
-                    {
-                        if quote_pt_for_sy(&fixture, amount).is_some() {
-                            let sy_out = fixture.client.swap_yt_for_sy(&fixture.admin, &amount, &1);
-                            model.free_yt -= amount;
-                            model.free_sy += sy_out;
-                            model.escrowed_sy -= amount;
-                            model.total_pt_supply -= amount;
-                            model.total_yt_supply -= amount;
-                        }
                     }
                     _ => {}
                 }
 
                 model.assert_invariant();
             }
+
+            assert_eq!(pt_balance(&fixture, &fixture.admin), wallet_pt);
+            assert_eq!(sy_balance(&fixture, &fixture.admin), wallet_sy);
+            assert_eq!(pool_pt_balance(&fixture), fixture.client.reserve_pt());
+            assert_eq!(pool_sy_balance(&fixture), fixture.client.reserve_sy());
         }
     }
 }
