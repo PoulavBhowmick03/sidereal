@@ -66,6 +66,7 @@ fn deploy(env: &Env) -> Market {
         &admin,
         &pt,
         &sy,
+        &yt,
         &tokenizer,
         &MATURITY,
         &SCALAR_ROOT,
@@ -97,6 +98,9 @@ fn deploy_settlement_amm(env: &Env) -> SettlementMarket {
     let sy = env
         .register_stellar_asset_contract_v2(admin.clone())
         .address();
+    let yt = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
     let amm = env.register(AmmMarket, ());
 
     token::StellarAssetClient::new(env, &pt).mint(&user, &2_000_000_000_000_i128);
@@ -106,6 +110,7 @@ fn deploy_settlement_amm(env: &Env) -> SettlementMarket {
         &admin,
         &pt,
         &sy,
+        &yt,
         &tokenizer,
         &MATURITY,
         &SCALAR_ROOT,
@@ -226,14 +231,37 @@ fn amm_swap_round_trip_charges_fees() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #16)")]
-fn amm_yt_route_waits_for_ws5_settlement() {
+fn yt_flash_route_round_trips_through_the_tokenizer() {
     let env = Env::default();
-    let m = deploy_settlement_amm(&env);
+    let m = deploy(&env);
+    // The flash route has the AMM authorize sub-calls on the tokenizer (split /
+    // recombine) and the token transfers they perform. Allowing non-root
+    // (contract) auth exercises the economics; the exact production
+    // authorize_as_current_contract entries still need a testnet check.
+    env.mock_all_auths_allowing_non_root_auth();
+    let sy = SyWrapperClient::new(&env, &m.sy);
+    let tokenizer = TokenizerClient::new(&env, &m.tokenizer);
     let amm = AmmMarketClient::new(&env, &m.amm);
+    let yt = token::TokenClient::new(&env, &m.yt);
 
-    let liquidity = 1_000_000_000_000_i128;
-    amm.add_liquidity(&m.user, &liquidity, &liquidity);
+    // Seed AMM liquidity: deposit SY, split to obtain PT, add PT + SY.
+    sy.deposit(&m.user, &2_000_000_000_i128);
+    tokenizer.split(&m.user, &1_000_000_000_i128);
+    amm.add_liquidity(&m.user, &800_000_000_i128, &800_000_000_i128);
 
-    amm.swap_sy_for_yt(&m.user, &1_000_000_000_i128, &0);
+    // Buy YT with SY through the flash route. The position is leveraged, so the
+    // YT received exceeds the SY paid, and it is minted to the buyer's balance.
+    let yt_before = yt.balance(&m.user);
+    let sy_in = 1_000_000_i128;
+    let yt_out = amm.swap_sy_for_yt(&m.user, &sy_in, &1);
+    assert!(yt_out > sy_in, "buying YT is leveraged");
+    assert_eq!(yt.balance(&m.user), yt_before + yt_out);
+    assert_eq!(amm.reserve_sy(), sy.balance(&m.amm), "reserves reconciled");
+
+    // Sell the YT straight back through the recombine path for less than face.
+    let sy_out = amm.swap_yt_for_sy(&m.user, &yt_out, &1);
+    assert!(
+        sy_out > 0 && sy_out < yt_out,
+        "selling YT returns less than face"
+    );
 }

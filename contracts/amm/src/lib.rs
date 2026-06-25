@@ -9,7 +9,7 @@ use sidereal_shared_types::Market;
 use soroban_sdk::{
     auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
     contract, contracterror, contractimpl, contracttype, panic_with_error, token, vec, Address,
-    Env, IntoVal, MuxedAddress, Symbol,
+    Env, IntoVal, MuxedAddress, Symbol, Val, Vec,
 };
 
 const WAD: i128 = 1_000_000_000_000_000_000;
@@ -31,6 +31,7 @@ pub struct Config {
     pub admin: Address,
     pub pt_token: Address,
     pub sy_token: Address,
+    pub yt_token: Address,
     pub tokenizer: Address,
     pub maturity: u64,
     pub scalar_root: i128,
@@ -101,6 +102,7 @@ impl AmmMarket {
         admin: Address,
         pt_token: Address,
         sy_token: Address,
+        yt_token: Address,
         tokenizer: Address,
         maturity: u64,
         scalar_root: i128,
@@ -140,6 +142,7 @@ impl AmmMarket {
             admin,
             pt_token,
             sy_token,
+            yt_token,
             tokenizer,
             maturity,
             scalar_root,
@@ -227,14 +230,34 @@ impl AmmMarket {
         ))
     }
 
-    pub fn quote_sy_for_yt(_env: Env, sy_in: i128) -> Result<i128, Error> {
-        let _ = sy_in;
-        Err(Error::UnsupportedRoute)
+    pub fn quote_sy_for_yt(env: Env, sy_in: i128) -> Result<i128, Error> {
+        require_bounded_amount_result(sy_in)?;
+
+        let config = read_config(&env)?;
+        require_live_result(&env, &config)?;
+
+        let state = read_state(&env)?;
+        require_seeded_result(&state)?;
+
+        let comp = precompute_or_panic(&env, &config, &state);
+        Ok(solve_yt_out_for_sy_in(&env, &config, &state, &comp, sy_in))
     }
 
-    pub fn quote_yt_for_sy(_env: Env, yt_in: i128) -> Result<i128, Error> {
-        let _ = yt_in;
-        Err(Error::UnsupportedRoute)
+    pub fn quote_yt_for_sy(env: Env, yt_in: i128) -> Result<i128, Error> {
+        require_bounded_amount_result(yt_in)?;
+
+        let config = read_config(&env)?;
+        require_live_result(&env, &config)?;
+
+        let state = read_state(&env)?;
+        require_seeded_result(&state)?;
+
+        let comp = precompute_or_panic(&env, &config, &state);
+        let sy_cost = exact_pt_out_sy_in_or_panic(&env, &config, &state, &comp, yt_in);
+        if sy_cost >= yt_in {
+            return Err(Error::InsufficientLiquidity);
+        }
+        Ok(yt_in - sy_cost)
     }
 
     pub fn spot_apy(env: Env) -> Result<i128, Error> {
@@ -350,14 +373,73 @@ impl Market for AmmMarket {
         pt_out
     }
 
-    fn swap_sy_for_yt(env: &Env, _from: Address, _sy_in: i128, _min_yt_out: i128) -> i128 {
-        let _ = (_from, _sy_in, _min_yt_out);
-        panic_with_error!(env, Error::UnsupportedRoute)
+    fn swap_sy_for_yt(env: &Env, from: Address, sy_in: i128, min_yt_out: i128) -> i128 {
+        from.require_auth();
+        require_bounded_amount(env, sy_in);
+
+        let config = read_config_or_panic(env);
+        require_live(env, &config);
+
+        let mut state = read_state_or_panic(env);
+        require_seeded(env, &state);
+
+        let comp = precompute_or_panic(env, &config, &state);
+        let yt_out = solve_yt_out_for_sy_in(env, &config, &state, &comp, sy_in);
+        if yt_out < min_yt_out {
+            panic_with_error!(env, Error::SlippageExceeded);
+        }
+
+        // The pool keeps the PT the split mints, so the curve moves as if it
+        // bought `yt_out` PT.
+        let (_, observed_ln_rate) =
+            apply_exact_pt_in_trade_or_panic(env, &config, &mut state, &comp, yt_out, 0);
+
+        // Take the buyer's SY, split pool-funded SY into PT + YT, keep the PT,
+        // and send the YT to the buyer.
+        transfer_into_pool(env, &config.sy_token, &from, sy_in);
+        let (_pt_minted, yt_minted) = flash_split(env, &config, yt_out);
+        transfer_out_of_pool(env, &config.yt_token, &from, yt_minted);
+        reconcile_reserves(env, &config, &mut state);
+        sync_twap(env, &config, &mut state, observed_ln_rate);
+        write_state(env, &state);
+
+        yt_minted
     }
 
-    fn swap_yt_for_sy(env: &Env, _from: Address, _yt_in: i128, _min_sy_out: i128) -> i128 {
-        let _ = (_from, _yt_in, _min_sy_out);
-        panic_with_error!(env, Error::UnsupportedRoute)
+    fn swap_yt_for_sy(env: &Env, from: Address, yt_in: i128, min_sy_out: i128) -> i128 {
+        from.require_auth();
+        require_bounded_amount(env, yt_in);
+
+        let config = read_config_or_panic(env);
+        require_live(env, &config);
+
+        let mut state = read_state_or_panic(env);
+        require_seeded(env, &state);
+
+        let comp = precompute_or_panic(env, &config, &state);
+        let sy_cost = exact_pt_out_sy_in_or_panic(env, &config, &state, &comp, yt_in);
+        let sy_out = checked_sub(env, yt_in, sy_cost);
+        if sy_out <= 0 {
+            panic_with_error!(env, Error::InsufficientLiquidity);
+        }
+        if sy_out < min_sy_out {
+            panic_with_error!(env, Error::SlippageExceeded);
+        }
+
+        // The pool sold `yt_in` PT for `sy_cost` SY into the recombine.
+        let observed_ln_rate =
+            apply_exact_sy_in_trade_or_panic(env, &config, &mut state, &comp, sy_cost, yt_in);
+
+        // Take the seller's YT, recombine pool PT + seller YT into SY, pay the
+        // seller, and keep the spread.
+        transfer_into_pool(env, &config.yt_token, &from, yt_in);
+        let _sy_from_recombine = flash_recombine(env, &config, yt_in);
+        transfer_out_of_pool(env, &config.sy_token, &from, sy_out);
+        reconcile_reserves(env, &config, &mut state);
+        sync_twap(env, &config, &mut state, observed_ln_rate);
+        write_state(env, &state);
+
+        sy_out
     }
 
     fn add_liquidity(env: &Env, from: Address, pt_in: i128, sy_in: i128) -> i128 {
@@ -810,6 +892,158 @@ fn try_exact_pt_out_sy_in(
     Some(checked_add(env, pre_fee_sy_in, fee))
 }
 
+/// Non-panicking SY out for selling `pt_in` PT to the pool, used by the YT-buy
+/// solver. Mirrors exact_pt_in_sy_out_or_panic but returns None instead of
+/// panicking at the liquidity bound.
+fn try_exact_pt_in_sy_out(
+    env: &Env,
+    config: &Config,
+    state: &State,
+    comp: &Precompute,
+    pt_in: i128,
+) -> Option<i128> {
+    if pt_in <= 0 {
+        return None;
+    }
+    let exchange_rate = try_get_exchange_rate(
+        env,
+        state.total_pt,
+        comp.total_asset,
+        comp.rate_scalar,
+        comp.rate_anchor,
+        -pt_in,
+    )?;
+    let pre_fee_sy_out = mul_div_down_or_panic(env, pt_in, WAD, exchange_rate);
+    let fee = mul_div_down_or_panic(env, pre_fee_sy_out, config.fee_bps, BPS_DENOMINATOR);
+    let sy_out = pre_fee_sy_out - fee;
+    if sy_out <= 0 || sy_out >= state.total_sy {
+        return None;
+    }
+    Some(sy_out)
+}
+
+/// Solves for the YT a buyer receives for `sy_in` SY. The pool mints `yt_out`
+/// PT and sells it to itself; the buyer covers the difference between `yt_out`
+/// and that PT sale. `yt_out - sell_pt(yt_out)` is monotonic in `yt_out`, so we
+/// binary search for the largest `yt_out` the buyer can afford.
+fn solve_yt_out_for_sy_in(
+    env: &Env,
+    config: &Config,
+    state: &State,
+    comp: &Precompute,
+    sy_in: i128,
+) -> i128 {
+    let mut low = 1;
+    let mut high = checked_add(env, sy_in, state.total_sy);
+    let mut best = 0;
+    while low <= high {
+        let mid = low + ((high - low) / 2);
+        match try_exact_pt_in_sy_out(env, config, state, comp, mid) {
+            Some(sy_paid) if mid > sy_paid && (mid - sy_paid) <= sy_in => {
+                best = mid;
+                low = mid + 1;
+            }
+            _ => {
+                high = mid - 1;
+            }
+        }
+    }
+    if best <= 0 {
+        panic_with_error!(env, Error::TradeNotFound);
+    }
+    best
+}
+
+/// Calls `tokenizer.split(amm, amount)`, authorizing the call and the SY pull it
+/// performs from the pool, and returns the (pt, yt) minted to the pool.
+///
+/// AUTH CAVEAT: the nested authorization tree is exercised only under
+/// mock_all_auths in tests. The exact production entries (argument encoding for
+/// the muxed SY transfer in particular) need review and a testnet check.
+fn flash_split(env: &Env, config: &Config, amount: i128) -> (i128, i128) {
+    let amm = env.current_contract_address();
+    let split_args: Vec<Val> =
+        soroban_sdk::vec![env, amm.clone().into_val(env), amount.into_val(env)];
+    let pull_args: Vec<Val> = soroban_sdk::vec![
+        env,
+        amm.clone().into_val(env),
+        MuxedAddress::from(&config.tokenizer).into_val(env),
+        amount.into_val(env),
+    ];
+    env.authorize_as_current_contract(vec![
+        env,
+        InvokerContractAuthEntry::Contract(SubContractInvocation {
+            context: ContractContext {
+                contract: config.tokenizer.clone(),
+                fn_name: Symbol::new(env, "split"),
+                args: split_args.clone(),
+            },
+            sub_invocations: vec![
+                env,
+                InvokerContractAuthEntry::Contract(SubContractInvocation {
+                    context: ContractContext {
+                        contract: config.sy_token.clone(),
+                        fn_name: Symbol::new(env, "transfer"),
+                        args: pull_args,
+                    },
+                    sub_invocations: vec![env],
+                }),
+            ],
+        }),
+    ]);
+    env.invoke_contract::<(i128, i128)>(&config.tokenizer, &Symbol::new(env, "split"), split_args)
+}
+
+/// Calls `tokenizer.recombine(amm, amount, amount)`, authorizing the call and
+/// the PT and YT burns it performs on the pool's balances, and returns SY out.
+///
+/// AUTH CAVEAT: same as flash_split.
+fn flash_recombine(env: &Env, config: &Config, amount: i128) -> i128 {
+    let amm = env.current_contract_address();
+    let recombine_args: Vec<Val> = soroban_sdk::vec![
+        env,
+        amm.clone().into_val(env),
+        amount.into_val(env),
+        amount.into_val(env),
+    ];
+    let burn_args: Vec<Val> =
+        soroban_sdk::vec![env, amm.clone().into_val(env), amount.into_val(env)];
+    env.authorize_as_current_contract(vec![
+        env,
+        InvokerContractAuthEntry::Contract(SubContractInvocation {
+            context: ContractContext {
+                contract: config.tokenizer.clone(),
+                fn_name: Symbol::new(env, "recombine"),
+                args: recombine_args.clone(),
+            },
+            sub_invocations: vec![
+                env,
+                InvokerContractAuthEntry::Contract(SubContractInvocation {
+                    context: ContractContext {
+                        contract: config.pt_token.clone(),
+                        fn_name: Symbol::new(env, "burn"),
+                        args: burn_args.clone(),
+                    },
+                    sub_invocations: vec![env],
+                }),
+                InvokerContractAuthEntry::Contract(SubContractInvocation {
+                    context: ContractContext {
+                        contract: config.yt_token.clone(),
+                        fn_name: Symbol::new(env, "burn"),
+                        args: burn_args,
+                    },
+                    sub_invocations: vec![env],
+                }),
+            ],
+        }),
+    ]);
+    env.invoke_contract::<i128>(
+        &config.tokenizer,
+        &Symbol::new(env, "recombine"),
+        recombine_args,
+    )
+}
+
 fn sync_twap(env: &Env, config: &Config, state: &mut State, observed_ln_rate: i128) {
     let now = env.ledger().timestamp();
     let elapsed = now.saturating_sub(state.last_observation);
@@ -1113,6 +1347,7 @@ mod test {
         admin: Address,
         pt_token: Address,
         sy_token: Address,
+        yt_token: Address,
         tokenizer: Address,
         bob: Address,
     }
@@ -1133,6 +1368,11 @@ mod test {
         let sy_token = env
             .register_stellar_asset_contract_v2(admin.clone())
             .address();
+        // A placeholder YT token; the unit fixture uses a stub tokenizer, so the
+        // YT flash routes are exercised in tests/integration instead.
+        let yt_token = env
+            .register_stellar_asset_contract_v2(admin.clone())
+            .address();
         let tokenizer = Address::generate(&env);
         let bob = Address::generate(&env);
 
@@ -1146,6 +1386,7 @@ mod test {
             admin,
             pt_token,
             sy_token,
+            yt_token,
             tokenizer,
             bob,
         }
@@ -1188,6 +1429,7 @@ mod test {
             &fixture.admin,
             &fixture.pt_token,
             &fixture.sy_token,
+            &fixture.yt_token,
             &fixture.tokenizer,
             &MATURITY,
             &SCALAR_ROOT,
@@ -1209,6 +1451,7 @@ mod test {
                 admin: fixture.admin,
                 pt_token: fixture.pt_token,
                 sy_token: fixture.sy_token,
+                yt_token: fixture.yt_token,
                 tokenizer: fixture.tokenizer,
                 maturity: MATURITY,
                 scalar_root: SCALAR_ROOT,
@@ -1244,6 +1487,7 @@ mod test {
             &fixture.admin,
             &fixture.pt_token,
             &fixture.sy_token,
+            &fixture.yt_token,
             &fixture.tokenizer,
             &MATURITY,
             &(MAX_FLOAT_HELPER_SCALAR_ROOT + 1),
@@ -1482,42 +1726,35 @@ mod test {
         );
     }
 
+    // The YT flash swaps move real tokens through the tokenizer and are
+    // exercised end to end in tests/integration. Here we assert the pure
+    // pricing the routes are built on.
     #[test]
-    #[should_panic(expected = "Error(Contract, #16)")]
-    fn swap_sy_for_yt_is_held_for_ws5() {
+    fn quote_sy_for_yt_is_leveraged() {
         let fixture = fixture(NOW);
         initialize(&fixture);
         fixture
             .client
             .add_liquidity(&fixture.admin, &20_000, &20_000);
 
-        fixture.env.ledger().set_timestamp(NOW + 60);
-        fixture.client.swap_sy_for_yt(&fixture.admin, &1_000, &1);
+        // Buying YT is leveraged: each SY buys more than its face in YT,
+        // because the freshly minted PT is sold to fund the position.
+        let yt_out = fixture.client.quote_sy_for_yt(&1_000);
+        assert!(yt_out > 1_000);
     }
 
     #[test]
-    #[should_panic(expected = "Error(Contract, #16)")]
-    fn swap_yt_for_sy_is_held_for_ws5() {
+    fn quote_yt_for_sy_is_below_face() {
         let fixture = fixture(NOW);
         initialize(&fixture);
         fixture
             .client
             .add_liquidity(&fixture.admin, &20_000, &20_000);
 
-        fixture.env.ledger().set_timestamp(NOW + 60);
-        fixture.client.swap_yt_for_sy(&fixture.admin, &1_000, &1);
-    }
-
-    #[test]
-    #[should_panic(expected = "Error(Contract, #16)")]
-    fn swap_sy_for_yt_rejects_until_flash_route_lands() {
-        let fixture = fixture(NOW);
-        initialize(&fixture);
-        fixture
-            .client
-            .add_liquidity(&fixture.admin, &20_000, &20_000);
-
-        fixture.client.swap_sy_for_yt(&fixture.admin, &100, &1);
+        // Selling YT yields less SY than its face: PT must be repurchased to
+        // complete the recombine.
+        let sy_out = fixture.client.quote_yt_for_sy(&1_000);
+        assert!(sy_out > 0 && sy_out < 1_000);
     }
 
     #[test]
@@ -1596,7 +1833,7 @@ mod test {
     }
 
     #[test]
-    fn quote_accessors_match_yt_route_execution_without_mutating_state() {
+    fn quote_yt_accessors_do_not_mutate_state() {
         let fixture = fixture(NOW);
         initialize(&fixture);
         fixture
@@ -1604,18 +1841,8 @@ mod test {
             .add_liquidity(&fixture.admin, &20_000, &20_000);
 
         let before = fixture.client.state();
-        assert_eq!(
-            fixture.env.as_contract(&fixture.contract_id, || {
-                AmmMarket::quote_sy_for_yt(fixture.env.clone(), 1_000)
-            }),
-            Err(Error::UnsupportedRoute)
-        );
-        assert_eq!(
-            fixture.env.as_contract(&fixture.contract_id, || {
-                AmmMarket::quote_yt_for_sy(fixture.env.clone(), 1_000)
-            }),
-            Err(Error::UnsupportedRoute)
-        );
+        assert!(fixture.client.quote_sy_for_yt(&1_000) > 0);
+        assert!(fixture.client.quote_yt_for_sy(&1_000) > 0);
         let after_quote = fixture.client.state();
 
         assert_eq!(before, after_quote);
@@ -1648,13 +1875,13 @@ mod test {
             fixture.env.as_contract(&fixture.contract_id, || {
                 AmmMarket::quote_sy_for_yt(fixture.env.clone(), 1_000)
             }),
-            Err(Error::UnsupportedRoute)
+            Err(Error::MarketNotSeeded)
         );
         assert_eq!(
             fixture.env.as_contract(&fixture.contract_id, || {
                 AmmMarket::quote_yt_for_sy(fixture.env.clone(), 1_000)
             }),
-            Err(Error::UnsupportedRoute)
+            Err(Error::MarketNotSeeded)
         );
     }
 
@@ -1683,13 +1910,13 @@ mod test {
             fixture.env.as_contract(&fixture.contract_id, || {
                 AmmMarket::quote_sy_for_yt(fixture.env.clone(), 1_000)
             }),
-            Err(Error::UnsupportedRoute)
+            Err(Error::MarketMatured)
         );
         assert_eq!(
             fixture.env.as_contract(&fixture.contract_id, || {
                 AmmMarket::quote_yt_for_sy(fixture.env.clone(), 1_000)
             }),
-            Err(Error::UnsupportedRoute)
+            Err(Error::MarketMatured)
         );
     }
 
