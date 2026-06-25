@@ -143,6 +143,14 @@ fn split_then_recombine_preserves_sy() {
     assert_eq!(pos.pt_balance, pt);
     assert_eq!(pos.yt_balance, yt);
 
+    // The tokenizer custodies the SY now; the holder's SY moved into escrow.
+    assert_eq!(
+        tokenizer.escrowed_sy(),
+        shares,
+        "escrow equals outstanding PT"
+    );
+    assert_eq!(sy.balance(&m.user), 0);
+
     // PT + YT recombine back into exactly the SY we started with.
     let sy_back = tokenizer.recombine(&m.user, &pt, &yt);
     assert_eq!(sy_back, shares, "PT + YT = SY invariant across contracts");
@@ -150,6 +158,8 @@ fn split_then_recombine_preserves_sy() {
     let after = tokenizer.position(&m.user);
     assert_eq!(after.pt_balance, 0);
     assert_eq!(after.yt_balance, 0);
+    assert_eq!(tokenizer.escrowed_sy(), 0, "escrow drains on recombine");
+    assert_eq!(sy.balance(&m.user), shares, "holder gets their SY back");
 }
 
 #[test]

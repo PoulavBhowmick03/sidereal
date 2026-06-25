@@ -2,7 +2,11 @@
 
 #![cfg_attr(target_family = "wasm", no_std)]
 
-use soroban_sdk::{contract, contracterror, contractimpl, contracttype, Address, Env};
+use soroban_sdk::{
+    auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
+    contract, contracterror, contractimpl, contracttype, token, vec, Address, Env, IntoVal,
+    MuxedAddress, Symbol, Val, Vec,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
@@ -14,6 +18,7 @@ pub struct Config {
     pub maturity: u64,
 }
 
+/// A holder's PT and YT balances, read from the real token contracts.
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct Position {
@@ -25,8 +30,6 @@ pub struct Position {
 #[contracttype]
 enum DataKey {
     Config,
-    EscrowedSy(u64),
-    Position(Address, u64),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -39,9 +42,7 @@ pub enum Error {
     InvalidAmount = 4,
     AmountMismatch = 5,
     Matured = 6,
-    InsufficientPosition = 7,
     LiveMarket = 8,
-    MathOverflow = 9,
 }
 
 #[contract]
@@ -111,56 +112,42 @@ impl Tokenizer {
         Ok(pt_amount)
     }
 
+    /// PT and YT balances the holder currently owns, read from the token
+    /// contracts.
     pub fn position(env: Env, holder: Address) -> Result<Position, Error> {
         let config = Self::read_config(&env)?;
-        Ok(env
-            .storage()
-            .instance()
-            .get(&DataKey::Position(holder, config.maturity))
-            .unwrap_or(Position {
-                pt_balance: 0,
-                yt_balance: 0,
-            }))
+        Ok(Position {
+            pt_balance: token_balance(&env, &config.pt_token, &holder),
+            yt_balance: token_balance(&env, &config.yt_token, &holder),
+        })
     }
 
+    /// SY the tokenizer custodies, equal to the outstanding PT (and YT) supply.
     pub fn escrowed_sy(env: Env) -> Result<i128, Error> {
         let config = Self::read_config(&env)?;
-        Ok(env
-            .storage()
-            .instance()
-            .get(&DataKey::EscrowedSy(config.maturity))
-            .unwrap_or(0))
+        Ok(token_balance(
+            &env,
+            &config.sy_token,
+            &env.current_contract_address(),
+        ))
     }
 
+    /// Pulls `sy_amount` SY from `from` into the tokenizer and mints equal PT
+    /// and YT to `from`.
     pub fn split(env: Env, from: Address, sy_amount: i128) -> Result<(i128, i128), Error> {
         from.require_auth();
         Self::require_live(&env)?;
         Self::require_positive_amount(sy_amount)?;
-
         let config = Self::read_config(&env)?;
-        let mut position = Self::position(env.clone(), from.clone())?;
-        position.pt_balance = position
-            .pt_balance
-            .checked_add(sy_amount)
-            .ok_or(Error::MathOverflow)?;
-        position.yt_balance = position
-            .yt_balance
-            .checked_add(sy_amount)
-            .ok_or(Error::MathOverflow)?;
 
-        let escrowed_sy = Self::escrowed_sy(env.clone())?
-            .checked_add(sy_amount)
-            .ok_or(Error::MathOverflow)?;
-        env.storage()
-            .instance()
-            .set(&DataKey::Position(from, config.maturity), &position);
-        env.storage()
-            .instance()
-            .set(&DataKey::EscrowedSy(config.maturity), &escrowed_sy);
+        pull_token(&env, &config.sy_token, &from, sy_amount);
+        mint_token(&env, &config.pt_token, &from, sy_amount);
+        mint_token(&env, &config.yt_token, &from, sy_amount);
 
         Ok((sy_amount, sy_amount))
     }
 
+    /// Burns equal PT and YT from `from` and returns the SY one-to-one.
     pub fn recombine(
         env: Env,
         from: Address,
@@ -177,62 +164,24 @@ impl Tokenizer {
         }
 
         let config = Self::read_config(&env)?;
-        let mut position = Self::position(env.clone(), from.clone())?;
-        if position.pt_balance < pt_amount || position.yt_balance < yt_amount {
-            return Err(Error::InsufficientPosition);
-        }
 
-        position.pt_balance = position
-            .pt_balance
-            .checked_sub(pt_amount)
-            .ok_or(Error::InsufficientPosition)?;
-        position.yt_balance = position
-            .yt_balance
-            .checked_sub(yt_amount)
-            .ok_or(Error::InsufficientPosition)?;
-
-        let escrowed_sy = Self::escrowed_sy(env.clone())?;
-        let escrowed_sy = escrowed_sy
-            .checked_sub(pt_amount)
-            .ok_or(Error::InsufficientPosition)?;
-
-        env.storage()
-            .instance()
-            .set(&DataKey::Position(from, config.maturity), &position);
-        env.storage()
-            .instance()
-            .set(&DataKey::EscrowedSy(config.maturity), &escrowed_sy);
+        burn_token(&env, &config.pt_token, &from, pt_amount);
+        burn_token(&env, &config.yt_token, &from, yt_amount);
+        push_token(&env, &config.sy_token, &from, pt_amount);
 
         Ok(pt_amount)
     }
 
+    /// After maturity, burns `pt_amount` PT from `from` and returns SY 1:1. YT
+    /// is worthless past maturity.
     pub fn redeem_at_maturity(env: Env, from: Address, pt_amount: i128) -> Result<i128, Error> {
         from.require_auth();
         Self::require_matured(&env)?;
         Self::require_positive_amount(pt_amount)?;
-
         let config = Self::read_config(&env)?;
-        let mut position = Self::position(env.clone(), from.clone())?;
-        if position.pt_balance < pt_amount {
-            return Err(Error::InsufficientPosition);
-        }
 
-        position.pt_balance = position
-            .pt_balance
-            .checked_sub(pt_amount)
-            .ok_or(Error::InsufficientPosition)?;
-
-        let escrowed_sy = Self::escrowed_sy(env.clone())?;
-        let escrowed_sy = escrowed_sy
-            .checked_sub(pt_amount)
-            .ok_or(Error::InsufficientPosition)?;
-
-        env.storage()
-            .instance()
-            .set(&DataKey::Position(from, config.maturity), &position);
-        env.storage()
-            .instance()
-            .set(&DataKey::EscrowedSy(config.maturity), &escrowed_sy);
+        burn_token(&env, &config.pt_token, &from, pt_amount);
+        push_token(&env, &config.sy_token, &from, pt_amount);
 
         Ok(pt_amount)
     }
@@ -269,6 +218,60 @@ impl Tokenizer {
 
         Ok(())
     }
+}
+
+fn token_balance(env: &Env, token_id: &Address, who: &Address) -> i128 {
+    token::TokenClient::new(env, token_id).balance(who)
+}
+
+/// Pulls `amount` of `token_id` from `from` into the tokenizer (holder-authorized).
+fn pull_token(env: &Env, token_id: &Address, from: &Address, amount: i128) {
+    let to = MuxedAddress::from(&env.current_contract_address());
+    token::TokenClient::new(env, token_id).transfer(from, &to, &amount);
+}
+
+/// Burns `amount` of `token_id` from `from` (holder-authorized).
+fn burn_token(env: &Env, token_id: &Address, from: &Address, amount: i128) {
+    token::TokenClient::new(env, token_id).burn(from, &amount);
+}
+
+/// Mints `amount` of `token_id` to `to`, authorizing the call as the tokenizer
+/// since the token gates mint on the tokenizer's address.
+fn mint_token(env: &Env, token_id: &Address, to: &Address, amount: i128) {
+    let args: Vec<Val> = vec![env, to.into_val(env), amount.into_val(env)];
+    authorize_self_call(env, token_id, "mint", args.clone());
+    env.invoke_contract::<()>(token_id, &Symbol::new(env, "mint"), args);
+}
+
+/// Sends `amount` of `token_id` from the tokenizer to `to`, authorizing the
+/// transfer as the tokenizer (it is moving its own custodied balance).
+fn push_token(env: &Env, token_id: &Address, to: &Address, amount: i128) {
+    let me = env.current_contract_address();
+    let to_muxed = MuxedAddress::from(to);
+    let args: Vec<Val> = vec![
+        env,
+        me.clone().into_val(env),
+        to_muxed.clone().into_val(env),
+        amount.into_val(env),
+    ];
+    authorize_self_call(env, token_id, "transfer", args);
+    token::TokenClient::new(env, token_id).transfer(&me, &to_muxed, &amount);
+}
+
+/// Authorizes a sub-invocation of `token_id` as the current contract, so a
+/// callee's `require_auth` on the tokenizer's address succeeds.
+fn authorize_self_call(env: &Env, token_id: &Address, fn_name: &str, args: Vec<Val>) {
+    env.authorize_as_current_contract(vec![
+        env,
+        InvokerContractAuthEntry::Contract(SubContractInvocation {
+            context: ContractContext {
+                contract: token_id.clone(),
+                fn_name: Symbol::new(env, fn_name),
+                args,
+            },
+            sub_invocations: vec![env],
+        }),
+    ]);
 }
 
 #[cfg(test)]
@@ -326,16 +329,14 @@ mod test {
     #[test]
     fn initialize_stores_config() {
         let fixture = fixture(NOW);
-
         initialize(&fixture);
-
         assert_eq!(
             fixture.client.config(),
             Config {
-                admin: fixture.admin,
-                sy_token: fixture.sy_token,
-                pt_token: fixture.pt_token,
-                yt_token: fixture.yt_token,
+                admin: fixture.admin.clone(),
+                sy_token: fixture.sy_token.clone(),
+                pt_token: fixture.pt_token.clone(),
+                yt_token: fixture.yt_token.clone(),
                 maturity: MATURITY,
             }
         );
@@ -347,7 +348,6 @@ mod test {
     #[should_panic(expected = "Error(Contract, #3)")]
     fn initialize_rejects_past_maturity() {
         let fixture = fixture(NOW);
-
         fixture.client.initialize(
             &fixture.admin,
             &fixture.sy_token,
@@ -361,7 +361,6 @@ mod test {
     fn preview_split_returns_equal_pt_and_yt() {
         let fixture = fixture(NOW);
         initialize(&fixture);
-
         assert_eq!(fixture.client.preview_split(&100), (100, 100));
     }
 
@@ -369,7 +368,6 @@ mod test {
     fn preview_recombine_returns_sy_for_equal_pt_and_yt() {
         let fixture = fixture(NOW);
         initialize(&fixture);
-
         assert_eq!(fixture.client.preview_recombine(&100, &100), 100);
     }
 
@@ -378,7 +376,6 @@ mod test {
     fn preview_recombine_rejects_mismatched_pt_and_yt() {
         let fixture = fixture(NOW);
         initialize(&fixture);
-
         fixture.client.preview_recombine(&100, &99);
     }
 
@@ -387,75 +384,13 @@ mod test {
     fn preview_split_rejects_matured_market() {
         let fixture = fixture(NOW);
         initialize(&fixture);
-
         fixture.env.ledger().set_timestamp(MATURITY);
-
         fixture.client.preview_split(&100);
     }
 
-    #[test]
-    fn split_tracks_holder_position_and_escrow() {
-        let fixture = fixture(NOW);
-        initialize(&fixture);
+    // The split/recombine/redeem flows move real tokens and are covered
+    // end to end in tests/integration. Here we only assert the init gating.
 
-        assert_eq!(fixture.client.split(&fixture.admin, &100), (100, 100));
-        assert_eq!(
-            fixture.client.position(&fixture.admin),
-            Position {
-                pt_balance: 100,
-                yt_balance: 100,
-            }
-        );
-        assert_eq!(fixture.client.escrowed_sy(), 100);
-    }
-
-    #[test]
-    fn recombine_burns_equal_pt_and_yt_for_sy() {
-        let fixture = fixture(NOW);
-        initialize(&fixture);
-        fixture.client.split(&fixture.admin, &100);
-
-        assert_eq!(fixture.client.recombine(&fixture.admin, &40, &40), 40);
-        assert_eq!(
-            fixture.client.position(&fixture.admin),
-            Position {
-                pt_balance: 60,
-                yt_balance: 60,
-            }
-        );
-        assert_eq!(fixture.client.escrowed_sy(), 60);
-    }
-
-    #[test]
-    #[should_panic(expected = "Error(Contract, #7)")]
-    fn recombine_rejects_when_holder_lacks_position() {
-        let fixture = fixture(NOW);
-        initialize(&fixture);
-        fixture.client.split(&fixture.admin, &10);
-
-        fixture.client.recombine(&fixture.admin, &11, &11);
-    }
-
-    #[test]
-    fn redeem_at_maturity_burns_pt_and_leaves_yt_worthless() {
-        let fixture = fixture(NOW);
-        initialize(&fixture);
-        fixture.client.split(&fixture.admin, &100);
-        fixture.env.ledger().set_timestamp(MATURITY);
-
-        assert_eq!(fixture.client.redeem_at_maturity(&fixture.admin, &70), 70);
-        assert_eq!(
-            fixture.client.position(&fixture.admin),
-            Position {
-                pt_balance: 30,
-                yt_balance: 100,
-            }
-        );
-        assert_eq!(fixture.client.escrowed_sy(), 30);
-    }
-
-    // M2-adjacent: tokenizer actions are gated on initialization. split before
-    // initialize fails with NotInitialized (#2).
     #[test]
     #[should_panic(expected = "Error(Contract, #2)")]
     fn split_before_initialize_fails() {
@@ -463,19 +398,6 @@ mod test {
         fixture.client.split(&fixture.admin, &100);
     }
 
-    // M3: PT/YT/escrow accumulation must reject i128 overflow rather than wrap.
-    // A second split that overflows the running position fails with
-    // MathOverflow (#9).
-    #[test]
-    #[should_panic(expected = "Error(Contract, #9)")]
-    fn split_overflow_is_rejected() {
-        let fixture = fixture(NOW);
-        initialize(&fixture);
-        fixture.client.split(&fixture.admin, &i128::MAX);
-        fixture.client.split(&fixture.admin, &1);
-    }
-
-    // M2-adjacent: recombine is gated on initialization (#2).
     #[test]
     #[should_panic(expected = "Error(Contract, #2)")]
     fn recombine_before_initialize_fails() {
@@ -483,24 +405,10 @@ mod test {
         fixture.client.recombine(&fixture.admin, &10, &10);
     }
 
-    // M2-adjacent: redeem_at_maturity is gated on initialization (#2). This
-    // path is guarded by require_matured, a different guard than split's.
     #[test]
     #[should_panic(expected = "Error(Contract, #2)")]
     fn redeem_at_maturity_before_initialize_fails() {
         let fixture = fixture(NOW);
         fixture.client.redeem_at_maturity(&fixture.admin, &10);
-    }
-
-    // M3: redeem_at_maturity rejects burning more PT than the holder has,
-    // exercising the checked subtraction on the position (#7).
-    #[test]
-    #[should_panic(expected = "Error(Contract, #7)")]
-    fn redeem_at_maturity_rejects_excess_pt() {
-        let fixture = fixture(NOW);
-        initialize(&fixture);
-        fixture.client.split(&fixture.admin, &100);
-        fixture.env.ledger().set_timestamp(MATURITY);
-        fixture.client.redeem_at_maturity(&fixture.admin, &101);
     }
 }
