@@ -121,6 +121,7 @@ impl SyWrapper {
 
 impl StandardizedYield for SyWrapper {
     fn deposit(env: &Env, from: Address, amount: i128) -> i128 {
+        require_init(env);
         from.require_auth();
         if let Err(error) = Self::require_positive_amount(amount) {
             panic_with_error!(env, error);
@@ -150,20 +151,22 @@ impl StandardizedYield for SyWrapper {
 
         env.storage().instance().set(
             &DataKey::HolderShares(from.clone()),
-            &(current_shares + shares),
+            &add_or_panic(env, current_shares, shares),
         );
         env.storage().instance().set(
             &DataKey::HolderPrincipal(from),
-            &(current_principal + amount),
+            &add_or_panic(env, current_principal, amount),
         );
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalShares, &(total_shares + shares));
+        env.storage().instance().set(
+            &DataKey::TotalShares,
+            &add_or_panic(env, total_shares, shares),
+        );
 
         shares
     }
 
     fn redeem(env: &Env, from: Address, sy_amount: i128) -> i128 {
+        require_init(env);
         from.require_auth();
         if let Err(error) = Self::require_positive_amount(sy_amount) {
             panic_with_error!(env, error);
@@ -199,20 +202,22 @@ impl StandardizedYield for SyWrapper {
 
         env.storage().instance().set(
             &DataKey::HolderShares(from.clone()),
-            &(current_shares - sy_amount),
+            &sub_or_panic(env, current_shares, sy_amount),
         );
         env.storage().instance().set(
             &DataKey::HolderPrincipal(from),
-            &(current_principal - principal_out),
+            &sub_or_panic(env, current_principal, principal_out),
         );
-        env.storage()
-            .instance()
-            .set(&DataKey::TotalShares, &(total_shares - sy_amount));
+        env.storage().instance().set(
+            &DataKey::TotalShares,
+            &sub_or_panic(env, total_shares, sy_amount),
+        );
 
         underlying_out
     }
 
     fn exchange_rate(env: &Env) -> i128 {
+        require_init(env);
         env.storage()
             .instance()
             .get(&DataKey::ExchangeRate)
@@ -227,6 +232,7 @@ impl StandardizedYield for SyWrapper {
     }
 
     fn accrued_yield(env: &Env, holder: Address) -> i128 {
+        require_init(env);
         let exchange_rate = <Self as StandardizedYield>::exchange_rate(env);
         let shares: i128 = env
             .storage()
@@ -282,6 +288,28 @@ fn mul_div_or_panic(env: &Env, lhs: i128, rhs: i128, denominator: i128) -> i128 
 
     match lhs_reduced.checked_mul(rhs_reduced) {
         Some(product) => product / denominator_final,
+        None => panic_with_error!(env, Error::MathOverflow),
+    }
+}
+
+/// Panics with `NotInitialized` when the contract has no stored `Config`, so a
+/// public SY method cannot read defaults or mutate state before `initialize`.
+fn require_init(env: &Env) {
+    if !env.storage().instance().has(&DataKey::Config) {
+        panic_with_error!(env, Error::NotInitialized);
+    }
+}
+
+fn add_or_panic(env: &Env, lhs: i128, rhs: i128) -> i128 {
+    match lhs.checked_add(rhs) {
+        Some(value) => value,
+        None => panic_with_error!(env, Error::MathOverflow),
+    }
+}
+
+fn sub_or_panic(env: &Env, lhs: i128, rhs: i128) -> i128 {
+    match lhs.checked_sub(rhs) {
+        Some(value) => value,
         None => panic_with_error!(env, Error::MathOverflow),
     }
 }
@@ -394,5 +422,62 @@ mod test {
         assert_eq!(fixture.client.share_balance(&fixture.alice), 60 * WAD);
         assert_eq!(fixture.client.total_shares(), 60 * WAD);
         assert_eq!(fixture.client.accrued_yield(&fixture.alice), 6 * WAD);
+    }
+
+    // M2: a public SY method must not mutate state or read defaults before
+    // initialize. deposit before initialize fails with NotInitialized (#2).
+    #[test]
+    #[should_panic(expected = "Error(Contract, #2)")]
+    fn deposit_before_initialize_fails() {
+        let fixture = fixture();
+        fixture.client.deposit(&fixture.alice, &(100 * WAD));
+    }
+
+    // M2: exchange_rate must not default to WAD before initialize.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #2)")]
+    fn exchange_rate_before_initialize_fails() {
+        let fixture = fixture();
+        fixture.client.exchange_rate();
+    }
+
+    // M3: holder/total share accumulation must reject i128 overflow rather than
+    // wrap. A second deposit that overflows the running total fails with
+    // MathOverflow (#6).
+    #[test]
+    #[should_panic(expected = "Error(Contract, #6)")]
+    fn deposit_overflow_is_rejected() {
+        let fixture = fixture();
+        initialize(&fixture);
+        fixture.client.deposit(&fixture.alice, &i128::MAX);
+        fixture.client.deposit(&fixture.alice, &1);
+    }
+
+    // M2: redeem before initialize fails with NotInitialized (#2).
+    #[test]
+    #[should_panic(expected = "Error(Contract, #2)")]
+    fn redeem_before_initialize_fails() {
+        let fixture = fixture();
+        fixture.client.redeem(&fixture.alice, &(10 * WAD));
+    }
+
+    // M2: accrued_yield before initialize fails with NotInitialized (#2).
+    #[test]
+    #[should_panic(expected = "Error(Contract, #2)")]
+    fn accrued_yield_before_initialize_fails() {
+        let fixture = fixture();
+        fixture.client.accrued_yield(&fixture.alice);
+    }
+
+    // M3: redeem must reject overflow when a large exchange rate multiplied by
+    // the redeemed shares exceeds i128, rather than wrapping (#6).
+    #[test]
+    #[should_panic(expected = "Error(Contract, #6)")]
+    fn redeem_overflow_is_rejected() {
+        let fixture = fixture();
+        initialize(&fixture);
+        fixture.client.deposit(&fixture.alice, &(1000 * WAD));
+        fixture.client.set_exchange_rate(&fixture.admin, &i128::MAX);
+        fixture.client.redeem(&fixture.alice, &(1000 * WAD));
     }
 }

@@ -41,6 +41,7 @@ pub enum Error {
     Matured = 6,
     InsufficientPosition = 7,
     LiveMarket = 8,
+    MathOverflow = 9,
 }
 
 #[contract]
@@ -138,10 +139,18 @@ impl Tokenizer {
 
         let config = Self::read_config(&env)?;
         let mut position = Self::position(env.clone(), from.clone())?;
-        position.pt_balance += sy_amount;
-        position.yt_balance += sy_amount;
+        position.pt_balance = position
+            .pt_balance
+            .checked_add(sy_amount)
+            .ok_or(Error::MathOverflow)?;
+        position.yt_balance = position
+            .yt_balance
+            .checked_add(sy_amount)
+            .ok_or(Error::MathOverflow)?;
 
-        let escrowed_sy = Self::escrowed_sy(env.clone())? + sy_amount;
+        let escrowed_sy = Self::escrowed_sy(env.clone())?
+            .checked_add(sy_amount)
+            .ok_or(Error::MathOverflow)?;
         env.storage()
             .instance()
             .set(&DataKey::Position(from, config.maturity), &position);
@@ -173,8 +182,14 @@ impl Tokenizer {
             return Err(Error::InsufficientPosition);
         }
 
-        position.pt_balance -= pt_amount;
-        position.yt_balance -= yt_amount;
+        position.pt_balance = position
+            .pt_balance
+            .checked_sub(pt_amount)
+            .ok_or(Error::InsufficientPosition)?;
+        position.yt_balance = position
+            .yt_balance
+            .checked_sub(yt_amount)
+            .ok_or(Error::InsufficientPosition)?;
 
         let escrowed_sy = Self::escrowed_sy(env.clone())?;
         let escrowed_sy = escrowed_sy
@@ -202,7 +217,10 @@ impl Tokenizer {
             return Err(Error::InsufficientPosition);
         }
 
-        position.pt_balance -= pt_amount;
+        position.pt_balance = position
+            .pt_balance
+            .checked_sub(pt_amount)
+            .ok_or(Error::InsufficientPosition)?;
 
         let escrowed_sy = Self::escrowed_sy(env.clone())?;
         let escrowed_sy = escrowed_sy
@@ -434,5 +452,55 @@ mod test {
             }
         );
         assert_eq!(fixture.client.escrowed_sy(), 30);
+    }
+
+    // M2-adjacent: tokenizer actions are gated on initialization. split before
+    // initialize fails with NotInitialized (#2).
+    #[test]
+    #[should_panic(expected = "Error(Contract, #2)")]
+    fn split_before_initialize_fails() {
+        let fixture = fixture(NOW);
+        fixture.client.split(&fixture.admin, &100);
+    }
+
+    // M3: PT/YT/escrow accumulation must reject i128 overflow rather than wrap.
+    // A second split that overflows the running position fails with
+    // MathOverflow (#9).
+    #[test]
+    #[should_panic(expected = "Error(Contract, #9)")]
+    fn split_overflow_is_rejected() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture.client.split(&fixture.admin, &i128::MAX);
+        fixture.client.split(&fixture.admin, &1);
+    }
+
+    // M2-adjacent: recombine is gated on initialization (#2).
+    #[test]
+    #[should_panic(expected = "Error(Contract, #2)")]
+    fn recombine_before_initialize_fails() {
+        let fixture = fixture(NOW);
+        fixture.client.recombine(&fixture.admin, &10, &10);
+    }
+
+    // M2-adjacent: redeem_at_maturity is gated on initialization (#2). This
+    // path is guarded by require_matured, a different guard than split's.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #2)")]
+    fn redeem_at_maturity_before_initialize_fails() {
+        let fixture = fixture(NOW);
+        fixture.client.redeem_at_maturity(&fixture.admin, &10);
+    }
+
+    // M3: redeem_at_maturity rejects burning more PT than the holder has,
+    // exercising the checked subtraction on the position (#7).
+    #[test]
+    #[should_panic(expected = "Error(Contract, #7)")]
+    fn redeem_at_maturity_rejects_excess_pt() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture.client.split(&fixture.admin, &100);
+        fixture.env.ledger().set_timestamp(MATURITY);
+        fixture.client.redeem_at_maturity(&fixture.admin, &101);
     }
 }
