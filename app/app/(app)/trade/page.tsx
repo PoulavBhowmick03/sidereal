@@ -128,9 +128,8 @@ export default function TradePage() {
 
         {direction.assetIn === "YT" || direction.assetOut === "YT" ? (
           <p className="panel-subtle px-3 py-2 text-xs text-neutral-600">
-            YT routes flash through the pool and depend on cross-contract
-            settlement that is not live on chain yet. Quotes are indicative; the
-            swap may not settle. PT and SY swaps are complete.
+            YT trades flash-route through the pool: in one transaction the AMM
+            splits or recombines via the tokenizer, so buying YT is leveraged.
           </p>
         ) : null}
 
