@@ -62,3 +62,20 @@ auth_invariants reports 1 passed / 1 ignored. Full baseline (`cargo test
 - Step 2: rewrite `tokenizer.split` and update its tests.
 - Blocker to clear before step 5: SDK/human ack on the `preview_claim_yield`
   interface change (COORDINATION.md section 2).
+
+---
+
+## Codex operations Phase 1
+
+### Provenance check complete
+
+- Queried the live AMM Wasm hash on testnet.
+- Rebuilt both committed float candidates and the uncommitted integer rewrite.
+- Confirmed the live AMM exactly matches the uncommitted integer artifact and
+  matches no committed candidate.
+- Located the uncommitted resilient deploy script used for the live addresses.
+- Recorded addresses, hashes, tool versions, and reproduction commands in
+  `docs/PROVENANCE.md`.
+
+Next: adopt the exact integer rewrite, remove `libm`, and verify the Wasm build
+contains no floating-point instructions.

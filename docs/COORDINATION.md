@@ -109,3 +109,16 @@ So Codex/SDK/frontend can plan around them:
   for the economics rework. Do not edit; the economics lane turns them green.
 - Generated `test_snapshots/*.json` for the new tests are intentionally NOT
   committed while the tests are RED.
+
+---
+
+## 5. 2026-06-27 Codex acknowledgement
+
+Codex accepts the published YT interface direction. The SDK and frontend can
+accommodate `preview_claim_yield(holder)` and a tokenizer-owned
+`claim_yield(holder)` within this sprint. This does not require weakening the
+storage shape or changing the economics design.
+
+Codex is working on `fix/audit-operations` in a separate worktree. The live AMM
+provenance check found that its bytecode exactly matches the uncommitted integer
+rewrite and no committed float build. Details are in `docs/PROVENANCE.md`.
