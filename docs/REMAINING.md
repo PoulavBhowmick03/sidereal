@@ -99,15 +99,34 @@ README, docs, and UI, and are not part of the grant demo.
 
 ## 3. Testnet verification checklist
 
-- ☐ Deploy underlying SAC, SY wrapper, PT, YT, tokenizer (and AMM separately) to
-  testnet via `scripts/deploy-testnet.sh`.
-- ☐ Initialize in dependency order; confirm addresses written to `app/.env.local`.
-- ☐ Deposit underlying, assert vault underlying balance increases and SY minted.
-- ☐ Split SY, assert PT and YT balances on the real token contracts.
-- ☐ Bump mock exchange rate, claim yield with YT, assert payout.
-- ☐ Recombine PT+YT, assert SY returned and PT/YT burned.
-- ☐ Advance maturity, redeem PT, assert underlying returned 1:1.
-- ☐ Capture explorer links for each transaction for the demo.
+The core lifecycle was walked on testnet on 2026-06-27 from commit `cdf9b3e`.
+All addresses and per-transaction explorer links are in
+`deployments/testnet.toml`. The maturity-redeem step ran against a separate
+short-maturity test market (same wasm, 20-minute term) so the full
+deposit/split/redeem path could be proven without waiting out the 90-day main
+market.
+
+- ☑ Deploy underlying SAC, SY wrapper, PT, YT, tokenizer (and AMM separately) to
+  testnet. Addresses recorded in `deployments/testnet.toml`.
+- ☑ Initialize in dependency order; addresses written to `app/.env.local` and
+  the committed `testnet.toml`.
+- ☑ Deposit underlying, assert SY minted (100 USDC in, 100M SY shares out).
+- ☑ Split SY, assert PT and YT balances on the real token contracts (50M SY ->
+  50M PT + 50M YT at rate 1.0).
+- ☑ Bump mock exchange rate (1.0 -> 1.1), claim yield with YT, assert payout
+  (`preview_claim_yield` = 4545454, `claim_yield` paid 4545454 SY from escrow;
+  matches the telescoping formula).
+- ☑ Recombine PT+YT, assert SY returned and PT/YT burned (50M PT+YT -> 45454545
+  SY principal at rate 1.1; total recovered 99999999, conservation holds to 1
+  dust).
+- ☑ Advance maturity, redeem PT, assert principal returned. On the test market:
+  rate frozen at 1.20 at maturity, `redeem_at_maturity` paid 8333333 SY
+  (= 10M PT * WAD / 1.2, principal not 1:1), PT burned to 0; SY redeem then
+  returned 9999999 underlying USDC (~10M principal recovered).
+- ☑ Capture explorer links for each transaction for the demo (in `testnet.toml`).
+- ☑ Frontend reads the live deployment: headless SDK `getMarket` / `getPosition`
+  succeed against the live contracts via the public simulation source, and the
+  dev server serves the homepage with no "no market configured" banner.
 - ☐ (Tier 2, only if pursuing) add liquidity and run a PT/SY swap on testnet
   without `mock_all_auths`; then the YT flash route.
 

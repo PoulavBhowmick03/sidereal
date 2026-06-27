@@ -41,11 +41,21 @@ rate_bump_1_1  = "https://stellar.expert/explorer/testnet/tx/da70a161ab038cc42aa
 claim_yield    = "https://stellar.expert/explorer/testnet/tx/e93b198f63428926ed49fd159a0027b5fac668b778fe3074d04c0f8897cb97f2"
 recombine      = "https://stellar.expert/explorer/testnet/tx/5b03c01f821e6eb34985a6ea7f69fb554637459d6632096d0c2ed5517a5caaa5"
 
-# Maturity-redeem test market (matures 2026-06-27T15:51:46Z, ~20min after split)
+# Maturity-redeem test market (matured 2026-06-27T15:51:46Z, ~20min after split)
+# Proves PT redeems to principal (not 1:1) at the frozen maturity rate.
+# Flow: deposit 10M USDC -> 10M SY (rate 1.0), split -> 10M PT + 10M YT,
+# bump SY rate to 1.20, advance past maturity, freeze rate, redeem 10M PT.
+# redeem_at_maturity paid 8333333 SY (= 10M * WAD / 1.2, principal floored),
+# PT burned to 0; then SY redeem returned 9999999 underlying USDC (~10M
+# principal recovered; the 2M appreciation is YT's yield, not PT's).
 [test_market]
 sy  = "CDA45TYZIMDODREEMMVHOA7OY7DCHYRYN5SZBUWV37UXJRB5UBAIO5VL"
 pt  = "CCX6TVIOOMF7D5EDRTH5FN3QLFXYNSQ2BV5KVLRIETJ2BDIWLUAER23Q"
 yt  = "CDUZ77QDJKM5PJLDZHMNDQ7XFCLYS4EM2HBBKERZ54X3RJPFBQXGA2DZ"
 tk  = "CANPCCGH6IQDAAMTCSOFJQ7I6JQIVFCGKBOEBKUUGUFSXLQQ4TLPKAX4"
 maturity = 1782575506
-split_tx = "https://stellar.expert/explorer/testnet/tx/81fc8ee0bc576b106780c6247f1ec921dd1f66bd024492b6aa8dce88e8cdd073"
+split_tx        = "https://stellar.expert/explorer/testnet/tx/81fc8ee0bc576b106780c6247f1ec921dd1f66bd024492b6aa8dce88e8cdd073"
+rate_bump_1_2   = "https://stellar.expert/explorer/testnet/tx/72a74f8a54e313f623679a82a9586e3a157b7b55a496a30c54143dadfbb26bb3"
+freeze_maturity = "https://stellar.expert/explorer/testnet/tx/7dd4585bf963532e704ca66702688c9f07fce2a70397c6547d061f23ac75a3a2"
+redeem_pt       = "https://stellar.expert/explorer/testnet/tx/0c36784f05715254cf97df5487cc4d87b7dc96e8c76c269f0e6643daab5b9401"
+sy_redeem       = "https://stellar.expert/explorer/testnet/tx/e972c95db827e9149225db9f25cdf210ffb467322e5c1912f7f8ef5ea8188518"
