@@ -1,6 +1,6 @@
 {
   "generators": {
-    "address": 5,
+    "address": 6,
     "nonce": 0,
     "mux_id": 0
   },
@@ -25,22 +25,7 @@
                   "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
                 },
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                },
-                {
                   "u64": "1777776000"
-                },
-                {
-                  "i128": "2000000000000000000"
-                },
-                {
-                  "i128": "1050000000000000000"
-                },
-                {
-                  "i128": "10"
-                },
-                {
-                  "u64": "1800"
                 }
               ]
             }
@@ -51,21 +36,18 @@
     ],
     [
       [
-        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
         {
           "function": {
             "contract_fn": {
               "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
-              "function_name": "add_liquidity",
+              "function_name": "mint",
               "args": [
                 {
-                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
                 },
                 {
-                  "i128": "20000"
-                },
-                {
-                  "i128": "20000"
+                  "i128": "100"
                 }
               ]
             }
@@ -86,6 +68,33 @@
     "min_temp_entry_ttl": 16,
     "max_entry_ttl": 6312000,
     "ledger_entries": [
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "Balance"
+                  },
+                  {
+                    "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "i128": "100"
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
       {
         "entry": {
           "last_modified_ledger_seq": 0,
@@ -121,42 +130,10 @@
                           },
                           {
                             "key": {
-                              "symbol": "fee_bps"
-                            },
-                            "val": {
-                              "i128": "10"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "initial_anchor"
-                            },
-                            "val": {
-                              "i128": "1050000000000000000"
-                            }
-                          },
-                          {
-                            "key": {
                               "symbol": "maturity"
                             },
                             "val": {
                               "u64": "1777776000"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "pt_token"
-                            },
-                            "val": {
-                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "scalar_root"
-                            },
-                            "val": {
-                              "i128": "2000000000000000000"
                             }
                           },
                           {
@@ -172,15 +149,7 @@
                               "symbol": "tokenizer"
                             },
                             "val": {
-                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAK3IM"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "twap_window"
-                            },
-                            "val": {
-                              "u64": "1800"
+                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M"
                             }
                           }
                         ]
@@ -190,69 +159,12 @@
                       "key": {
                         "vec": [
                           {
-                            "symbol": "State"
+                            "symbol": "TotalSupply"
                           }
                         ]
                       },
                       "val": {
-                        "map": [
-                          {
-                            "key": {
-                              "symbol": "last_ln_implied_rate"
-                            },
-                            "val": {
-                              "i128": "197871221353807750"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "last_observation"
-                            },
-                            "val": {
-                              "u64": "1770000000"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "total_lp"
-                            },
-                            "val": {
-                              "i128": "20000"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "total_pt"
-                            },
-                            "val": {
-                              "i128": "20000"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "total_sy"
-                            },
-                            "val": {
-                              "i128": "20000"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "twap_ln_implied_rate"
-                            },
-                            "val": {
-                              "i128": "197871221353807750"
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "warmup_until"
-                            },
-                            "val": {
-                              "u64": "1770001800"
-                            }
-                          }
-                        ]
+                        "i128": "100"
                       }
                     }
                   ]
@@ -290,7 +202,7 @@
           "data": {
             "contract_data": {
               "ext": "v0",
-              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
               "key": {
                 "ledger_key_nonce": {
                   "nonce": "5541220902715666415"

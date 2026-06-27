@@ -21,6 +21,7 @@ const MESSAGES: Record<ErrorContext, Record<number, string>> = {
     6: "This market has matured.",
     7: "You do not hold enough PT and YT.",
     8: "The market is still live.",
+    9: "Amount is too large.",
   },
   sy: {
     3: "Enter a valid amount.",

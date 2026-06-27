@@ -116,10 +116,10 @@ export class StellarYT {
   /**
    * Reads a holder's SY/PT/YT balances and claimable yield.
    *
-   * PT/YT balances live in the tokenizer's per-holder Position accounting
-   * (codex-2's feat/tokenization), not on the token contracts. SY balance is
-   * the wrapper's share_balance. Claimable yield uses YT's preview_claim_yield,
-   * which needs the holder's YT balance and the current SY exchange rate.
+   * PT and YT are real SEP-41 tokens now, so tokenizer.position reads the
+   * holder's on-chain PT/YT balances and SY balance is the wrapper's
+   * share_balance. Claimable yield uses YT's preview_claim_yield, which reads
+   * the holder's real YT balance itself and takes the current SY exchange rate.
    */
   async getPosition(holder: string, marketId: string): Promise<Position> {
     const sy = new Contract(this.contracts.sy);
@@ -144,7 +144,6 @@ export class StellarYT {
             new Contract(this.contracts.yt).call(
               "preview_claim_yield",
               holderScVal,
-              nativeToScVal(ytBalance, { type: "i128" }),
               nativeToScVal(exchangeRate, { type: "i128" }),
             ),
           )

@@ -33,13 +33,17 @@ SY wrapper, PT, YT, tokenizer, and AMM, initializes them in dependency order
 with a 90 day maturity, and writes the addresses to `app/.env.local`. The
 deployer public key and all five contract IDs are printed.
 
-Then seed the fresh market with some activity (a deposit, a split, and AMM
-liquidity) so the UI shows real numbers, otherwise the pool is empty and quotes
-fail with `MarketNotSeeded`:
+Then seed the fresh market with core activity (a deposit and a split) so the
+demo shows real balances:
 
 ```bash
 make seed
 ```
+
+By default `make seed` seeds only the Tier 1 core (deposit + split). It does not
+seed AMM liquidity, because the AMM/YT flash route is experimental and its auth
+is not yet proven on testnet. Once that verification passes, opt in with
+`SEED_AMM=1 make seed` to add PT/SY liquidity for the AMM demo.
 
 ## 3. Run the frontend
 
@@ -50,28 +54,42 @@ make dev   # http://localhost:3000
 Connect a testnet wallet (Freighter, xBull, Albedo, Lobstr, or Hana) with the
 button in the top right.
 
-## 4. The user journey
+## 4. Core demo script (real settlement)
 
-1. **Home** shows live pool stats read from the AMM: SY and PT reserves, the
-   TWAP implied APY (with the spot rate and a "stabilizing" note while the TWAP
-   window fills), and days to maturity.
-2. **Mint** deposits USDC for SY and, with split enabled, mints equal PT and YT.
-   A human readable preview ("you will receive ~N PT and ~N YT") is shown before
-   you sign.
-3. **Trade** swaps between PT, YT, and SY. Pick a direction (buy/sell PT or YT),
-   enter an amount, and a live quote shows expected output, price impact, the
-   implied APY, and the minimum received at 0.5% slippage.
-4. **Redeem** reads your position and either recombines PT + YT back into SY
-   (before maturity) or redeems PT 1:1 (after maturity).
+This is the demo to record for Build Station / Instaward. Every step moves real
+SEP-41 tokens; show the balance and the explorer link at each step.
+
+1. Deploy the underlying token (a Stellar Asset Contract on testnet).
+2. Deploy the SY wrapper.
+3. Deploy PT and YT.
+4. Deploy the tokenizer and wire it to SY/PT/YT.
+5. **Deposit** underlying into SY. Show the vault's underlying balance rise and
+   the user's SY balance appear.
+6. **Split** SY into PT + YT. Show equal PT and YT minted to the user and the
+   tokenizer now custodying the SY.
+7. **Increase the mock exchange rate** (admin testnet knob) to simulate yield.
+8. **Claim yield** with YT. Show the payout against the real YT balance.
+9. **Recombine** PT + YT before maturity. Show SY returned and PT/YT burned.
+10. **Split** again to set up the maturity path.
+11. **Advance maturity** (testnet time control / a short maturity).
+12. **Redeem PT** 1:1. Show underlying returned and PT burned.
+13. Show final balances and the explorer links for each transaction.
 
 Every action runs the same path: the SDK builds an unsigned transaction, the
 wallet signs it, and the SDK submits and waits for confirmation. The SDK never
 holds keys.
 
+## 5. AMM demo (future milestone, gated)
+
+The PT/SY AMM and the YT flash route are **not** part of the core demo. They are
+implemented but only proven under `mock_all_auths`; the nested authorization
+tree has not been verified on testnet. Do not show or claim the AMM/YT flash
+route as working until that verification passes. Track the gate in
+[`docs/REMAINING.md`](./REMAINING.md) section 2.
+
 ## Current limitations
 
 See the [Limitations section in the README](../README.md#current-limitations).
-In short: the contracts use internal accounting rather than real SEP-41 token
-transfers between contracts, so a deploy runs and the UI drives on chain state,
-but external token value is not yet custodied and the YT flash route does not
-settle yet. PT/SY mint, swap, and redeem are complete paths.
+The core lifecycle (deposit, split, recombine, redeem, claim) settles real
+SEP-41 tokens. The AMM and YT flash route are experimental and pending testnet
+auth verification, so they are excluded from the demo above.

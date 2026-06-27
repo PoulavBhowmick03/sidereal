@@ -7,8 +7,8 @@ import { formatTokenAmount } from "../lib/format";
 
 function Cell({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-white/10 bg-panel p-3">
-      <dt className="text-xs uppercase text-slate-400">{label}</dt>
+    <div className="panel-subtle p-3">
+      <dt className="text-xs uppercase tracking-wide text-neutral-500">{label}</dt>
       <dd className="tabular-nums">{value}</dd>
     </div>
   );

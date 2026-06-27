@@ -32,6 +32,46 @@ Read these before writing any code. Violations get reverted, no exceptions.
 
 ---
 
+## 1b. Maintainer policy (current sprint)
+
+The product direction is locked. We are continuing Sidereal: real-settlement
+yield tokenization on Stellar. Do not propose or start a new product (no
+PolicyToken, no CredAttest, no pivot). Strategy is settled; the work is
+execution.
+
+Merge and claim rules for this sprint:
+
+1. **Tier the work.** Tier 1 is the real-settlement core (SY vault, PT/YT
+   SEP-41 tokens, tokenizer split/recombine/redeem, YT yield claim, checked
+   math, init gates). Tier 2 is the AMM, PT/SY swaps, the YT flash route, TWAP,
+   time decay, and anything using `authorize_as_current_contract` or nested
+   `InvokerContractAuthEntry`. Tier 1 ships and demos now. Tier 2 stays gated.
+2. **No fake accounting.** Core paths move real SEP-41 tokens. Do not reintroduce
+   internal-storage balances for the core lifecycle.
+3. **No claims not backed by tests.** Do not describe a path as working,
+   production ready, or grant ready unless tests prove it. Passing under
+   `mock_all_auths` is not proof of the real authorization tree.
+4. **No AMM/YT flash merge as ready without auth verification.** The nested auth
+   tree must be proven without permissive mocks or on testnet before the AMM or
+   YT flash route is presented as demo ready. Until then it is experimental.
+5. **Docs must match code before merge.** README and `docs/` reflect what the
+   code actually does. If a doc says "internal accounting" for a path that now
+   settles real tokens, fix the doc in the same change.
+
+Agent split for this sprint:
+
+- **Claude Code Agent 1:** contracts, settlement correctness, tokenizer,
+  PT/YT/SY, tests, AMM auth review.
+- **Claude Code Agent 2:** README, docs, SDK/frontend, demo flow, testnet
+  deployment scripts, grant positioning.
+- **Codex Agent:** CI/CD, boilerplate, generated clients, test scaffolding,
+  small refactors, dependency bumps.
+
+See [`docs/ROADMAP.md`](./docs/ROADMAP.md) for the three-week plan and
+[`docs/REMAINING.md`](./docs/REMAINING.md) for the Tier 2 gate.
+
+---
+
 ## 2. Repo structure
 
 ```

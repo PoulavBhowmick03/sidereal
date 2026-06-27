@@ -13,8 +13,8 @@ Status: ☐ open · ◐ in progress · ☑ fixed (with test)
 |----|----------|---------|-------|--------|
 | H1 | HIGH | LP shares are global; any caller can remove pool liquidity | codex-1 (AMM) | ☑ |
 | H2 | HIGH | Same-ledger swaps overwrite the TWAP with spot | codex-1 (AMM) | ☑ |
-| M2 | MED  | SY methods mutate state before initialization | codex-2 (sy-wrapper) | ☐ |
-| M3 | MED  | Tokenization state uses unchecked i128 arithmetic | codex-2 (sy-wrapper, tokenizer) | ☐ |
+| M2 | MED  | SY methods mutate state before initialization | codex-2 (sy-wrapper) | ☑ |
+| M3 | MED  | Tokenization state uses unchecked i128 arithmetic | codex-2 (sy-wrapper, tokenizer) | ☑ |
 | M1 | MED  | SY exact-in swaps do not account for the full `sy_in` | codex-1 (AMM) | ☑ |
 
 ## Recommended for testnet (☑ or a written accept-risk note)
