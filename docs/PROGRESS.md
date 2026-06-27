@@ -19,18 +19,18 @@ unchanged and green.
 What landed:
 
 - `tests/integration/tests/economics.rs`:
-  - `yt_receives_yield_on_claim` — RED: claim pays YT holder 0 SY today; spec
+  - `yt_receives_yield_on_claim`, RED: claim pays YT holder 0 SY today; spec
     wants ~9.09 SY (10 asset units of yield / rate 1.10) for a 100-unit split.
-  - `pt_redeems_to_principal_not_share` — RED: PT redeems 1:1 (1_000_000_000
+  - `pt_redeems_to_principal_not_share`, RED: PT redeems 1:1 (1_000_000_000
     SY) today; spec wants principal at the maturity rate (909_090_909 SY).
-  - `escrow_covers_outstanding_claims` — RED: YT holders receive 0 SY on claim
+  - `escrow_covers_outstanding_claims`, RED: YT holders receive 0 SY on claim
     today; spec wants real payout plus the escrow-coverage invariant holding at
     every step, escrow draining to ~0 at the end.
 - `tests/integration/tests/auth_invariants.rs`:
-  - `flash_route_top_level_auth_is_arg_pinned` — GREEN: the user's
+  - `flash_route_top_level_auth_is_arg_pinned`, GREEN: the user's
     `swap_sy_for_yt` authorization is pinned to the exact `sy_in`/`min_yt_out`,
     and every authorized transfer carries a concrete positive amount.
-  - `flash_route_user_only_signs_the_swap` — `#[ignore]`d, the strict end-state
+  - `flash_route_user_only_signs_the_swap`, `#[ignore]`d, the strict end-state
     for Codex's real (non-mock) auth tree.
 - `docs/COORDINATION.md`:
   - Final YT checkpoint storage shape (`Checkpoint(Address)` +
@@ -271,3 +271,42 @@ Next: fix the SDK simulation source account.
   economics specifications. The auth invariant remains green.
 
 Next: fix and harden the testnet deploy scripts.
+
+---
+
+## Integration: economics + operations merged (2026-06-27)
+
+Codex hit its usage limit partway through its operations lane. Its pushed work
+(`fix/audit-operations`: provenance doc, AMM integer math + libm removal, the CI
+float guard, and the SDK source-account fix) was merged into the economics
+branch on `integrate/economics-and-ops`. Codex's uncommitted deploy-script work
+in its separate worktree was not recoverable, so the remaining items were
+finished here. The merge was clean apart from PROGRESS.md (both lanes appended).
+
+Completed after the merge (code-only, no testnet needed):
+
+- SDK interface sync: `getPosition` drops the removed rate arg and adds LP
+  balance; new `buildClaimYield` targets `tokenizer.claim_yield`; `Position`
+  gains `lpBalance`. SDK 33 tests, app 16 tests, both typecheck + build green.
+- TTL bumps on SY/PT/YT/tokenizer mutating entrypoints (instance + per-holder
+  persistent), matching the AMM's 30/120-day policy. YT checkpoints were already
+  persistent and per-holder from the economics rework. Adds a YT TTL test.
+- SY principal-on-transfer fix: principal moves pro-rata with shares so
+  `accrued_yield` stays correct for both parties after a transfer. New test.
+- Deploy script: `--yt_token` added to the AMM init (it would have failed
+  without it); env now records the source commit and simulation source account.
+- README/REMAINING reconciled with the reworked code: YT claim pays out, PT
+  redeems to principal, yield source stated as a pluggable testnet mock (not
+  wired to Blend), property-test vs float-guard claim corrected, and a section
+  listing the audit items closed by this remediation.
+- MAX_FLOAT_HELPER_* renamed to honest names (values unchanged).
+
+Verification: full `cargo test --workspace` green with the integer AMM and the
+economics rework together (amm 21, economics 6, journey 5, pt 12-ish, sy 12, yt
+10, tokenizer 9); all 5 contract wasm pass the float guard; SDK 33, app 16.
+
+Still pending (need a funded testnet run + wallet, interactive, not headless):
+reproducible redeploy from a pinned commit + committed `deployments/testnet.toml`,
+AMM liquidity seeding, PT/SY swap proof, the flash-route auth proof on testnet
+(the `flash_route_user_only_signs_the_swap` test stays `#[ignore]`d until then),
+and the full frontend manual verification pass against the live deployment.
