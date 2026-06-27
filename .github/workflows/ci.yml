@@ -28,6 +28,18 @@ jobs:
           cargo build --release --target wasm32v1-none --locked \
             -p sidereal-sy-wrapper -p sidereal-pt-token -p sidereal-yt-token \
             -p sidereal-tokenizer -p sidereal-amm
+      - name: Install Wasm inspection tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes wabt
+      - name: Reject floating-point Wasm opcodes
+        run: |
+          bash scripts/check-wasm-floats.sh \
+            target/wasm32v1-none/release/sidereal_sy_wrapper.wasm \
+            target/wasm32v1-none/release/sidereal_pt_token.wasm \
+            target/wasm32v1-none/release/sidereal_yt_token.wasm \
+            target/wasm32v1-none/release/sidereal_tokenizer.wasm \
+            target/wasm32v1-none/release/sidereal_amm.wasm
 
   sdk:
     name: sdk (typecheck + test + build)
