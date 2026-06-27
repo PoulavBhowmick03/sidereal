@@ -1,8 +1,8 @@
 # sidereal
 
-> Yield tokenization on Stellar. Split yield-bearing assets into fixed-income and variable-yield instruments. Trade them in a time-decay AMM.
+> Real-settlement yield tokenization on Stellar. Split yield-bearing vault shares into principal and yield tokens, then recombine or redeem them through Soroban contracts.
 
-**Status:** in active development as part of the Stellar Build Station 2026 sprint. Testnet only. Not yet audited. Do not deposit real funds.
+**Status:** active Stellar Build Station / Instaward prototype. Testnet only. Not audited. Do not deposit real funds. The core lifecycle (deposit, split, recombine, redeem, claim) settles real SEP-41 tokens. The PT/SY AMM and the YT flash route are experimental and pending testnet auth verification (see [Current limitations](#current-limitations)).
 
 ---
 
@@ -29,25 +29,52 @@ What's missing is the layer that lets institutional users hedge that yield and l
 
 ## What's built
 
+Status legend: **built** (real settlement, tested) · **experimental** (works under test mocks, auth not yet proven) · **pending testnet verification** · **planned**.
+
 | Component | Status |
 |---|---|
-| SY wrapper (shares, exchange rate, accrued yield) | ✅ built, 4 tests |
-| Tokenizer (split, recombine, redeem at maturity) | ✅ built, 10 tests |
-| PT / YT tokens | ✅ built, 3 tests each |
-| Time-decay AMM (PT/SY pool, TWAP, quotes) | ✅ built, 15 tests incl. property suite |
-| TypeScript SDK (typed client, quote, build, submit) | ✅ built, 11 tests |
-| Frontend (mint, trade, redeem, wallet connect) | ✅ built, 12 tests |
-| Cross-contract integration tests | ✅ 3 tests (deposit/split/recombine, redeem, AMM) |
-| Integrated workspace (everything builds together) | ✅ `cargo`, SDK, and `next build` green |
+| SY wrapper real vault (real underlying transfer in/out, share mint/burn) | ✅ built |
+| PT SEP-41 token (balance/transfer/allowance, tokenizer-gated mint/burn) | ✅ built |
+| YT SEP-41 token (balance/transfer/allowance, per-holder yield checkpoints) | ✅ built |
+| Tokenizer split / recombine / redeem (real SY custody, PT+YT=SY) | ✅ built |
+| YT yield claim (reads real YT balance against exchange-rate growth) | ✅ built |
+| Checked tokenization math + initialize gates (audit M2/M3) | ✅ built |
+| TypeScript SDK (typed client, quote, build, submit) | ✅ built |
+| Frontend (mint, split, recombine, redeem, claim) | ✅ built |
+| PT/SY AMM (custody, swaps, TWAP, time decay) | ⚠️ experimental, mock-auth only |
+| YT flash route (split/recombine through tokenizer in one tx) | ⚠️ experimental, auth not proven |
+| Cross-contract integration tests | ✅ real-balance journeys (core); YT flash under permissive auth mock |
 | Testnet deploy script | ✅ `scripts/deploy-testnet.sh` |
-| Live testnet end-to-end demo | 🚧 needs token settlement (plan in [docs/REMAINING.md](./docs/REMAINING.md)) |
+| Live testnet end-to-end demo | 🚧 pending testnet deploy + verification |
 
-All layers compile and test together on one branch. The remaining work for a
-live on-chain demo is documented under [Limitations](#current-limitations).
+The core settlement lifecycle moves real SEP-41 tokens and is covered by tests
+that reconcile balances against the actual token contracts. The AMM and YT flash
+route compile and pass under `mock_all_auths`, but the nested authorization tree
+has not been proven without permissive mocks or on testnet, so they are not
+demo-ready. See [Current limitations](#current-limitations).
 
 ## Architecture
 
-See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the protocol design, math, and Soroban-specific decisions.
+```
+                 User
+                  | deposit underlying
+                  v
+          SY Wrapper / Vault   (real SEP-41 underlying in, SY shares out)
+                  | mint SY
+                  v
+              Tokenizer        (custodies SY, drives PT/YT)
+               /        \
+              v          v
+          PT Token    YT Token
+              |           |
+           Redeem      Claim yield
+        (1:1 at maturity)  (variable, reads real YT balance)
+
+  Optional / experimental, gated until auth is proven on testnet:
+          PT/SY AMM  --  YT flash route (split/recombine via tokenizer)
+```
+
+See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the protocol design, math, and Soroban-specific decisions, and [`docs/SETTLEMENT.md`](./docs/SETTLEMENT.md) for the real-token settlement model.
 
 ## Local development
 
@@ -115,20 +142,27 @@ does not ship. CI (`.github/workflows/ci.yml`) runs all three layers on every PR
 
 ## Current limitations
 
-The protocol compiles, tests, and is wired end to end, with two known gaps
-before a live on-chain demo:
+1. **Core settlement is real, not internal accounting.** The SY wrapper,
+   PT/YT tokens, and tokenizer move real SEP-41 tokens. Deposit pulls underlying
+   into the vault, split/recombine custody SY and mint/burn PT and YT, and
+   redeem returns underlying at maturity. Tests reconcile balances against the
+   actual token contracts. This is the demo-ready path.
+2. **AMM and YT flash route are experimental.** The PT/SY AMM custodies tokens
+   and the YT flash route settles through the tokenizer in one transaction, but
+   both rely on a nested `authorize_as_current_contract` tree that is only
+   exercised under `mock_all_auths`. The authorization tree has not been proven
+   without permissive mocks or on testnet. Do not present these as production
+   or grant ready until that verification passes. The UI surfaces a warning on
+   YT routes.
+3. **Testnet deployment is required before grant submission.** The contracts
+   build to wasm and the deploy script exists, but a live testnet run that
+   reconciles real balances has not yet been recorded.
+4. **Not audited, testnet only.** No third-party audit. Do not use real funds.
 
-1. **Token settlement.** The SY wrapper, tokenizer, and AMM currently track
-   balances with internal accounting rather than moving real SEP-41 tokens
-   between contracts. A deploy will run and the UI will drive it, but value is
-   not yet custodied or transferred on chain.
-2. **YT flash route.** `swap_sy_for_yt` / `swap_yt_for_sy` depend on the
-   cross-contract settlement surface above, so YT trades are wired in the SDK
-   and UI but not yet functional on chain. PT/SY swaps, mint, and redeem are
-   complete paths.
-
-The detailed plan to close both gaps (six workstreams, ownership, sequencing,
-and acceptance criteria) is in [`docs/REMAINING.md`](./docs/REMAINING.md).
+The completed settlement work, remaining AMM/auth work, the testnet verification
+checklist, and known risks are tracked in
+[`docs/REMAINING.md`](./docs/REMAINING.md). The three-week execution plan is in
+[`docs/ROADMAP.md`](./docs/ROADMAP.md).
 
 ## Contributing
 
