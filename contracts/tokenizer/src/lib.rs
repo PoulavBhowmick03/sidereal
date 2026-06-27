@@ -10,6 +10,12 @@ use soroban_sdk::{
 
 const WAD: i128 = 1_000_000_000_000_000_000;
 
+/// TTL policy, matching the AMM: bump when within 30 days of expiry, extend to
+/// 120 days, so a periodically-touched market never archives mid-term.
+const LEDGERS_PER_DAY: u32 = 17_280;
+const TTL_THRESHOLD_LEDGERS: u32 = 30 * LEDGERS_PER_DAY;
+const TTL_EXTEND_TO_LEDGERS: u32 = 120 * LEDGERS_PER_DAY;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct Config {
@@ -180,6 +186,7 @@ impl Tokenizer {
         Self::require_live(&env)?;
         Self::require_positive_amount(sy_amount)?;
         let config = Self::read_config(&env)?;
+        Self::bump_instance_ttl(&env);
 
         let rate = current_rate(&env, &config.sy_token);
         let face = mul_div_floor(sy_amount, rate, WAD)?;
@@ -214,6 +221,7 @@ impl Tokenizer {
         }
 
         let config = Self::read_config(&env)?;
+        Self::bump_instance_ttl(&env);
         let rate = current_rate(&env, &config.sy_token);
         let sy_equivalent = mul_div_floor(pt_amount, WAD, rate)?;
         Self::require_positive_amount(sy_equivalent)?;
@@ -245,6 +253,7 @@ impl Tokenizer {
         Self::require_matured(&env)?;
         Self::require_positive_amount(pt_amount)?;
         let config = Self::read_config(&env)?;
+        Self::bump_instance_ttl(&env);
 
         let rate = effective_rate(&env, &config);
         let full = mul_div_floor(pt_amount, WAD, rate)?;
@@ -270,6 +279,7 @@ impl Tokenizer {
     pub fn claim_yield(env: Env, holder: Address) -> Result<i128, Error> {
         holder.require_auth();
         let config = Self::read_config(&env)?;
+        Self::bump_instance_ttl(&env);
 
         let owed = settle_and_consume_yt(&env, &config.yt_token, &holder);
         if owed > 0 {
@@ -297,6 +307,12 @@ impl Tokenizer {
             .instance()
             .get(&DataKey::Config)
             .ok_or(Error::NotInitialized)
+    }
+
+    fn bump_instance_ttl(env: &Env) {
+        env.storage()
+            .instance()
+            .extend_ttl(TTL_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
     }
 
     fn require_live(env: &Env) -> Result<(), Error> {

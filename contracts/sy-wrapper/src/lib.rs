@@ -14,6 +14,12 @@ const WAD: i128 = 1_000_000_000_000_000_000;
 /// Display decimals for SY, matching the 7-decimal underlying.
 const DECIMALS: u32 = 7;
 
+/// TTL policy, matching the AMM: bump when within 30 days of expiry, extend to
+/// 120 days, so a periodically-touched vault never archives mid-term.
+const LEDGERS_PER_DAY: u32 = 17_280;
+const TTL_THRESHOLD_LEDGERS: u32 = 30 * LEDGERS_PER_DAY;
+const TTL_EXTEND_TO_LEDGERS: u32 = 120 * LEDGERS_PER_DAY;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct Config {
@@ -86,6 +92,7 @@ impl SyWrapper {
             return Err(Error::NotInitialized);
         }
         Self::require_exchange_rate(exchange_rate)?;
+        Self::bump_instance_ttl(&env);
 
         env.storage()
             .instance()
@@ -144,6 +151,7 @@ impl SyWrapper {
         if amount > 0 && expiration_ledger < env.ledger().sequence() {
             panic_with_error!(&env, Error::InvalidExpiration);
         }
+        Self::bump_instance_ttl(&env);
         env.storage().temporary().set(
             &DataKey::Allowance(from, spender),
             &AllowanceValue {
@@ -156,12 +164,14 @@ impl SyWrapper {
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
         from.require_auth();
         Self::require_amount_or_panic(&env, amount);
+        Self::bump_instance_ttl(&env);
         Self::move_balance(&env, &from, &to, amount);
     }
 
     pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
         spender.require_auth();
         Self::require_amount_or_panic(&env, amount);
+        Self::bump_instance_ttl(&env);
         Self::spend_allowance(&env, &from, &spender, amount);
         Self::move_balance(&env, &from, &to, amount);
     }
@@ -205,9 +215,17 @@ impl SyWrapper {
     }
 
     fn write_balance(env: &Env, id: &Address, amount: i128) {
+        let key = DataKey::Balance(id.clone());
+        env.storage().persistent().set(&key, &amount);
         env.storage()
             .persistent()
-            .set(&DataKey::Balance(id.clone()), &amount);
+            .extend_ttl(&key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
+    }
+
+    fn bump_instance_ttl(env: &Env) {
+        env.storage()
+            .instance()
+            .extend_ttl(TTL_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
     }
 
     fn read_principal(env: &Env, id: &Address) -> i128 {
@@ -218,9 +236,11 @@ impl SyWrapper {
     }
 
     fn write_principal(env: &Env, id: &Address, amount: i128) {
+        let key = DataKey::Principal(id.clone());
+        env.storage().persistent().set(&key, &amount);
         env.storage()
             .persistent()
-            .set(&DataKey::Principal(id.clone()), &amount);
+            .extend_ttl(&key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
     }
 
     fn read_total_supply(env: &Env) -> i128 {
@@ -277,6 +297,7 @@ impl StandardizedYield for SyWrapper {
         if let Err(error) = Self::require_positive_amount(amount) {
             panic_with_error!(env, error);
         }
+        Self::bump_instance_ttl(env);
 
         let config = match Self::read_config(env) {
             Ok(config) => config,
@@ -309,6 +330,7 @@ impl StandardizedYield for SyWrapper {
         if let Err(error) = Self::require_positive_amount(sy_amount) {
             panic_with_error!(env, error);
         }
+        Self::bump_instance_ttl(env);
 
         let config = match Self::read_config(env) {
             Ok(config) => config,

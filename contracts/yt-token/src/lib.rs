@@ -12,6 +12,12 @@ const WAD: i128 = 1_000_000_000_000_000_000;
 /// Display decimals for YT, matching SY and the 7-decimal underlying.
 const DECIMALS: u32 = 7;
 
+/// TTL policy, matching the AMM: bump when within 30 days of expiry, extend to
+/// 120 days. A 90-day market that is touched periodically never archives.
+const LEDGERS_PER_DAY: u32 = 17_280;
+const TTL_THRESHOLD_LEDGERS: u32 = 30 * LEDGERS_PER_DAY;
+const TTL_EXTEND_TO_LEDGERS: u32 = 120 * LEDGERS_PER_DAY;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct Config {
@@ -138,6 +144,7 @@ impl YtToken {
     pub fn settle_and_consume(env: Env, holder: Address) -> Result<i128, Error> {
         let config = Self::read_config(&env)?;
         config.tokenizer.require_auth();
+        Self::bump_instance_ttl(&env);
         Self::settle(&env, &holder);
         let owed = Self::read_accrued(&env, &holder);
         if owed > 0 {
@@ -156,6 +163,7 @@ impl YtToken {
         let config = Self::read_config_or_panic(&env);
         config.tokenizer.require_auth();
         Self::require_amount_or_panic(&env, amount);
+        Self::bump_instance_ttl(&env);
 
         Self::settle(&env, &to);
 
@@ -208,6 +216,7 @@ impl YtToken {
         if amount > 0 && expiration_ledger < env.ledger().sequence() {
             panic_with_error!(&env, Error::InvalidExpiration);
         }
+        Self::bump_instance_ttl(&env);
         env.storage().temporary().set(
             &DataKey::Allowance(from, spender),
             &AllowanceValue {
@@ -220,6 +229,7 @@ impl YtToken {
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
         from.require_auth();
         Self::require_amount_or_panic(&env, amount);
+        Self::bump_instance_ttl(&env);
         Self::settle(&env, &from);
         Self::settle(&env, &to);
         Self::move_balance(&env, &from, &to, amount);
@@ -228,6 +238,7 @@ impl YtToken {
     pub fn transfer_from(env: Env, spender: Address, from: Address, to: Address, amount: i128) {
         spender.require_auth();
         Self::require_amount_or_panic(&env, amount);
+        Self::bump_instance_ttl(&env);
         Self::spend_allowance(&env, &from, &spender, amount);
         Self::settle(&env, &from);
         Self::settle(&env, &to);
@@ -240,6 +251,7 @@ impl YtToken {
     pub fn burn(env: Env, from: Address, amount: i128) {
         from.require_auth();
         Self::require_amount_or_panic(&env, amount);
+        Self::bump_instance_ttl(&env);
         Self::settle(&env, &from);
         Self::burn_balance(&env, &from, amount);
     }
@@ -247,6 +259,7 @@ impl YtToken {
     pub fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
         spender.require_auth();
         Self::require_amount_or_panic(&env, amount);
+        Self::bump_instance_ttl(&env);
         Self::spend_allowance(&env, &from, &spender, amount);
         Self::settle(&env, &from);
         Self::burn_balance(&env, &from, amount);
@@ -380,9 +393,17 @@ impl YtToken {
     }
 
     fn write_checkpoint(env: &Env, holder: &Address, rate: i128) {
+        let key = DataKey::Checkpoint(holder.clone());
+        env.storage().persistent().set(&key, &rate);
         env.storage()
             .persistent()
-            .set(&DataKey::Checkpoint(holder.clone()), &rate);
+            .extend_ttl(&key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
+    }
+
+    fn bump_instance_ttl(env: &Env) {
+        env.storage()
+            .instance()
+            .extend_ttl(TTL_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
     }
 
     fn read_accrued(env: &Env, holder: &Address) -> i128 {
@@ -393,9 +414,11 @@ impl YtToken {
     }
 
     fn write_accrued(env: &Env, holder: &Address, amount: i128) {
+        let key = DataKey::AccruedYield(holder.clone());
+        env.storage().persistent().set(&key, &amount);
         env.storage()
             .persistent()
-            .set(&DataKey::AccruedYield(holder.clone()), &amount);
+            .extend_ttl(&key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
     }
 
     fn require_amount_or_panic(env: &Env, amount: i128) {
@@ -412,9 +435,11 @@ impl YtToken {
     }
 
     fn write_balance(env: &Env, id: &Address, amount: i128) {
+        let key = DataKey::Balance(id.clone());
+        env.storage().persistent().set(&key, &amount);
         env.storage()
             .persistent()
-            .set(&DataKey::Balance(id.clone()), &amount);
+            .extend_ttl(&key, TTL_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
     }
 
     fn read_total_supply(env: &Env) -> i128 {
@@ -531,6 +556,24 @@ mod test {
             alice,
             bob,
         }
+    }
+
+    #[test]
+    fn mint_extends_instance_ttl() {
+        use soroban_sdk::testutils::storage::Instance as _;
+        let f = fixture(NOW);
+        // A mint is a mutating entrypoint, so it must bump the instance TTL to
+        // the 120-day window. Read the live TTL from inside the contract frame.
+        f.client.mint(&f.alice, &1_000);
+        let ttl = f.env.as_contract(&f.client.address, || {
+            f.env.storage().instance().get_ttl()
+        });
+        assert!(
+            ttl >= TTL_EXTEND_TO_LEDGERS,
+            "instance TTL {} should be extended to at least {}",
+            ttl,
+            TTL_EXTEND_TO_LEDGERS
+        );
     }
 
     #[test]
