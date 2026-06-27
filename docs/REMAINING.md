@@ -106,6 +106,15 @@ short-maturity test market (same wasm, 20-minute term) so the full
 deposit/split/redeem path could be proven without waiting out the 90-day main
 market.
 
+This walk is reproducible: `bash scripts/smoke-testnet.sh` deploys a fresh
+throwaway short-maturity market and runs the whole lifecycle
+(deposit, split, claim, recombine, re-split, redeem at maturity, SY redeem),
+asserting every economic result against its closed-form expectation. It is
+hardened against the testnet RPC's transient errors (sequence lag, submission
+timeouts, load-balanced-replica read lag and stale-state simulation) so it can
+run unattended, and it tops the vault up with the underlying the mocked rate
+implies (the testnet stand-in for real yield accrual).
+
 - ☑ Deploy underlying SAC, SY wrapper, PT, YT, tokenizer (and AMM separately) to
   testnet. Addresses recorded in `deployments/testnet.toml`.
 - ☑ Initialize in dependency order; addresses written to `app/.env.local` and
