@@ -259,9 +259,25 @@ impl SyWrapper {
         if from_balance < amount {
             panic_with_error!(env, Error::InsufficientBalance);
         }
+
+        // Move principal pro-rata with the shares, so accrued_yield (shares*rate
+        // - principal) stays correct for both parties. Without this, the
+        // recipient reads zero principal (their whole balance shows as yield) and
+        // the sender keeps too much. Round the moved principal down, which leaves
+        // a stroop of principal with the sender (the conservative direction).
+        let from_principal = Self::read_principal(env, from);
+        let moved_principal = if from_balance == 0 {
+            0
+        } else {
+            mul_div_or_panic(env, from_principal, amount, from_balance)
+        };
+
         Self::write_balance(env, from, from_balance - amount);
+        Self::write_principal(env, from, sub_or_panic(env, from_principal, moved_principal));
         let to_balance = Self::read_balance(env, to);
         Self::write_balance(env, to, add_or_panic(env, to_balance, amount));
+        let to_principal = Self::read_principal(env, to);
+        Self::write_principal(env, to, add_or_panic(env, to_principal, moved_principal));
     }
 
     fn read_allowance(env: &Env, from: &Address, spender: &Address) -> AllowanceValue {
@@ -603,6 +619,27 @@ mod test {
             .transfer(&fixture.alice, &fixture.bob, &(40 * WAD));
         assert_eq!(fixture.client.balance(&fixture.alice), 60 * WAD);
         assert_eq!(fixture.client.balance(&fixture.bob), 40 * WAD);
+    }
+
+    #[test]
+    fn transfer_moves_principal_pro_rata_so_yield_stays_correct() {
+        let fixture = fixture();
+        initialize(&fixture);
+        fixture.client.deposit(&fixture.alice, &(100 * WAD));
+
+        // Rate grows 10%, so Alice has 10 of yield on 100 shares. She sends 40
+        // shares to Bob. Principal must follow pro-rata (40 of the 100), so
+        // neither party's accrued_yield is corrupted by the transfer.
+        fixture
+            .client
+            .set_exchange_rate(&fixture.admin, &1_100_000_000_000_000_000);
+        fixture
+            .client
+            .transfer(&fixture.alice, &fixture.bob, &(40 * WAD));
+
+        // 60 shares * 1.10 - 60 principal = 6 yield; 40 * 1.10 - 40 = 4 yield.
+        assert_eq!(fixture.client.accrued_yield(&fixture.alice), 6 * WAD);
+        assert_eq!(fixture.client.accrued_yield(&fixture.bob), 4 * WAD);
     }
 
     #[test]
