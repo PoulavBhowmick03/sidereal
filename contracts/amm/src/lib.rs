@@ -4,6 +4,7 @@
 
 use core::cmp::min;
 
+use libm::{exp, floor, log, sqrt};
 use sidereal_shared_types::Market;
 use soroban_sdk::{
     auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
@@ -1208,121 +1209,68 @@ fn ln_rate_to_bps(ln_rate: i128) -> i128 {
     (ln_rate * BPS_DENOMINATOR) / WAD
 }
 
-// ln(2) scaled by WAD. Used to range-reduce ln and exp into a small interval
-// where the series below converge quickly. Soroban's wasm VM rejects
-// floating-point instructions, so all transcendental math here is integer
-// fixed-point (i128, WAD = 1e18); these replace the previous libm f64 helpers.
-const LN2_WAD: i128 = 693_147_180_559_945_309;
-
 fn integer_sqrt_or_panic(env: &Env, value: i128) -> i128 {
     if value <= 0 {
         panic_with_error!(env, Error::InvalidAmount);
     }
 
-    // Floor integer square root via Newton's method. Exact for every i128 >= 1
-    // and, unlike the previous f64 sqrt, it does not lose precision for products
-    // approaching WAD^2 (~1e36), which f64's 53-bit mantissa cannot represent.
-    let mut x = value;
-    let mut y = (x + 1) / 2;
-    while y < x {
-        x = y;
-        y = (x + value / x) / 2;
+    let root = floor(sqrt(value as f64));
+    if !root.is_finite() || root <= 0.0 || root > i128::MAX as f64 {
+        panic_with_error!(env, Error::MathOverflow);
     }
-    x
+
+    root as i128
 }
 
-// Natural log of a WAD-fixed positive value, returned WAD-fixed (signed).
-// Range-reduce value = m * 2^k with m in [1, 2), so ln(value) = k*ln2 + ln(m),
-// and evaluate ln(m) with the fast atanh series
-// ln(m) = 2*(z + z^3/3 + z^5/5 + ...), z = (m-1)/(m+1) in [0, 1/3].
-fn ln_wad_checked(value: i128) -> Option<i128> {
+fn ln_wad_or_panic(env: &Env, value: i128) -> i128 {
+    if value <= 0 {
+        panic_with_error!(env, Error::MathOverflow);
+    }
+
+    let as_float = value as f64 / WAD as f64;
+    let logged = log(as_float);
+    from_float_wad_or_panic(env, logged)
+}
+
+fn try_ln_wad(env: &Env, value: i128) -> Option<i128> {
     if value <= 0 {
         return None;
     }
 
-    let mut k: i128 = 0;
-    let mut m = value;
-    while m >= 2 * WAD {
-        m /= 2;
-        k += 1;
-    }
-    while m < WAD {
-        m = m.checked_mul(2)?;
-        k -= 1;
-    }
-
-    // z = (m - WAD) / (m + WAD), WAD-fixed, in [0, 1/3].
-    let z = (m - WAD).checked_mul(WAD)? / (m + WAD);
-    let z2 = z.checked_mul(z)? / WAD; // z^2, WAD-fixed (<= ~1/9)
-
-    let mut term = z; // z^(2n+1), starting at z^1
-    let mut sum = z;
-    let mut n: i128 = 3;
-    // z^2 <= 1/9 so terms decay ~9x each step; 24 terms is far past 1e-18.
-    while n <= 49 {
-        term = term.checked_mul(z2)? / WAD;
-        sum = sum.checked_add(term / n)?;
-        n += 2;
-    }
-
-    let ln_mant = sum.checked_mul(2)?;
-    k.checked_mul(LN2_WAD)?.checked_add(ln_mant)
-}
-
-fn ln_wad_or_panic(env: &Env, value: i128) -> i128 {
-    match ln_wad_checked(value) {
-        Some(v) => v,
-        None => panic_with_error!(env, Error::MathOverflow),
-    }
-}
-
-fn try_ln_wad(_env: &Env, value: i128) -> Option<i128> {
-    ln_wad_checked(value)
-}
-
-// e^x for WAD-fixed signed x, returned WAD-fixed. Range-reduce x = k*ln2 + r
-// with |r| <= ln2/2, so e^x = 2^k * e^r, and evaluate e^r with its Taylor
-// series (|r| <= 0.347 converges in a handful of terms).
-fn exp_wad_checked(value: i128) -> Option<i128> {
-    let k = if value >= 0 {
-        (value + LN2_WAD / 2) / LN2_WAD
-    } else {
-        (value - LN2_WAD / 2) / LN2_WAD
-    };
-    let r = value.checked_sub(k.checked_mul(LN2_WAD)?)?; // |r| <= ln2/2
-
-    let mut term = WAD; // r^0 / 0! = 1
-    let mut sum = WAD;
-    let mut i: i128 = 1;
-    while i <= 20 {
-        term = term.checked_mul(r)? / WAD / i; // term *= r/i
-        if term == 0 {
-            break;
-        }
-        sum = sum.checked_add(term)?;
-        i += 1;
-    }
-
-    // Apply the 2^k factor.
-    if k >= 0 {
-        if k > 90 {
-            return None; // e^x too large to represent in i128 WAD-fixed
-        }
-        sum.checked_mul(1i128 << k)
-    } else {
-        let shift = (-k) as u32;
-        if shift >= 127 {
-            return Some(0);
-        }
-        Some(sum >> shift)
-    }
+    let as_float = value as f64 / WAD as f64;
+    let logged = log(as_float);
+    try_from_float_wad(env, logged)
 }
 
 fn exp_wad_or_panic(env: &Env, value: i128) -> i128 {
-    match exp_wad_checked(value) {
-        Some(v) => v,
-        None => panic_with_error!(env, Error::MathOverflow),
+    let exponent = value as f64 / WAD as f64;
+    from_float_wad_or_panic(env, exp(exponent))
+}
+
+fn from_float_wad_or_panic(env: &Env, value: f64) -> i128 {
+    if !value.is_finite() {
+        panic_with_error!(env, Error::MathOverflow);
     }
+
+    let scaled = value * WAD as f64;
+    if !scaled.is_finite() || scaled > i128::MAX as f64 || scaled < i128::MIN as f64 {
+        panic_with_error!(env, Error::MathOverflow);
+    }
+
+    floor(scaled) as i128
+}
+
+fn try_from_float_wad(_env: &Env, value: f64) -> Option<i128> {
+    if !value.is_finite() {
+        return None;
+    }
+
+    let scaled = value * WAD as f64;
+    if !scaled.is_finite() || scaled > i128::MAX as f64 || scaled < i128::MIN as f64 {
+        return None;
+    }
+
+    Some(floor(scaled) as i128)
 }
 
 fn mul_div_down_or_panic(env: &Env, lhs: i128, rhs: i128, denominator: i128) -> i128 {
