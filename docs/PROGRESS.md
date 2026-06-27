@@ -310,3 +310,34 @@ reproducible redeploy from a pinned commit + committed `deployments/testnet.toml
 AMM liquidity seeding, PT/SY swap proof, the flash-route auth proof on testnet
 (the `flash_route_user_only_signs_the_swap` test stays `#[ignore]`d until then),
 and the full frontend manual verification pass against the live deployment.
+
+---
+
+## Codex operations loop (2026-06-27)
+
+Baseline:
+
+- Read `AUDIT.md`, `docs/COORDINATION.md`, `docs/PROVENANCE.md`, and
+  `docs/PROGRESS.md`.
+- Confirmed `main` already contains the provenance finding, AMM integer math,
+  float-opcode CI guard, SDK simulation source fix, SDK claim/LP additions, TTL
+  bumps, deploy `--yt_token` fix, docs reconciliation, and SY principal transfer
+  fix.
+- Ran `cargo test --workspace`; full workspace is green. The strict
+  `flash_route_user_only_signs_the_swap` test remains ignored as documented
+  until testnet auth proof.
+
+Completed in this loop:
+
+- Added `scripts/deploy-testnet-resilient.sh`, a resumable deployment path that
+  refuses tracked dirty source by default, persists public partial state, reuses
+  the underlying SAC address on rerun, verifies local and on-chain Wasm hashes,
+  writes `app/.env.local`, and emits `deployments/testnet.toml`.
+- Pointed `make deploy` at the resilient script.
+- Added `deployments/README.md` and ignored local deployment state files.
+
+Blocker:
+
+- `stellar` CLI is not installed in this environment, so the pinned testnet
+  redeploy, `deployments/testnet.toml`, AMM liquidity seed, and wallet/manual
+  frontend verification remain pending for a funded testnet machine.

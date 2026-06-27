@@ -112,12 +112,13 @@ make dev       # run the frontend dev server
 Deploy to testnet and wire the frontend:
 
 ```bash
-make deploy    # or: bash scripts/deploy-testnet.sh
+make deploy    # or: bash scripts/deploy-testnet-resilient.sh
 ```
 
 This builds the contracts to wasm, generates and funds a deployer identity (no
 hardcoded keys), deploys SY/PT/YT/tokenizer/AMM, initializes them in dependency
-order, and writes the contract addresses to `app/.env.local`.
+order, writes the contract addresses to `app/.env.local`, and emits a public
+deployment manifest at `deployments/testnet.toml`.
 
 ## Deploying the frontend (Vercel)
 

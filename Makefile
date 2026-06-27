@@ -37,7 +37,7 @@ dev: ## Run the frontend dev server
 	pnpm --filter @sidereal/app dev
 
 deploy: ## Deploy the protocol to testnet and wire the frontend
-	bash scripts/deploy-testnet.sh
+	bash scripts/deploy-testnet-resilient.sh
 
 seed: ## Seed the deployed market with activity so the demo shows live numbers
 	bash scripts/seed-demo.sh

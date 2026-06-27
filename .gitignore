@@ -9,3 +9,9 @@ next-env.d.ts
 *.tsbuildinfo
 playwright-report/
 test-results/
+
+# Local deploy outputs. Committed deployment manifests live in deployments/*.toml.
+app/.env.local
+deployments/*.state.env
+deployments/*.tmp
+deployments/*.tmp.*

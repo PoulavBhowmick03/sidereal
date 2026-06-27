@@ -64,10 +64,11 @@ The pre-testnet audit found defects that are now fixed. Closed items:
 - ☑ **SDK interface drift.** `getPosition` dropped the removed rate argument and
   added LP balance; a `buildClaimYield` builder targets `tokenizer.claim_yield`.
 - ☑ **Deploy script missing `--yt_token` (audit Layer 7).** `scripts/deploy-testnet.sh`
-  now passes `--yt_token` to the AMM init and pins the source commit. A
-  resumable variant and a committed `deployments/testnet.toml` provenance record
-  are still pending (the live redeploy from a pinned commit needs a funded
-  testnet run, see section 2).
+  now passes `--yt_token` to the AMM init and pins the source commit.
+  `scripts/deploy-testnet-resilient.sh` is the resumable path: it persists
+  partial addresses, reuses the SAC address on rerun, and writes
+  `deployments/testnet.toml`. The live redeploy from a pinned commit still needs
+  a funded testnet run, see section 2.
 - ☑ **TTL strategy (audit Layer 7).** SY/PT/YT/tokenizer now bump instance and
   per-holder persistent TTL on every mutating entrypoint; YT checkpoints are
   persistent and per-holder.
