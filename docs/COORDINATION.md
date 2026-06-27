@@ -24,7 +24,11 @@ per-holder persistent entries, replacing the current single
 | Key (new)                | Value type | Meaning                                                                 |
 | ------------------------ | ---------- | ----------------------------------------------------------------------- |
 | `Checkpoint(Address)`    | `i128`     | Last SY exchange rate (WAD-scaled) the holder's yield index settled to. |
-| `AccruedYield(Address)`  | `i128`     | Asset-unit YT yield accrued but not yet claimed, carried over transfers.|
+| `AccruedYield(Address)`  | `i128`     | SY shares accrued but not yet claimed, carried over transfers.          |
+
+(Note: `AccruedYield` is denominated in SY shares, the directly-claimable
+amount, not asset units. The storage key shape and class are unaffected by the
+unit; this note is just for correctness.)
 
 Decisions baked into this shape:
 
@@ -92,6 +96,26 @@ So Codex/SDK/frontend can plan around them:
   every tokenizer mutation: `escrow_sy * R / WAD >= pt_supply +
   sum(unclaimed YT yield at R)`. Verified by construction in the algebra; also
   asserted in tests/integration/tests/economics.rs.
+
+---
+
+## 3b. Correctness finding: the yield formula (economics lane, fixed in-lane)
+
+The original work plan stated the YT yield as
+`accrued = yt_balance * (R - checkpoint) / WAD`. That is only correct when the
+split rate is exactly 1.00. For a position split at rate 1.05 growing to 1.10 it
+overpays (5.25 vs the correct 5.00 asset units), which would break the
+escrow-coverage invariant. The economics lane uses the conservation-correct,
+telescoping form instead:
+
+```
+owed_SY_shares = yt_balance * (R - c) / (c * R) * WAD     (== yt_balance * (1/c - 1/R) * WAD)
+```
+
+This telescopes across intermediate settlements, so settle-on-transfer banks
+exactly the same total as a single end-of-term settle. Implemented with checked
+mul/div in a fixed order to stay within i128 under the testnet input bounds.
+No action needed from Codex; flagged for the record.
 
 ---
 

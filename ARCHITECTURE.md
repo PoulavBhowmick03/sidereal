@@ -48,40 +48,86 @@ Each layer is a separate Soroban contract. The dependency only flows downward �
 
 ## 3. Layer 2: Tokenizer
 
-**Purpose:** mint PT + YT from SY, redeem the underlying at maturity, and track YT yield accrual.
+**Purpose:** mint PT + YT from SY, separate fixed principal (PT) from yield (YT),
+redeem principal at maturity, and pay YT holders their accrued yield.
 
-**The mint operation.**
-
-```
-input:  N units of SY, maturity timestamp M
-output: N units of PT-M, N units of YT-M
-```
-
-Both PT and YT are tagged with the same maturity. The tokenizer holds the SY in escrow until either:
-- the holder recombines PT+YT before maturity → returns SY, or
-- maturity passes and PT holders redeem → returns SY pro-rata
-
-**The PT redemption at maturity.**
-
-After the maturity timestamp, each PT-M is redeemable 1:1 for SY-M. The tokenizer reads the current `exchange_rate()` from the SY contract — which by then reflects all the yield earned during the term — and transfers the appropriate amount of underlying.
-
-Worked example. A user mints 100 PT and 100 YT from 100 SY at t=0, when the SY exchange rate is 1.00 (1 SY = 1 USDC). The maturity is t+90 days. During those 90 days, Blend pays an average of 8% APY, so by maturity the SY exchange rate is roughly 1.02. The user redeems 100 PT at maturity and receives 100 SY, which they unwrap into 102 USDC. The 2 USDC of yield went to whoever held the YT during the term and called `claim_yield`.
-
-**The YT yield accrual.**
-
-This is the subtle part, and we are deliberately matching Pendle's behavior rather than auto-compounding.
-
-Each holder has a `last_claim_rate` checkpoint. When they call `claim_yield`:
+**Denomination: asset units.** PT and YT are denominated in underlying asset
+units, not SY shares. This is what makes PT fungible across holders who split at
+different times: 1 PT is always a claim on 1 unit of asset at maturity,
+regardless of the exchange rate when it was minted. At `split(sy_amount)` with
+the current SY rate `R` (asset per share, WAD scaled), the tokenizer mints
 
 ```
-accrued = (current_exchange_rate - last_claim_rate) * yt_balance
-transfer accrued SY to holder
-last_claim_rate = current_exchange_rate
+pt_face = yt_face = sy_amount * R / WAD   (asset units, equal amounts)
 ```
 
-Unclaimed yield is not lost — it stays in the SY wrapper and accrues to the holder's account on the next claim. But it does not compound. A YT holder who never claims and then sells their YT mid-term will have transferred their accrued yield to the buyer.
+and escrows `sy_amount` SY shares. At `R = WAD` (rate 1.00) the asset amount
+equals the share amount, so a split at par mints `sy_amount` of each.
 
-**Storage segregation.** YT checkpoints are keyed by `(holder_address, maturity_timestamp)`, never by holder alone. This is enforced at the storage layer so that v2's multi-maturity support is a no-op refactor.
+The tokenizer holds the escrowed SY until either:
+- the holder recombines PT+YT before maturity, returning principal plus settling
+  any accrued YT yield, or
+- maturity passes and PT holders redeem principal, while YT holders claim the
+  yield accrued over the term.
+
+**PT redemption at maturity.** Each PT is principal, not a share claim. Redeeming
+`pt_amount` (asset units) pays
+
+```
+sy_to_pay = pt_amount * WAD / R_maturity
+```
+
+SY shares out of escrow, which unwrap to `pt_amount` units of underlying. PT is
+fixed principal: it does not capture yield. (This is the central correction over
+the earlier prototype, where PT redeemed 1:1 in shares and so captured the yield
+that belongs to YT. See the audit, Layer 1 finding 3.)
+
+**YT yield accrual.** YT captures everything the escrow earns above principal. We
+match Pendle's index model rather than auto-compounding. Each holder carries a
+`checkpoint`, the SY exchange rate their yield was last settled at. Settling a
+holder from checkpoint `c` to the current rate `R` banks
+
+```
+owed_shares = yt_balance * (R - c) / (c * R) * WAD     (SY shares)
+```
+
+into the holder's `accrued_yield` ledger and advances `checkpoint` to `R`. The
+`(R - c) / (c * R)` form (equivalently `1/c - 1/R`) is the conservation-correct
+amount: it telescopes across intermediate settlements, so settling at every
+transfer yields exactly the same total as a single settle at the end. A naive
+`(R - c) / WAD` overpays whenever the split rate is above 1.00. `claim_yield`
+pays the banked `accrued_yield` SY out of escrow and zeroes the ledger.
+
+Worked example. A user deposits 100 USDC at rate 1.00 and splits into 100 PT and
+100 YT (asset units). Over the term the SY rate rises to 1.02. The escrow (100
+SY shares) is now worth 102 USDC. The YT holder claims `100 * (1/1.00 - 1/1.02)`
+= 1.96 SY, which unwraps to 2.00 USDC: the yield. At maturity the PT holder
+redeems 100 PT for `100 / 1.02` = 98.04 SY, which unwraps to 100.00 USDC: the
+principal. Out: 2.00 + 100.00 = 102.00 USDC, exactly the escrow. No double count.
+
+**Transfer carries settled yield, not unsettled.** On any YT balance change
+(mint, transfer, transfer_from, burn) both the sender and the receiver are
+settled first, banking each party's accrued yield to their own ledger before the
+balance moves. A holder who never claims and then sells keeps the yield they
+earned while holding (in their ledger); the buyer only earns yield from the
+transfer forward. This fixes the earlier behavior where mid-term transfers lost
+or double-counted yield (audit Layer 1 finding 4).
+
+**The escrow-coverage invariant.** At every tokenizer state transition,
+
+```
+escrow_sy * R / WAD  >=  pt_supply + total_unclaimed_yt_yield
+```
+
+The escrow, valued at the current rate, always covers every PT at face plus
+every YT's unclaimed yield. Equality holds at split and is preserved by claim,
+redeem, and recombine. A code path that can break this is a bug.
+
+**Storage.** YT per-holder yield state is two persistent entries keyed by holder
+address: `Checkpoint(holder)` (last settled rate) and `AccruedYield(holder)`
+(banked but unclaimed SY). Persistent, not instance, so per-holder data scales
+and carries its own TTL. Each YT contract is single-maturity, so the maturity is
+implicit in the contract, not part of the key.
 
 ---
 
