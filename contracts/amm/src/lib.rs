@@ -17,9 +17,15 @@ const DAY: u64 = 86_400;
 const IMPLIED_RATE_TIME: u64 = 365 * DAY;
 const MINIMUM_LIQUIDITY: i128 = 1_000;
 const MAX_MARKET_PROPORTION: i128 = (WAD * 96) / 100;
-const MAX_FLOAT_HELPER_BALANCE: i128 = WAD;
-const MAX_FLOAT_HELPER_SCALAR_ROOT: i128 = 10 * WAD;
-const MAX_FLOAT_HELPER_ANCHOR: i128 = 2 * WAD;
+// Conservative testnet caps on reserves and curve parameters. These were
+// originally sized to keep values in the float-safe range of the old f64 curve
+// helpers. The curve is integer fixed-point now, so the names no longer refer
+// to floats; the caps are kept as a conservative product limit that also keeps
+// the i128 intermediate products well clear of overflow. Re-deriving the exact
+// i128 overflow bound is future work; these values are unchanged.
+const MAX_RESERVE_UNITS: i128 = WAD;
+const MAX_SCALAR_ROOT: i128 = 10 * WAD;
+const MAX_ANCHOR: i128 = 2 * WAD;
 const LEDGERS_PER_DAY: u32 = 17_280;
 const AMM_INSTANCE_TTL_THRESHOLD_LEDGERS: u32 = 30 * LEDGERS_PER_DAY;
 const AMM_INSTANCE_TTL_EXTEND_TO_LEDGERS: u32 = 120 * LEDGERS_PER_DAY;
@@ -121,13 +127,13 @@ impl AmmMarket {
         if scalar_root <= 0 {
             return Err(Error::InvalidScalarRoot);
         }
-        if scalar_root > MAX_FLOAT_HELPER_SCALAR_ROOT {
+        if scalar_root > MAX_SCALAR_ROOT {
             return Err(Error::InputOutOfBounds);
         }
         if initial_anchor < WAD {
             return Err(Error::InvalidAnchor);
         }
-        if initial_anchor > MAX_FLOAT_HELPER_ANCHOR {
+        if initial_anchor > MAX_ANCHOR {
             return Err(Error::InputOutOfBounds);
         }
         if !(0..BPS_DENOMINATOR).contains(&fee_bps) {
@@ -682,20 +688,20 @@ fn require_positive_amount_result(amount: i128) -> Result<(), Error> {
 
 fn require_bounded_amount(env: &Env, amount: i128) {
     require_positive_amount(env, amount);
-    require_within_float_helper_bounds(env, amount);
+    require_within_reserve_bounds(env, amount);
 }
 
 fn require_bounded_amount_result(amount: i128) -> Result<(), Error> {
     require_positive_amount_result(amount)?;
-    if amount > MAX_FLOAT_HELPER_BALANCE {
+    if amount > MAX_RESERVE_UNITS {
         return Err(Error::InputOutOfBounds);
     }
 
     Ok(())
 }
 
-fn require_within_float_helper_bounds(env: &Env, amount: i128) {
-    if amount > MAX_FLOAT_HELPER_BALANCE {
+fn require_within_reserve_bounds(env: &Env, amount: i128) {
+    if amount > MAX_RESERVE_UNITS {
         panic_with_error!(env, Error::InputOutOfBounds);
     }
 }
@@ -1356,7 +1362,7 @@ fn checked_add(env: &Env, lhs: i128, rhs: i128) -> i128 {
 
 fn checked_bounded_reserve_add(env: &Env, lhs: i128, rhs: i128) -> i128 {
     let value = checked_add(env, lhs, rhs);
-    require_within_float_helper_bounds(env, value);
+    require_within_reserve_bounds(env, value);
     value
 }
 
@@ -1542,7 +1548,7 @@ mod test {
             &fixture.yt_token,
             &fixture.tokenizer,
             &MATURITY,
-            &(MAX_FLOAT_HELPER_SCALAR_ROOT + 1),
+            &(MAX_SCALAR_ROOT + 1),
             &INITIAL_ANCHOR,
             &FEE_BPS,
             &TWAP_WINDOW,
@@ -1557,7 +1563,7 @@ mod test {
 
         fixture
             .client
-            .add_liquidity(&fixture.admin, &(MAX_FLOAT_HELPER_BALANCE + 1), &10_000);
+            .add_liquidity(&fixture.admin, &(MAX_RESERVE_UNITS + 1), &10_000);
     }
 
     #[test]
