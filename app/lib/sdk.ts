@@ -4,10 +4,14 @@ import { StellarYT, type MarketState } from "@sidereal/sdk";
 import { appConfig, isDeployed, type AppConfig } from "./config";
 
 /** Builds a StellarYT client from the current public app config. */
-export function makeClient(cfg: AppConfig = appConfig()): StellarYT {
+export function makeClient(
+  cfg: AppConfig = appConfig(),
+  simulationSourceAccount = cfg.simulationSourceAccount,
+): StellarYT {
   return new StellarYT({
     rpcUrl: cfg.rpcUrl,
     networkPassphrase: cfg.networkPassphrase,
+    simulationSourceAccount,
     contracts: cfg.contracts,
   });
 }

@@ -22,7 +22,7 @@ export function usePosition(address: string | null, refreshKey: unknown = 0): Po
     }
     let cancelled = false;
     const cfg = appConfig();
-    makeClient(cfg)
+    makeClient(cfg, address)
       .getPosition(address, cfg.marketId)
       .then((p) => !cancelled && setPosition(p))
       .catch(() => !cancelled && setPosition(null));

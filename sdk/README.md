@@ -21,6 +21,7 @@ import { StellarYT } from "@sidereal/sdk";
 const client = new StellarYT({
   rpcUrl: "https://soroban-testnet.stellar.org",
   networkPassphrase: "Test SDF Network ; September 2015",
+  simulationSourceAccount, // funded public G-account, never used for signing
   contracts: { sy, pt, yt, tokenizer, market }, // deployed addresses
 });
 

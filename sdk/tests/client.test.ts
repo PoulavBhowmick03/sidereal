@@ -15,6 +15,7 @@ vi.mock("@stellar/stellar-sdk", () => {
     sendHash: "txhash123",
     getTxStatus: "SUCCESS" as string,
     calls: [] as Array<{ method: string; args: unknown[] }>,
+    accountRequests: [] as string[],
   };
   (globalThis as Record<string, unknown>).__sdkMock = state;
 
@@ -65,6 +66,7 @@ vi.mock("@stellar/stellar-sdk", () => {
       public opts?: unknown,
     ) {}
     async getAccount(addr: string) {
+      state.accountRequests.push(addr);
       if (!state.accountExists) throw new Error("account not found");
       return { accountId: () => addr, sequenceNumber: () => "1" };
     }
@@ -98,16 +100,19 @@ type MockState = {
   sendHash: string;
   getTxStatus: string;
   calls: Array<{ method: string; args: unknown[] }>;
+  accountRequests: string[];
 };
 
 const state = () => (globalThis as Record<string, unknown>).__sdkMock as MockState;
 
 const contracts = { sy: "SY", pt: "PT", yt: "YT", tokenizer: "TK", market: "AMM" };
+const simulationSourceAccount = "GSIMULATIONSOURCE";
 
 function newClient() {
   return new StellarYT({
     rpcUrl: "http://localhost:8000",
     networkPassphrase: "Test SDF Network ; September 2015",
+    simulationSourceAccount,
     contracts,
   });
 }
@@ -120,6 +125,7 @@ beforeEach(() => {
   s.sendStatus = "PENDING";
   s.getTxStatus = "SUCCESS";
   s.calls = [];
+  s.accountRequests = [];
 });
 
 describe("getMarket", () => {
@@ -155,6 +161,27 @@ describe("getMarket", () => {
   it("rejects when the source account is missing", async () => {
     state().accountExists = false;
     await expect(newClient().getMarket("mkt")).rejects.toThrow(/source account not found/);
+  });
+
+  it("uses the configured funded account instead of the market contract", async () => {
+    state().returns = {
+      exchange_rate: 1_000_000_000_000_000_000n,
+      twap_apy: 860n,
+      spot_apy: 875n,
+      twap_warming_up: false,
+      maturity: 2_000_000_000n,
+      underlying: "USDC",
+      reserve_pt: 500n,
+      reserve_sy: 700n,
+    };
+
+    await newClient().getMarket("mkt");
+
+    expect(state().accountRequests).not.toContain(contracts.market);
+    expect(state().accountRequests).toHaveLength(8);
+    expect(state().accountRequests.every((account) => account === simulationSourceAccount)).toBe(
+      true,
+    );
   });
 });
 

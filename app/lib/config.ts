@@ -10,6 +10,8 @@ import type { ContractAddresses } from "@sidereal/sdk";
 
 export const TESTNET_PASSPHRASE = "Test SDF Network ; September 2015";
 export const TESTNET_RPC = "https://soroban-testnet.stellar.org";
+export const TESTNET_SIMULATION_SOURCE =
+  "GBGHELMOABS7WCYOMJTWQRGQ6VZYLYXXMLE7JJAHJ6I4WW7FMJSDERN3";
 
 function env(name: string, fallback = ""): string {
   const value = process.env[name];
@@ -19,6 +21,8 @@ function env(name: string, fallback = ""): string {
 export interface AppConfig {
   rpcUrl: string;
   networkPassphrase: string;
+  /** Public funded G-account used only to source unconnected read simulations. */
+  simulationSourceAccount: string;
   marketId: string;
   /** Base-unit decimals for SY/PT/YT (Stellar USDC is 7). Display only. */
   decimals: number;
@@ -29,6 +33,10 @@ export function appConfig(): AppConfig {
   return {
     rpcUrl: env("NEXT_PUBLIC_SOROBAN_RPC_URL", TESTNET_RPC),
     networkPassphrase: env("NEXT_PUBLIC_NETWORK_PASSPHRASE", TESTNET_PASSPHRASE),
+    simulationSourceAccount: env(
+      "NEXT_PUBLIC_SIMULATION_SOURCE_ADDRESS",
+      TESTNET_SIMULATION_SOURCE,
+    ),
     marketId: env("NEXT_PUBLIC_MARKET_ID", "blend-usdc-q3"),
     decimals: Number(env("NEXT_PUBLIC_TOKEN_DECIMALS", "7")),
     contracts: {

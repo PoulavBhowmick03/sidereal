@@ -37,6 +37,7 @@ function requirePositive(label: string, value: bigint): void {
 export class StellarYT {
   private readonly server: rpc.Server;
   private readonly networkPassphrase: string;
+  private readonly simulationSourceAccount: string;
   private readonly contracts: ContractAddresses;
 
   constructor(opts: StellarYTOptions) {
@@ -44,6 +45,7 @@ export class StellarYT {
       allowHttp: opts.rpcUrl.startsWith("http://"),
     });
     this.networkPassphrase = opts.networkPassphrase;
+    this.simulationSourceAccount = opts.simulationSourceAccount;
     this.contracts = opts.contracts;
   }
 
@@ -275,9 +277,16 @@ export class StellarYT {
 
   /** Simulates a read-only call and decodes the ScVal result to a JS value. */
   private async simulateRead<T>(op: Operation): Promise<T> {
-    const source = await this.server.getAccount(this.contracts.market).catch(() => null);
+    // Soroban simulations require a funded G-account for the transaction
+    // source. A contract C-address is not an account and RPC rejects it. The
+    // caller supplies the connected wallet when available, or a public funded
+    // fallback account for reads before a wallet is connected. This address is
+    // never used to sign or submit a transaction.
+    const source = await this.server.getAccount(this.simulationSourceAccount).catch(() => null);
     if (source === null) {
-      throw new Error("cannot simulate: source account not found on RPC");
+      throw new Error(
+        `cannot simulate: source account not found on RPC: ${this.simulationSourceAccount}`,
+      );
     }
     const tx = new TransactionBuilder(source, {
       fee: "0",

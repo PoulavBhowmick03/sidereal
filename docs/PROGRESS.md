@@ -202,3 +202,72 @@ Out of lane / not done here (by design): the real yield source (mock rate
 remains; Layer 2 is Codex's), the AMM float fix, SDK simulate source, deploy
 scripts, TTL bumps. The SDK must drop the rate arg from preview_claim_yield and
 add a claim builder targeting tokenizer.claim_yield (COORDINATION.md 2).
+
+---
+
+## Codex operations Phase 1
+
+### Provenance check complete
+
+- Queried the live AMM Wasm hash on testnet.
+- Rebuilt both committed float candidates and the uncommitted integer rewrite.
+- Confirmed the live AMM exactly matches the uncommitted integer artifact and
+  matches no committed candidate.
+- Located the uncommitted resilient deploy script used for the live addresses.
+- Recorded addresses, hashes, tool versions, and reproduction commands in
+  `docs/PROVENANCE.md`.
+
+Next: adopt the exact integer rewrite, remove `libm`, and verify the Wasm build
+contains no floating-point instructions.
+
+### AMM integer math complete
+
+- Applied the exact integer fixed-point rewrite that produced the live testnet
+  artifact.
+- Removed the AMM's direct `libm` dependency and updated `Cargo.lock`.
+- Built `sidereal-amm` for `wasm32v1-none` with `--locked`.
+- Verified the new committed artifact hash is
+  `33cf0ee0a757baa546f4350c8ab3e2167ce86e3e8051bc9bb2ec1809ed309a04`.
+- Verified `wasm-objdump -d` reports zero `f32.*` or `f64.*` opcodes. The same
+  check reports 210 float opcodes for the prior committed float artifact.
+- AMM tests are green, including the 10,000-case property test.
+- The full workspace reaches only Claude's three intentionally red economics
+  specifications. All previously green tests, including the auth invariant,
+  remain green.
+
+Next: add the all-contract Wasm float-opcode CI guard.
+
+### Wasm float-opcode guard complete
+
+- Added `scripts/check-wasm-floats.sh`, which disassembles each supplied Wasm
+  artifact and fails on any `f32.*` or `f64.*` opcode.
+- Updated contract CI to install `wabt` and inspect all five release artifacts.
+- Verified all five integer-path artifacts pass locally.
+- Verified the prior float AMM fails with 210 detected float opcodes.
+
+GitHub negative control:
+
+- Opened temporary draft PR #20 from clean `main` with only the guard added.
+- SDK, app, e2e, contract tests, and contract Wasm builds passed.
+- The contracts job then failed only at `Reject floating-point Wasm opcodes`.
+- Four contracts passed; the float AMM reported 210 rejected opcodes.
+- Closed the PR and deleted the temporary branch after capturing the failed
+  step log.
+
+Next: fix the SDK simulation source account.
+
+### SDK simulation source fixed
+
+- Added an explicit funded G-account simulation source to the SDK options.
+- The app uses the connected wallet for reads when available and the public
+  funded testnet deployer address before wallet connection.
+- Added a unit test proving reads never call `getAccount` with the market
+  C-address.
+- SDK typecheck, 32 tests, and build pass.
+- App typecheck, 16 tests, and production build pass.
+- A direct no-wallet testnet read now returns the live market successfully.
+  It also confirms the current deployment has zero PT and SY reserves.
+- The Rust workspace remains green except for Claude's three intentionally red
+  economics specifications. The auth invariant remains green.
+
+Next: fix and harden the testnet deploy scripts.
