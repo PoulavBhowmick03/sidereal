@@ -17,8 +17,11 @@ import { useTxFlow } from "./tx";
  */
 export function useSidereal() {
   const cfg = useMemo(() => appConfig(), []);
-  const client = useMemo(() => makeClient(cfg), [cfg]);
   const { address, signTransaction } = useWallet();
+  const client = useMemo(
+    () => makeClient(cfg, address ?? cfg.simulationSourceAccount),
+    [cfg, address],
+  );
   const { phase, run } = useTxFlow();
 
   const submit = useCallback(

@@ -115,3 +115,19 @@ GitHub negative control:
   step log.
 
 Next: fix the SDK simulation source account.
+
+### SDK simulation source fixed
+
+- Added an explicit funded G-account simulation source to the SDK options.
+- The app uses the connected wallet for reads when available and the public
+  funded testnet deployer address before wallet connection.
+- Added a unit test proving reads never call `getAccount` with the market
+  C-address.
+- SDK typecheck, 32 tests, and build pass.
+- App typecheck, 16 tests, and production build pass.
+- A direct no-wallet testnet read now returns the live market successfully.
+  It also confirms the current deployment has zero PT and SY reserves.
+- The Rust workspace remains green except for Claude's three intentionally red
+  economics specifications. The auth invariant remains green.
+
+Next: fix and harden the testnet deploy scripts.

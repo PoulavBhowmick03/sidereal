@@ -38,6 +38,8 @@ export interface StellarYTOptions {
   rpcUrl: string;
   /** Network passphrase, e.g. "Test SDF Network ; September 2015". */
   networkPassphrase: string;
+  /** Funded G-account used only as the source for read simulations. */
+  simulationSourceAccount: string;
   /** Deployed contract addresses for the target market. */
   contracts: ContractAddresses;
 }
