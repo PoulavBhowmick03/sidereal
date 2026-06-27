@@ -9,6 +9,7 @@ import type {
   Position,
   Quote,
   RedeemArgs,
+  ClaimArgs,
   RemoveLiquidityArgs,
   StellarYTOptions,
   SwapArgs,
@@ -121,19 +122,22 @@ export class StellarYT {
    * PT and YT are real SEP-41 tokens now, so tokenizer.position reads the
    * holder's on-chain PT/YT balances and SY balance is the wrapper's
    * share_balance. Claimable yield uses YT's preview_claim_yield, which reads
-   * the holder's real YT balance itself and takes the current SY exchange rate.
+   * the holder's real YT balance and the SY exchange rate itself (no caller
+   * supplied rate), and returns the claimable amount in SY shares. LP balance
+   * comes from the AMM's per-holder accounting.
    */
   async getPosition(holder: string, marketId: string): Promise<Position> {
     const sy = new Contract(this.contracts.sy);
     const tokenizer = new Contract(this.contracts.tokenizer);
+    const market = new Contract(this.contracts.market);
     const holderScVal = new Address(holder).toScVal();
 
-    const [syBalance, position, exchangeRate] = await Promise.all([
+    const [syBalance, position, lpBalance] = await Promise.all([
       this.simulateRead<bigint>(sy.call("share_balance", holderScVal)),
       this.simulateRead<{ pt_balance: bigint; yt_balance: bigint }>(
         tokenizer.call("position", holderScVal),
       ),
-      this.simulateRead<bigint>(sy.call("exchange_rate")),
+      this.simulateRead<bigint>(market.call("lp_balance", holderScVal)),
     ]);
 
     const ptBalance = position.pt_balance;
@@ -143,15 +147,32 @@ export class StellarYT {
     const claimableYield =
       ytBalance > 0n
         ? await this.simulateRead<bigint>(
-            new Contract(this.contracts.yt).call(
-              "preview_claim_yield",
-              holderScVal,
-              nativeToScVal(exchangeRate, { type: "i128" }),
-            ),
+            new Contract(this.contracts.yt).call("preview_claim_yield", holderScVal),
           )
         : 0n;
 
-    return { holder, marketId, syBalance, ptBalance, ytBalance, claimableYield };
+    return {
+      holder,
+      marketId,
+      syBalance,
+      ptBalance,
+      ytBalance,
+      claimableYield,
+      lpBalance,
+    };
+  }
+
+  /**
+   * Builds a claim transaction. The tokenizer settles the holder's accrued YT
+   * yield and pays it in SY out of escrow. Reverts (Insolvent) if the rate has
+   * regressed below PT coverage, which leaves the holder's banked yield intact.
+   */
+  async buildClaimYield(args: ClaimArgs): Promise<TransactionEnvelope> {
+    const op = new Contract(this.contracts.tokenizer).call(
+      "claim_yield",
+      new Address(args.from).toScVal(),
+    );
+    return this.buildEnvelope(args.from, [op]);
   }
 
   // --- transaction builders (return unsigned envelopes) --------------------

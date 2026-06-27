@@ -217,11 +217,11 @@ describe("quoteSwap", () => {
 });
 
 describe("getPosition", () => {
-  it("reads SY share balance, tokenizer position, and claimable yield", async () => {
+  it("reads SY balance, position, claimable yield, and LP balance", async () => {
     state().returns = {
       share_balance: 50n,
       position: { pt_balance: 10n, yt_balance: 20n },
-      exchange_rate: 1_000_000_000_000_000_000n,
+      lp_balance: 3n,
       preview_claim_yield: 7n,
     };
     const p = await newClient().getPosition("G1", "mkt");
@@ -229,13 +229,17 @@ describe("getPosition", () => {
     expect(p.ptBalance).toBe(10n);
     expect(p.ytBalance).toBe(20n);
     expect(p.claimableYield).toBe(7n);
+    expect(p.lpBalance).toBe(3n);
+    // preview_claim_yield is called with the holder only, no rate argument.
+    const preview = state().calls.find((c) => c.method === "preview_claim_yield");
+    expect(preview?.args).toHaveLength(1);
   });
 
   it("skips the yield preview when YT balance is zero", async () => {
     state().returns = {
       share_balance: 0n,
       position: { pt_balance: 0n, yt_balance: 0n },
-      exchange_rate: 1_000_000_000_000_000_000n,
+      lp_balance: 0n,
     };
     const p = await newClient().getPosition("G1", "mkt");
     expect(p.claimableYield).toBe(0n);
@@ -286,6 +290,11 @@ describe("transaction builders", () => {
     state().returns = { is_matured: true };
     const post = await newClient().buildRedeem({ marketId: "mkt", from: "G1", amount: 5n });
     expect(post.xdr).toBe("PREPARED:redeem_at_maturity");
+  });
+
+  it("buildClaimYield targets the tokenizer claim_yield entrypoint", async () => {
+    const env = await newClient().buildClaimYield({ marketId: "mkt", from: "G1" });
+    expect(env.xdr).toBe("PREPARED:claim_yield");
   });
 
   it("buildAddLiquidity and buildRemoveLiquidity hit the Market methods", async () => {

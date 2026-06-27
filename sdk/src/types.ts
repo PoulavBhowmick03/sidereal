@@ -101,6 +101,8 @@ export interface Position {
   ytBalance: bigint;
   /** Yield claimable by this holder right now, in SY base units. */
   claimableYield: bigint;
+  /** LP tokens held by this holder in the AMM, in base units. */
+  lpBalance: bigint;
 }
 
 export interface MintArgs {
@@ -116,10 +118,16 @@ export interface RedeemArgs {
   marketId: string;
   from: string;
   /**
-   * Before maturity: recombine `amount` PT + `amount` YT back into SY.
-   * At/after maturity: redeem `amount` PT 1:1 for SY.
+   * Before maturity: recombine `amount` PT + `amount` YT back into SY principal.
+   * At/after maturity: redeem `amount` PT for its principal in SY
+   * (`amount * WAD / maturity_rate`), capped pro-rata under insolvency.
    */
   amount: bigint;
+}
+
+export interface ClaimArgs {
+  marketId: string;
+  from: string;
 }
 
 export interface AddLiquidityArgs {

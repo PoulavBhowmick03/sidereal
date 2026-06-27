@@ -15,6 +15,7 @@ export type {
   Position,
   MintArgs,
   RedeemArgs,
+  ClaimArgs,
   AddLiquidityArgs,
   RemoveLiquidityArgs,
   TransactionEnvelope,
