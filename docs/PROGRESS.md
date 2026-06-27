@@ -55,10 +55,44 @@ auth_invariants reports 1 passed / 1 ignored. Full baseline (`cargo test
   (`amm_*`, `yt_flash_route`) are side effects of running tests against Codex's
   uncommitted AMM integer-math change; they are NOT part of this commit.
 
-## Next: Phase 2 step 1 (denomination) and step 2 (rewrite split)
+## Phase 2 steps 1-4 (COMPLETE): denomination + split/redeem/recombine
 
-- Step 1: encode the asset-unit denomination in `tokenizer.split` (mint
-  `sy_amount * R / WAD`), document in ARCHITECTURE.md and code comments.
-- Step 2: rewrite `tokenizer.split` and update its tests.
-- Blocker to clear before step 5: SDK/human ack on the `preview_claim_yield`
-  interface change (COORDINATION.md section 2).
+Human checkpoint approved continuing through step 4, with "read rate internally"
+for the step 5 interface.
+
+- Step 1 (denomination): ARCHITECTURE.md section 3 rewritten to asset units, the
+  correct telescoping YT formula, the escrow invariant, and a worked example
+  that no longer double-counts. Recorded a correctness finding: the planned
+  `(R-c)/WAD` yield formula overpays for splits above rate 1.00; the lane uses
+  `(R-c)/(c*R)*WAD` instead (COORDINATION.md 3b).
+- YT settle engine (`feat(yt)`): per-holder persistent `Checkpoint` +
+  `AccruedYield`, `settle()` reading the SY rate internally, wired into mint /
+  transfer / transfer_from / burn / burn_from. Telescoping formula locked by a
+  1.05-split test and a cross-transfer conservation test. claim_yield settles
+  and reports the claimable amount; payout is deferred to step 5.
+- Step 2 (split): mints `face = sy_amount * rate / WAD` PT and YT, escrows the
+  SY. At rate 1.00, face == sy_amount, so rate-1.0 flows are unchanged.
+- Step 3 (redeem_at_maturity): pays `pt_amount * WAD / rate` SY (principal),
+  burns PT. No longer 1:1 in shares.
+- Step 4 (recombine): burns equal PT+YT (the YT burn settles accrued yield
+  first), returns principal `pt_amount * WAD / rate`; banked yield stays
+  claimable.
+
+Test state after steps 1-4:
+- `pt_redeems_to_principal_not_share` (economics): now GREEN.
+- `yt_receives_yield_on_claim`, `escrow_covers_outstanding_claims`: still RED by
+  design, waiting on the step 5 claim payout.
+- yt-token 9, tokenizer 9, journey 5: green. Rate-1.0 numbers unchanged.
+
+## Next: Phase 2 step 5 (claim payout) and step 6 (transfer hooks)
+
+- Step 5: make claim pay the banked `AccruedYield` SY out of the tokenizer
+  escrow, zero the ledger, drop the `current_exchange_rate` arg from
+  preview/claim (read internally). This is the hard-stop #1 interface change;
+  human approved the "read rate internally" direction. Turns the last two
+  economics specs green.
+- Step 6 transfer hooks are already implemented as part of the settle engine;
+  step 5 will add the dedicated conservation test that pays out and asserts no
+  yield is lost or double counted.
+- Then Phase 3: escrow-coverage assertion in code, insolvency guard, maturity
+  rate snapshot, post-maturity YT settlement.
