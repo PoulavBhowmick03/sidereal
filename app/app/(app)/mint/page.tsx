@@ -14,21 +14,25 @@ import { SubmitButton } from "@/components/SubmitButton";
 import { TxStatus } from "@/components/TxStatus";
 
 export default function MintPage() {
-  const { cfg, client, address, phase, submit } = useSidereal();
+  const { cfg, client, address, phase, submit, submitSequence } = useSidereal();
 
   const [amount, setAmount] = useState("");
   const [split, setSplit] = useState(true);
   const market = useMarket();
   const position = usePosition(address, phase.kind === "done" ? phase.hash : 0);
 
-  // Preview SY out using the same formula the SY wrapper uses on deposit:
-  // shares = amount * WAD / exchangeRate. PT and YT each equal the SY split.
+  // Preview the deposit and split using the contract's own math:
+  //   SY minted on deposit  = amount * WAD / rate   (SY wrapper)
+  //   PT/YT face on split   = SY * rate / WAD        (tokenizer, asset units)
+  // PT and YT are each minted at the asset-unit face, which is ~the underlying
+  // deposited (so 11 USDC -> ~11 PT and ~11 YT, not the SY-share count).
   const preview = useMemo(() => {
     if (!amount || market === null) return null;
     try {
       const amountBase = parseTokenAmount(amount, cfg.decimals);
       const syOut = (amountBase * WAD) / market.exchangeRate;
-      return { syOut, splitOut: syOut };
+      const splitOut = (syOut * market.exchangeRate) / WAD;
+      return { syOut, splitOut };
     } catch {
       return null;
     }
@@ -38,11 +42,26 @@ export default function MintPage() {
   const canSubmit = address !== null && preview !== null && !amtError && phase.kind !== "working";
 
   async function onSubmit() {
-    if (!address) return;
+    if (!address || preview === null) return;
     const underlyingAmount = parseTokenAmount(amount, cfg.decimals);
-    await submit(() =>
-      client.buildMint({ marketId: cfg.marketId, from: address, underlyingAmount, split }),
-    );
+    if (!split) {
+      await submit(() => client.buildDeposit({ marketId: cfg.marketId, from: address, underlyingAmount }));
+      return;
+    }
+    // Soroban allows one host-function op per transaction, so deposit and split
+    // are two signatures. Split exactly the SY this deposit mints; the split
+    // builds only after the deposit confirms (submitSequence enforces order).
+    const syMinted = preview.syOut;
+    await submitSequence([
+      {
+        label: "Deposit",
+        build: () => client.buildDeposit({ marketId: cfg.marketId, from: address, underlyingAmount }),
+      },
+      {
+        label: "Split",
+        build: () => client.buildSplit({ from: address, syAmount: syMinted }),
+      },
+    ]);
   }
 
   return (
@@ -99,7 +118,7 @@ export default function MintPage() {
           disabled={!canSubmit}
           onClick={onSubmit}
           connectLabel="Connect wallet to mint"
-          idleLabel={split ? "Deposit and split" : "Deposit"}
+          idleLabel={split ? "Deposit, then split (2 signatures)" : "Deposit"}
         />
 
         <TxStatus phase={phase} context="sy" />

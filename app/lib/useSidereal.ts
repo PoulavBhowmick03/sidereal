@@ -22,7 +22,7 @@ export function useSidereal() {
     () => makeClient(cfg, address ?? cfg.simulationSourceAccount),
     [cfg, address],
   );
-  const { phase, run } = useTxFlow();
+  const { phase, run, runSequence } = useTxFlow();
 
   const submit = useCallback(
     (build: () => Promise<TransactionEnvelope>) =>
@@ -30,5 +30,24 @@ export function useSidereal() {
     [run, signTransaction, client],
   );
 
-  return { cfg, client, address, phase, submit };
+  /**
+   * Submits an ordered list of build steps as separate signed transactions
+   * (one signature each). A later step builds only after the prior one has
+   * confirmed, so it can depend on that on-chain state. Used for deposit ->
+   * split, which cannot share a single Soroban transaction.
+   */
+  const submitSequence = useCallback(
+    (steps: { label: string; build: () => Promise<TransactionEnvelope> }[]) =>
+      runSequence(
+        steps.map((s) => ({
+          label: s.label,
+          build: s.build,
+          sign: signTransaction,
+          submit: (signed: string) => client.submit(signed),
+        })),
+      ),
+    [runSequence, signTransaction, client],
+  );
+
+  return { cfg, client, address, phase, submit, submitSequence };
 }

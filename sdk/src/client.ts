@@ -6,6 +6,7 @@ import type {
   ContractAddresses,
   MarketState,
   MintArgs,
+  SplitArgs,
   Position,
   Quote,
   RedeemArgs,
@@ -15,7 +16,7 @@ import type {
   SwapArgs,
   TransactionEnvelope,
 } from "./types.js";
-import { BPS_DENOMINATOR, WAD } from "./types.js";
+import { BPS_DENOMINATOR } from "./types.js";
 import { marketMethodFor, quoteMethodFor, priceImpactBps, secondsToMaturity } from "./routes.js";
 import { ContractError, parseContractErrorCode } from "./errors.js";
 
@@ -178,32 +179,35 @@ export class StellarYT {
   // --- transaction builders (return unsigned envelopes) --------------------
 
   /**
-   * Builds a deposit (and optional PT+YT split) transaction.
+   * Builds a single SY deposit transaction (one host-function op).
    *
-   * Without `split`: a single SY deposit. With `split`: the deposit plus a
-   * tokenizer split in one envelope, using the exact SY mint preview
-   * (shares = amount * WAD / exchangeRate). codex-2 to confirm the deposit ->
-   * split atomic co-sign path; flagged on the bus.
+   * Deposit and split must be separate transactions: a Soroban transaction
+   * carries exactly one InvokeHostFunction op, so they cannot be batched. The
+   * UI deposits first, waits for confirmation, then calls `buildSplit` with the
+   * exact SY the deposit minted.
    */
-  async buildMint(args: MintArgs): Promise<TransactionEnvelope> {
+  async buildDeposit(args: MintArgs): Promise<TransactionEnvelope> {
     requirePositive("underlyingAmount", args.underlyingAmount);
     const from = new Address(args.from).toScVal();
-    const sy = new Contract(this.contracts.sy);
     const amount = nativeToScVal(args.underlyingAmount, { type: "i128" });
-    const depositOp = sy.call("deposit", from, amount);
+    const depositOp = new Contract(this.contracts.sy).call("deposit", from, amount);
+    return this.buildEnvelope(args.from, [depositOp]);
+  }
 
-    if (!args.split) {
-      return this.buildEnvelope(args.from, [depositOp]);
-    }
-
-    const exchangeRate = await this.simulateRead<bigint>(sy.call("exchange_rate"));
-    const syMinted = (args.underlyingAmount * WAD) / exchangeRate;
+  /**
+   * Builds a single tokenizer split transaction (one host-function op) for an
+   * exact SY amount. The tokenizer pulls `syAmount` SY and mints
+   * `syAmount * rate / WAD` of PT and YT. Build this only after the deposit it
+   * depends on has confirmed, so the holder's SY balance covers `syAmount`.
+   */
+  async buildSplit(args: SplitArgs): Promise<TransactionEnvelope> {
+    requirePositive("syAmount", args.syAmount);
     const splitOp = new Contract(this.contracts.tokenizer).call(
       "split",
-      from,
-      nativeToScVal(syMinted, { type: "i128" }),
+      new Address(args.from).toScVal(),
+      nativeToScVal(args.syAmount, { type: "i128" }),
     );
-    return this.buildEnvelope(args.from, [depositOp, splitOp]);
+    return this.buildEnvelope(args.from, [splitOp]);
   }
 
   /** Builds a swap transaction matching the frozen Market trait routes. */

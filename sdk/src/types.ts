@@ -110,8 +110,17 @@ export interface MintArgs {
   from: string;
   /** Underlying amount to deposit, in token base units. */
   underlyingAmount: bigint;
-  /** When true, immediately split the minted SY into PT + YT. */
-  split: boolean;
+}
+
+export interface SplitArgs {
+  from: string;
+  /**
+   * SY shares to split into PT + YT, in base units. The tokenizer mints
+   * `syAmount * rate / WAD` of each (asset-unit face). Deposit and split cannot
+   * share a transaction (Soroban allows one host-function op per tx), so the UI
+   * deposits first, then splits the exact SY the deposit minted.
+   */
+  syAmount: bigint;
 }
 
 export interface RedeemArgs {

@@ -14,6 +14,7 @@ export type {
   Quote,
   Position,
   MintArgs,
+  SplitArgs,
   RedeemArgs,
   ClaimArgs,
   AddLiquidityArgs,

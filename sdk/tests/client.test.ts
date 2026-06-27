@@ -248,26 +248,20 @@ describe("getPosition", () => {
 });
 
 describe("transaction builders", () => {
-  it("buildMint without split deposits only", async () => {
-    const env = await newClient().buildMint({
+  it("buildDeposit builds a single deposit op", async () => {
+    const env = await newClient().buildDeposit({
       marketId: "mkt",
       from: "G1",
       underlyingAmount: 100n,
-      split: false,
     });
+    // One host-function op per Soroban tx: deposit and split cannot be batched.
     expect(env.xdr).toBe("PREPARED:deposit");
     expect(env.networkPassphrase).toContain("Test SDF");
   });
 
-  it("buildMint with split batches deposit then split", async () => {
-    state().returns = { exchange_rate: 1_000_000_000_000_000_000n };
-    const env = await newClient().buildMint({
-      marketId: "mkt",
-      from: "G1",
-      underlyingAmount: 100n,
-      split: true,
-    });
-    expect(env.xdr).toBe("PREPARED:deposit+split");
+  it("buildSplit builds a single split op", async () => {
+    const env = await newClient().buildSplit({ from: "G1", syAmount: 100n });
+    expect(env.xdr).toBe("PREPARED:split");
   });
 
   it("buildSwap routes through the matching Market method", async () => {
@@ -307,7 +301,8 @@ describe("transaction builders", () => {
 
   it("rejects non-positive amounts before building", async () => {
     const c = newClient();
-    await expect(c.buildMint({ marketId: "mkt", from: "G1", underlyingAmount: 0n, split: false })).rejects.toThrow(/positive/);
+    await expect(c.buildDeposit({ marketId: "mkt", from: "G1", underlyingAmount: 0n })).rejects.toThrow(/positive/);
+    await expect(c.buildSplit({ from: "G1", syAmount: 0n })).rejects.toThrow(/positive/);
     await expect(
       c.buildSwap({ marketId: "mkt", from: "G1", assetIn: "PT", assetOut: "SY", amountIn: -1n, minAmountOut: 0n }),
     ).rejects.toThrow(/positive/);
