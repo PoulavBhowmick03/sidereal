@@ -96,3 +96,14 @@ contains no floating-point instructions.
   remain green.
 
 Next: add the all-contract Wasm float-opcode CI guard.
+
+### Wasm float-opcode guard complete
+
+- Added `scripts/check-wasm-floats.sh`, which disassembles each supplied Wasm
+  artifact and fails on any `f32.*` or `f64.*` opcode.
+- Updated contract CI to install `wabt` and inspect all five release artifacts.
+- Verified all five integer-path artifacts pass locally.
+- Verified the prior float AMM fails with 210 detected float opcodes.
+
+Next: push the guard, prove the GitHub check fails on a temporary float branch,
+then remove that branch.
