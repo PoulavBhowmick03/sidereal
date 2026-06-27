@@ -46,6 +46,7 @@ pub enum Error {
     Matured = 6,
     MathOverflow = 7,
     LiveMarket = 8,
+    Insolvent = 9,
 }
 
 #[contract]
@@ -163,6 +164,7 @@ impl Tokenizer {
         mint_token(&env, &config.pt_token, &from, face);
         mint_token(&env, &config.yt_token, &from, face);
 
+        check_solvency(&env, &config)?;
         Ok((face, face))
     }
 
@@ -195,6 +197,7 @@ impl Tokenizer {
         burn_token(&env, &config.yt_token, &from, yt_amount);
         push_token(&env, &config.sy_token, &from, sy_equivalent);
 
+        check_solvency(&env, &config)?;
         Ok(sy_equivalent)
     }
 
@@ -216,6 +219,7 @@ impl Tokenizer {
         burn_token(&env, &config.pt_token, &from, pt_amount);
         push_token(&env, &config.sy_token, &from, sy_to_pay);
 
+        check_solvency(&env, &config)?;
         Ok(sy_to_pay)
     }
 
@@ -233,6 +237,7 @@ impl Tokenizer {
             push_token(&env, &config.sy_token, &holder, owed);
         }
 
+        check_solvency(&env, &config)?;
         Ok(owed)
     }
 
@@ -306,6 +311,35 @@ fn settle_and_consume_yt(env: &Env, yt_token: &Address, holder: &Address) -> i12
     let args: Vec<Val> = vec![env, holder.into_val(env)];
     authorize_self_call(env, yt_token, "settle_and_consume", args.clone());
     env.invoke_contract(yt_token, &Symbol::new(env, "settle_and_consume"), args)
+}
+
+/// Outstanding PT supply (asset units) read from the PT contract.
+fn pt_total_supply(env: &Env, pt_token: &Address) -> i128 {
+    let args: Vec<Val> = vec![env];
+    env.invoke_contract(pt_token, &Symbol::new(env, "total_supply"), args)
+}
+
+/// The escrow-coverage invariant, checked after every state-mutating entrypoint:
+///
+///   escrow_sy * rate / WAD  >=  pt_supply
+///
+/// The escrow, valued at the current rate, must cover all PT principal at face.
+/// YT yield coverage holds by construction: the escrow asset value above PT
+/// principal is exactly the total outstanding YT yield (split establishes
+/// equality, and claim/redeem/recombine each reduce both sides by equal amounts,
+/// rounding in the escrow's favor). Total YT yield is not enumerable on-chain,
+/// so we assert the computable PT half; the YT half follows from the algebra.
+/// A violation means the escrow can no longer cover principal (a rate regression
+/// past solvency), which redemption handles by capping payouts pro-rata.
+fn check_solvency(env: &Env, config: &Config) -> Result<(), Error> {
+    let rate = current_rate(env, &config.sy_token);
+    let escrow_shares = token_balance(env, &config.sy_token, &env.current_contract_address());
+    let escrow_asset = mul_div_floor(escrow_shares, rate, WAD)?;
+    let pt_supply = pt_total_supply(env, &config.pt_token);
+    if escrow_asset < pt_supply {
+        return Err(Error::Insolvent);
+    }
+    Ok(())
 }
 
 /// Pulls `amount` of `token_id` from `from` into the tokenizer (holder-authorized).
