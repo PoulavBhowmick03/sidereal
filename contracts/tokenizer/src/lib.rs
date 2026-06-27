@@ -8,6 +8,8 @@ use soroban_sdk::{
     MuxedAddress, Symbol, Val, Vec,
 };
 
+const WAD: i128 = 1_000_000_000_000_000_000;
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 #[contracttype]
 pub struct Config {
@@ -30,6 +32,9 @@ pub struct Position {
 #[contracttype]
 enum DataKey {
     Config,
+    /// SY rate frozen at maturity, used for all post-maturity redemption so
+    /// later rate moves cannot change what PT redeems for.
+    MaturityRate,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -42,7 +47,9 @@ pub enum Error {
     InvalidAmount = 4,
     AmountMismatch = 5,
     Matured = 6,
+    MathOverflow = 7,
     LiveMarket = 8,
+    Insolvent = 9,
 }
 
 #[contract]
@@ -93,13 +100,42 @@ impl Tokenizer {
         Ok(env.ledger().timestamp() >= config.maturity)
     }
 
+    /// Permissionless: after maturity, snapshot and return the SY rate used for
+    /// all redemption. Any caller may poke this so the maturity rate is captured
+    /// promptly; redemption also snapshots it lazily on first use. Idempotent
+    /// once set.
+    pub fn freeze_maturity_rate(env: Env) -> Result<i128, Error> {
+        let config = Self::read_config(&env)?;
+        if env.ledger().timestamp() < config.maturity {
+            return Err(Error::LiveMarket);
+        }
+        Ok(effective_rate(&env, &config))
+    }
+
+    /// The frozen maturity rate, or 0 if not yet snapshotted.
+    pub fn maturity_rate(env: Env) -> Result<i128, Error> {
+        Self::read_config(&env)?;
+        Ok(env
+            .storage()
+            .instance()
+            .get(&DataKey::MaturityRate)
+            .unwrap_or(0))
+    }
+
+    /// PT and YT minted for `sy_amount` SY at the current rate, in asset units.
     pub fn preview_split(env: Env, sy_amount: i128) -> Result<(i128, i128), Error> {
         Self::require_live(&env)?;
         Self::require_positive_amount(sy_amount)?;
+        let config = Self::read_config(&env)?;
 
-        Ok((sy_amount, sy_amount))
+        let rate = current_rate(&env, &config.sy_token);
+        let face = mul_div_floor(sy_amount, rate, WAD)?;
+        Ok((face, face))
     }
 
+    /// SY shares returned for recombining equal PT and YT (asset units) at the
+    /// current rate. This is the principal only; any accrued YT yield is settled
+    /// separately into the holder's claim ledger.
     pub fn preview_recombine(env: Env, pt_amount: i128, yt_amount: i128) -> Result<i128, Error> {
         Self::require_live(&env)?;
         Self::require_positive_amount(pt_amount)?;
@@ -109,7 +145,9 @@ impl Tokenizer {
             return Err(Error::AmountMismatch);
         }
 
-        Ok(pt_amount)
+        let config = Self::read_config(&env)?;
+        let rate = current_rate(&env, &config.sy_token);
+        mul_div_floor(pt_amount, WAD, rate)
     }
 
     /// PT and YT balances the holder currently owns, read from the token
@@ -132,22 +170,34 @@ impl Tokenizer {
         ))
     }
 
-    /// Pulls `sy_amount` SY from `from` into the tokenizer and mints equal PT
-    /// and YT to `from`.
+    /// Pulls `sy_amount` SY from `from` into escrow and mints equal PT and YT,
+    /// denominated in asset units: `face = sy_amount * rate / WAD`. At rate 1.00
+    /// this equals `sy_amount`. PT is the fixed principal claim; YT is the yield
+    /// claim. The escrow holds the SY shares; their asset value at the current
+    /// rate equals the PT face exactly at mint, which is the coverage invariant.
     pub fn split(env: Env, from: Address, sy_amount: i128) -> Result<(i128, i128), Error> {
         from.require_auth();
         Self::require_live(&env)?;
         Self::require_positive_amount(sy_amount)?;
         let config = Self::read_config(&env)?;
 
-        pull_token(&env, &config.sy_token, &from, sy_amount);
-        mint_token(&env, &config.pt_token, &from, sy_amount);
-        mint_token(&env, &config.yt_token, &from, sy_amount);
+        let rate = current_rate(&env, &config.sy_token);
+        let face = mul_div_floor(sy_amount, rate, WAD)?;
+        Self::require_positive_amount(face)?;
 
-        Ok((sy_amount, sy_amount))
+        pull_token(&env, &config.sy_token, &from, sy_amount);
+        mint_token(&env, &config.pt_token, &from, face);
+        mint_token(&env, &config.yt_token, &from, face);
+
+        check_solvency(&env, &config)?;
+        Ok((face, face))
     }
 
-    /// Burns equal PT and YT from `from` and returns the SY one-to-one.
+    /// Burns equal PT and YT (asset units) from `from` and returns the principal
+    /// in SY shares: `sy_equivalent = pt_amount * WAD / rate`. Burning the YT
+    /// settles the holder's accrued yield first (the YT burn hook banks it into
+    /// the holder's claim ledger), so recombine returns only principal and the
+    /// banked yield stays owed and covered by the remaining escrow.
     pub fn recombine(
         env: Env,
         from: Address,
@@ -164,26 +214,82 @@ impl Tokenizer {
         }
 
         let config = Self::read_config(&env)?;
+        let rate = current_rate(&env, &config.sy_token);
+        let sy_equivalent = mul_div_floor(pt_amount, WAD, rate)?;
+        Self::require_positive_amount(sy_equivalent)?;
 
         burn_token(&env, &config.pt_token, &from, pt_amount);
         burn_token(&env, &config.yt_token, &from, yt_amount);
-        push_token(&env, &config.sy_token, &from, pt_amount);
+        push_token(&env, &config.sy_token, &from, sy_equivalent);
 
-        Ok(pt_amount)
+        check_solvency(&env, &config)?;
+        Ok(sy_equivalent)
     }
 
-    /// After maturity, burns `pt_amount` PT from `from` and returns SY 1:1. YT
-    /// is worthless past maturity.
+    /// After maturity, burns `pt_amount` PT (asset units) from `from` and returns
+    /// principal in SY shares: `pt_amount * WAD / rate`, capped to the holder's
+    /// pro-rata share of escrow.
+    ///
+    /// Insolvency guard: if a rate regression (negative yield, a slash) has left
+    /// the escrow unable to cover all PT principal, the payout is capped to
+    /// `escrow_shares * pt_amount / pt_supply`, so PT holders share the shortfall
+    /// pro-rata rather than letting the first redeemers drain the escrow at the
+    /// expense of the last. When solvent, the ideal payout is the smaller of the
+    /// two, so this pays principal in full. Capping preserves the escrow/PT ratio,
+    /// keeping every later redeemer's share fair.
+    ///
+    /// The rate read here is the current SY rate; Phase 3 step 9 snapshots a
+    /// maturity rate so post-maturity rate moves do not change redemption.
     pub fn redeem_at_maturity(env: Env, from: Address, pt_amount: i128) -> Result<i128, Error> {
         from.require_auth();
         Self::require_matured(&env)?;
         Self::require_positive_amount(pt_amount)?;
         let config = Self::read_config(&env)?;
 
-        burn_token(&env, &config.pt_token, &from, pt_amount);
-        push_token(&env, &config.sy_token, &from, pt_amount);
+        let rate = effective_rate(&env, &config);
+        let full = mul_div_floor(pt_amount, WAD, rate)?;
 
-        Ok(pt_amount)
+        let escrow_shares =
+            token_balance(&env, &config.sy_token, &env.current_contract_address());
+        let pt_supply = pt_total_supply(&env, &config.pt_token);
+        let pro_rata = mul_div_floor(escrow_shares, pt_amount, pt_supply)?;
+        let sy_to_pay = if full < pro_rata { full } else { pro_rata };
+        Self::require_positive_amount(sy_to_pay)?;
+
+        burn_token(&env, &config.pt_token, &from, pt_amount);
+        push_token(&env, &config.sy_token, &from, sy_to_pay);
+
+        Ok(sy_to_pay)
+    }
+
+    /// Pays `holder` their accrued YT yield in SY out of escrow, and returns the
+    /// SY amount paid. The YT contract settles the holder and reports the owed
+    /// SY shares (consuming its banked ledger); the tokenizer, which custodies
+    /// the escrow, transfers that SY. Allowed any time, including after maturity,
+    /// so a holder can always collect yield earned over the term.
+    pub fn claim_yield(env: Env, holder: Address) -> Result<i128, Error> {
+        holder.require_auth();
+        let config = Self::read_config(&env)?;
+
+        let owed = settle_and_consume_yt(&env, &config.yt_token, &holder);
+        if owed > 0 {
+            push_token(&env, &config.sy_token, &holder, owed);
+        }
+
+        check_solvency(&env, &config)?;
+        Ok(owed)
+    }
+
+    /// SY shares `holder` could claim right now, for display. Reads through to
+    /// the YT contract, which reads the SY rate itself.
+    pub fn preview_claim_yield(env: Env, holder: Address) -> Result<i128, Error> {
+        let config = Self::read_config(&env)?;
+        let args: Vec<Val> = vec![&env, holder.into_val(&env)];
+        Ok(env.invoke_contract(
+            &config.yt_token,
+            &Symbol::new(&env, "preview_claim_yield"),
+            args,
+        ))
     }
 
     fn read_config(env: &Env) -> Result<Config, Error> {
@@ -222,6 +328,78 @@ impl Tokenizer {
 
 fn token_balance(env: &Env, token_id: &Address, who: &Address) -> i128 {
     token::TokenClient::new(env, token_id).balance(who)
+}
+
+/// Reads the SY exchange rate (asset per share, WAD scaled) from the SY contract.
+fn current_rate(env: &Env, sy_token: &Address) -> i128 {
+    let args: Vec<Val> = vec![env];
+    env.invoke_contract(sy_token, &Symbol::new(env, "exchange_rate"), args)
+}
+
+/// `a * b / c`, rounded down, with checked arithmetic.
+fn mul_div_floor(a: i128, b: i128, c: i128) -> Result<i128, Error> {
+    a.checked_mul(b)
+        .and_then(|v| v.checked_div(c))
+        .ok_or(Error::MathOverflow)
+}
+
+/// Settles `holder` on the YT contract and consumes their banked yield, returning
+/// the SY shares owed. Authorizes the call as the tokenizer, since YT gates
+/// `settle_and_consume` on the tokenizer's address.
+fn settle_and_consume_yt(env: &Env, yt_token: &Address, holder: &Address) -> i128 {
+    let args: Vec<Val> = vec![env, holder.into_val(env)];
+    authorize_self_call(env, yt_token, "settle_and_consume", args.clone());
+    env.invoke_contract(yt_token, &Symbol::new(env, "settle_and_consume"), args)
+}
+
+/// Outstanding PT supply (asset units) read from the PT contract.
+fn pt_total_supply(env: &Env, pt_token: &Address) -> i128 {
+    let args: Vec<Val> = vec![env];
+    env.invoke_contract(pt_token, &Symbol::new(env, "total_supply"), args)
+}
+
+/// The rate to value the escrow at: the live SY rate before maturity, and the
+/// rate frozen at maturity afterwards. The first post-maturity caller snapshots
+/// it; later callers reuse the snapshot, so post-maturity rate moves cannot
+/// change redemption. Real yield sources stop accruing at maturity, so the live
+/// rate is expected flat by then; the snapshot defends against a stray late move.
+fn effective_rate(env: &Env, config: &Config) -> i128 {
+    if env.ledger().timestamp() < config.maturity {
+        return current_rate(env, &config.sy_token);
+    }
+    if let Some(rate) = env
+        .storage()
+        .instance()
+        .get::<_, i128>(&DataKey::MaturityRate)
+    {
+        return rate;
+    }
+    let rate = current_rate(env, &config.sy_token);
+    env.storage().instance().set(&DataKey::MaturityRate, &rate);
+    rate
+}
+
+/// The escrow-coverage invariant, checked after every state-mutating entrypoint:
+///
+///   escrow_sy * rate / WAD  >=  pt_supply
+///
+/// The escrow, valued at the current rate, must cover all PT principal at face.
+/// YT yield coverage holds by construction: the escrow asset value above PT
+/// principal is exactly the total outstanding YT yield (split establishes
+/// equality, and claim/redeem/recombine each reduce both sides by equal amounts,
+/// rounding in the escrow's favor). Total YT yield is not enumerable on-chain,
+/// so we assert the computable PT half; the YT half follows from the algebra.
+/// A violation means the escrow can no longer cover principal (a rate regression
+/// past solvency), which redemption handles by capping payouts pro-rata.
+fn check_solvency(env: &Env, config: &Config) -> Result<(), Error> {
+    let rate = effective_rate(env, config);
+    let escrow_shares = token_balance(env, &config.sy_token, &env.current_contract_address());
+    let escrow_asset = mul_div_floor(escrow_shares, rate, WAD)?;
+    let pt_supply = pt_total_supply(env, &config.pt_token);
+    if escrow_asset < pt_supply {
+        return Err(Error::Insolvent);
+    }
+    Ok(())
 }
 
 /// Pulls `amount` of `token_id` from `from` into the tokenizer (holder-authorized).
@@ -280,6 +458,7 @@ extern crate std;
 #[cfg(test)]
 mod test {
     use super::*;
+    use sidereal_sy_wrapper::{SyWrapper, SyWrapperClient};
     use soroban_sdk::testutils::{Address as _, Ledger};
 
     const NOW: u64 = 1_770_000_000;
@@ -302,7 +481,12 @@ mod test {
         let contract_id = env.register(Tokenizer, ());
         let client = TokenizerClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
-        let sy_token = Address::generate(&env);
+
+        // A real SY wrapper supplies the exchange rate the tokenizer reads to
+        // size mints and redemptions. It defaults to rate 1.00 after init.
+        let sy_token = env.register(SyWrapper, ());
+        SyWrapperClient::new(&env, &sy_token).initialize(&admin, &Address::generate(&env));
+
         let pt_token = Address::generate(&env);
         let yt_token = Address::generate(&env);
 
