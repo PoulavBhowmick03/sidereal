@@ -79,3 +79,20 @@ auth_invariants reports 1 passed / 1 ignored. Full baseline (`cargo test
 
 Next: adopt the exact integer rewrite, remove `libm`, and verify the Wasm build
 contains no floating-point instructions.
+
+### AMM integer math complete
+
+- Applied the exact integer fixed-point rewrite that produced the live testnet
+  artifact.
+- Removed the AMM's direct `libm` dependency and updated `Cargo.lock`.
+- Built `sidereal-amm` for `wasm32v1-none` with `--locked`.
+- Verified the new committed artifact hash is
+  `33cf0ee0a757baa546f4350c8ab3e2167ce86e3e8051bc9bb2ec1809ed309a04`.
+- Verified `wasm-objdump -d` reports zero `f32.*` or `f64.*` opcodes. The same
+  check reports 210 float opcodes for the prior committed float artifact.
+- AMM tests are green, including the 10,000-case property test.
+- The full workspace reaches only Claude's three intentionally red economics
+  specifications. All previously green tests, including the auth invariant,
+  remain green.
+
+Next: add the all-contract Wasm float-opcode CI guard.
