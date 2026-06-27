@@ -3,7 +3,8 @@
 #![cfg_attr(target_family = "wasm", no_std)]
 
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, panic_with_error, Address, Env, String,
+    contract, contracterror, contractimpl, contracttype, panic_with_error, vec, Address, Env,
+    String, Symbol, Val,
 };
 
 const WAD: i128 = 1_000_000_000_000_000_000;
@@ -35,8 +36,12 @@ enum DataKey {
     Balance(Address),
     /// (owner, spender)
     Allowance(Address, Address),
-    /// Last exchange rate a holder has claimed yield against, per (holder, maturity).
-    Checkpoint(Address, u64),
+    /// SY exchange rate the holder's yield was last settled at. Persistent,
+    /// holder-keyed: the contract is single-maturity, so maturity is implicit.
+    Checkpoint(Address),
+    /// SY shares accrued to the holder but not yet claimed, carried across
+    /// transfers. Persistent, holder-keyed.
+    AccruedYield(Address),
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -98,90 +103,68 @@ impl YtToken {
 
     // --- Yield accounting --------------------------------------------------
 
+    /// The SY rate the holder's yield was last settled at. Zero means the
+    /// holder has never been settled (no YT minted to them yet).
     pub fn checkpoint(env: Env, holder: Address) -> Result<i128, Error> {
-        let config = Self::read_config(&env)?;
-        Ok(env
-            .storage()
-            .instance()
-            .get(&DataKey::Checkpoint(holder, config.maturity))
-            .unwrap_or(0))
+        Self::read_config(&env)?;
+        Ok(Self::read_checkpoint(&env, &holder).unwrap_or(0))
     }
 
-    pub fn seed_checkpoint(
-        env: Env,
-        admin: Address,
-        holder: Address,
-        exchange_rate: i128,
-    ) -> Result<(), Error> {
-        let config = Self::read_config(&env)?;
-        admin.require_auth();
-        if admin != config.admin {
-            return Err(Error::NotInitialized);
-        }
-
-        Self::require_exchange_rate(exchange_rate)?;
-        env.storage().instance().set(
-            &DataKey::Checkpoint(holder, config.maturity),
-            &exchange_rate,
-        );
-
-        Ok(())
+    /// SY shares already banked to the holder but not yet claimed.
+    pub fn accrued_yield(env: Env, holder: Address) -> Result<i128, Error> {
+        Self::read_config(&env)?;
+        Ok(Self::read_accrued(&env, &holder))
     }
 
-    /// Yield accrued to `holder` since their last checkpoint, computed against
-    /// the holder's real YT balance.
+    /// Total SY shares claimable by `holder` right now: already-banked yield
+    /// plus what a settle at `current_exchange_rate` would add.
+    ///
+    /// The `current_exchange_rate` argument is retained for SDK compatibility
+    /// through the economics rework; the settle path itself reads the rate from
+    /// the SY contract. Phase 2 step 5 drops this argument (see
+    /// docs/COORDINATION.md).
     pub fn preview_claim_yield(
         env: Env,
         holder: Address,
         current_exchange_rate: i128,
     ) -> Result<i128, Error> {
-        let config = Self::read_config(&env)?;
-        Self::require_exchange_rate(current_exchange_rate)?;
-
-        let yt_balance = Self::read_balance(&env, &holder);
-        let last_rate = env
-            .storage()
-            .instance()
-            .get(&DataKey::Checkpoint(holder, config.maturity))
-            .unwrap_or(current_exchange_rate);
-        if current_exchange_rate < last_rate {
-            return Err(Error::ExchangeRateRegression);
+        Self::read_config(&env)?;
+        if current_exchange_rate <= 0 {
+            return Err(Error::InvalidExchangeRate);
         }
 
-        let rate_delta = current_exchange_rate - last_rate;
-        let scaled = rate_delta
-            .checked_mul(yt_balance)
-            .ok_or(Error::MathOverflow)?;
-        Ok(scaled / WAD)
+        let banked = Self::read_accrued(&env, &holder);
+        let pending = Self::pending_yield(&env, &holder, current_exchange_rate)?;
+        banked.checked_add(pending).ok_or(Error::MathOverflow)
     }
 
+    /// Settles the holder against the current SY rate, banking accrued yield,
+    /// and returns their total claimable SY shares. The actual SY payout from
+    /// escrow lands in Phase 2 step 5; today this reports the claimable amount
+    /// and advances the checkpoint so yield is never double counted.
     pub fn claim_yield(
         env: Env,
         holder: Address,
-        current_exchange_rate: i128,
+        _current_exchange_rate: i128,
     ) -> Result<i128, Error> {
         holder.require_auth();
-
-        let config = Self::read_config(&env)?;
-        let accrued =
-            Self::preview_claim_yield(env.clone(), holder.clone(), current_exchange_rate)?;
-
-        env.storage().instance().set(
-            &DataKey::Checkpoint(holder, config.maturity),
-            &current_exchange_rate,
-        );
-
-        Ok(accrued)
+        Self::read_config(&env)?;
+        Self::settle(&env, &holder);
+        Ok(Self::read_accrued(&env, &holder))
     }
 
     // --- Minter-privileged supply control (only the tokenizer) -------------
 
     /// Mints `amount` YT to `to`. Restricted to the tokenizer recorded at
-    /// initialization, which mints YT when a holder splits SY.
+    /// initialization, which mints YT when a holder splits SY. The recipient is
+    /// settled first, so a fresh holder's checkpoint starts at the current rate
+    /// and an existing holder's prior yield is banked before the balance grows.
     pub fn mint(env: Env, to: Address, amount: i128) {
         let config = Self::read_config_or_panic(&env);
         config.tokenizer.require_auth();
         Self::require_amount_or_panic(&env, amount);
+
+        Self::settle(&env, &to);
 
         let balance = Self::read_balance(&env, &to);
         Self::write_balance(&env, &to, Self::add_or_panic(&env, balance, amount));
@@ -244,6 +227,8 @@ impl YtToken {
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
         from.require_auth();
         Self::require_amount_or_panic(&env, amount);
+        Self::settle(&env, &from);
+        Self::settle(&env, &to);
         Self::move_balance(&env, &from, &to, amount);
     }
 
@@ -251,14 +236,18 @@ impl YtToken {
         spender.require_auth();
         Self::require_amount_or_panic(&env, amount);
         Self::spend_allowance(&env, &from, &spender, amount);
+        Self::settle(&env, &from);
+        Self::settle(&env, &to);
         Self::move_balance(&env, &from, &to, amount);
     }
 
     /// Burns `amount` YT from `from`. The tokenizer burns YT on recombine;
-    /// holders may also burn their own balance.
+    /// holders may also burn their own balance. The holder is settled first so
+    /// their accrued yield is banked before the balance shrinks.
     pub fn burn(env: Env, from: Address, amount: i128) {
         from.require_auth();
         Self::require_amount_or_panic(&env, amount);
+        Self::settle(&env, &from);
         Self::burn_balance(&env, &from, amount);
     }
 
@@ -266,7 +255,92 @@ impl YtToken {
         spender.require_auth();
         Self::require_amount_or_panic(&env, amount);
         Self::spend_allowance(&env, &from, &spender, amount);
+        Self::settle(&env, &from);
         Self::burn_balance(&env, &from, amount);
+    }
+
+    // --- yield engine ------------------------------------------------------
+
+    /// Reads the live SY exchange rate (asset per share, WAD scaled) from the
+    /// SY contract recorded at initialization. The contract reads it itself so
+    /// no caller can supply a manipulated rate.
+    fn current_rate(env: &Env, config: &Config) -> i128 {
+        let args: soroban_sdk::Vec<Val> = vec![env];
+        env.invoke_contract(&config.sy_token, &Symbol::new(env, "exchange_rate"), args)
+    }
+
+    /// SY shares `holder` would accrue if settled at `rate` right now, without
+    /// writing anything. Zero before the holder is first settled.
+    fn pending_yield(env: &Env, holder: &Address, rate: i128) -> Result<i128, Error> {
+        let last = match Self::read_checkpoint(env, holder) {
+            Some(c) => c,
+            None => return Ok(0),
+        };
+        if rate <= last {
+            return Ok(0);
+        }
+        let balance = Self::read_balance(env, holder);
+        if balance <= 0 {
+            return Ok(0);
+        }
+        Self::owed_shares(balance, last, rate)
+    }
+
+    /// Banks `holder`'s accrued yield up to the current rate and advances their
+    /// checkpoint. Bookkeeping only: it never moves SY. A fresh holder simply
+    /// starts accruing from the current rate. On a rate dip the checkpoint is
+    /// held (not lowered), so no yield is paid for the dip and the holder
+    /// resumes accruing only once the rate climbs back above it.
+    fn settle(env: &Env, holder: &Address) {
+        let config = Self::read_config_or_panic(env);
+        let rate = Self::current_rate(env, &config);
+
+        let last = match Self::read_checkpoint(env, holder) {
+            Some(c) => c,
+            None => {
+                Self::write_checkpoint(env, holder, rate);
+                return;
+            }
+        };
+
+        if rate <= last {
+            return;
+        }
+
+        let balance = Self::read_balance(env, holder);
+        if balance > 0 {
+            let owed = match Self::owed_shares(balance, last, rate) {
+                Ok(value) => value,
+                Err(error) => panic_with_error!(env, error),
+            };
+            if owed > 0 {
+                let prev = Self::read_accrued(env, holder);
+                Self::write_accrued(env, holder, Self::add_or_panic(env, prev, owed));
+            }
+        }
+        Self::write_checkpoint(env, holder, rate);
+    }
+
+    /// Yield owed for a balance held from rate `c` to rate `r`, in SY shares:
+    ///   balance * (r - c) / (c * r) * WAD   ==   balance * (1/c - 1/r) * WAD
+    /// This telescopes across intermediate settlements, so settling at every
+    /// transfer banks exactly the same total as one settle at the end. Computed
+    /// in a fixed order with checked math to stay within i128 under the testnet
+    /// input bounds, rounding down (favoring the escrow).
+    fn owed_shares(balance: i128, c: i128, r: i128) -> Result<i128, Error> {
+        // asset yield measured at the checkpoint basis: balance * (r - c) / c
+        let delta = r.checked_sub(c).ok_or(Error::MathOverflow)?;
+        let asset_yield = balance
+            .checked_mul(delta)
+            .ok_or(Error::MathOverflow)?
+            .checked_div(c)
+            .ok_or(Error::MathOverflow)?;
+        // convert to SY shares at the current rate: asset_yield * WAD / r
+        asset_yield
+            .checked_mul(WAD)
+            .ok_or(Error::MathOverflow)?
+            .checked_div(r)
+            .ok_or(Error::MathOverflow)
     }
 
     // --- internal helpers --------------------------------------------------
@@ -285,12 +359,29 @@ impl YtToken {
         }
     }
 
-    fn require_exchange_rate(exchange_rate: i128) -> Result<(), Error> {
-        if exchange_rate < WAD {
-            return Err(Error::InvalidExchangeRate);
-        }
+    fn read_checkpoint(env: &Env, holder: &Address) -> Option<i128> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Checkpoint(holder.clone()))
+    }
 
-        Ok(())
+    fn write_checkpoint(env: &Env, holder: &Address, rate: i128) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::Checkpoint(holder.clone()), &rate);
+    }
+
+    fn read_accrued(env: &Env, holder: &Address) -> i128 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::AccruedYield(holder.clone()))
+            .unwrap_or(0)
+    }
+
+    fn write_accrued(env: &Env, holder: &Address, amount: i128) {
+        env.storage()
+            .persistent()
+            .set(&DataKey::AccruedYield(holder.clone()), &amount);
     }
 
     fn require_amount_or_panic(env: &Env, amount: i128) {
@@ -380,17 +471,20 @@ extern crate std;
 #[cfg(test)]
 mod test {
     use super::*;
+    use sidereal_sy_wrapper::{SyWrapper, SyWrapperClient};
     use soroban_sdk::testutils::{Address as _, Ledger};
 
     const NOW: u64 = 1_770_000_000;
     const MATURITY: u64 = NOW + 90 * 24 * 60 * 60;
+    const RATE_1_00: i128 = WAD;
+    const RATE_1_05: i128 = 1_050_000_000_000_000_000;
+    const RATE_1_10: i128 = 1_100_000_000_000_000_000;
 
     struct Fixture {
         env: Env,
         client: YtTokenClient<'static>,
+        sy: SyWrapperClient<'static>,
         admin: Address,
-        tokenizer: Address,
-        sy_token: Address,
         alice: Address,
         bob: Address,
     }
@@ -400,150 +494,154 @@ mod test {
         env.ledger().set_timestamp(now);
         env.mock_all_auths();
 
-        let contract_id = env.register(YtToken, ());
-        let client = YtTokenClient::new(&env, &contract_id);
         let admin = Address::generate(&env);
         let tokenizer = Address::generate(&env);
-        let sy_token = Address::generate(&env);
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
+
+        // A real SY wrapper provides the exchange rate the YT yield engine reads.
+        let sy_id = env.register(SyWrapper, ());
+        let sy = SyWrapperClient::new(&env, &sy_id);
+        let underlying = Address::generate(&env);
+        sy.initialize(&admin, &underlying);
+
+        let contract_id = env.register(YtToken, ());
+        let client = YtTokenClient::new(&env, &contract_id);
+        client.initialize(&admin, &tokenizer, &sy_id, &MATURITY);
 
         Fixture {
             env,
             client,
+            sy,
             admin,
-            tokenizer,
-            sy_token,
             alice,
             bob,
         }
     }
 
-    fn initialize(fixture: &Fixture) {
-        fixture.client.initialize(
-            &fixture.admin,
-            &fixture.tokenizer,
-            &fixture.sy_token,
-            &MATURITY,
-        );
+    #[test]
+    fn mint_settles_fresh_holder_to_current_rate() {
+        let f = fixture(NOW);
+        f.sy.set_exchange_rate(&f.admin, &RATE_1_05);
+        f.client.mint(&f.alice, &(100 * WAD));
+
+        // Checkpoint starts at the rate when YT was first minted, so prior
+        // history is not retroactively claimable.
+        assert_eq!(f.client.checkpoint(&f.alice), RATE_1_05);
+        assert_eq!(f.client.accrued_yield(&f.alice), 0);
     }
 
     #[test]
-    fn first_claim_seeds_checkpoint_without_accruing_prior_yield() {
-        let fixture = fixture(NOW);
-        initialize(&fixture);
-        fixture.client.mint(&fixture.alice, &(100 * WAD));
+    fn claim_banks_yield_using_the_telescoping_formula() {
+        let f = fixture(NOW);
+        // Split at 1.05, not 1.00, to exercise the correct (r-c)/(c*r) form.
+        f.sy.set_exchange_rate(&f.admin, &RATE_1_05);
+        f.client.mint(&f.alice, &(100 * WAD));
 
-        let accrued = fixture
-            .client
-            .claim_yield(&fixture.alice, &1_020_000_000_000_000_000);
+        f.sy.set_exchange_rate(&f.admin, &RATE_1_10);
+        let claimable = f.client.claim_yield(&f.alice, &RATE_1_10);
 
-        assert_eq!(accrued, 0);
-        assert_eq!(
-            fixture.client.checkpoint(&fixture.alice),
-            1_020_000_000_000_000_000
+        // owed = 100 * (1/1.05 - 1/1.10) * WAD = 100 * 0.0432900 = 4.329 SY.
+        // A naive (r-c)/WAD form would wrongly bank 100*0.05 = 5.0 SY.
+        let expected = (100 * WAD) * (RATE_1_10 - RATE_1_05) / RATE_1_05 * WAD / RATE_1_10;
+        assert!((claimable - expected).abs() <= 2, "claimable {}", claimable);
+        assert!(
+            (claimable - 4_329_004_329_004_329_000).abs() <= 1_000_000,
+            "approx 4.329 SY, got {}",
+            claimable
         );
+        assert_eq!(f.client.checkpoint(&f.alice), RATE_1_10);
     }
 
     #[test]
-    fn claim_uses_exchange_rate_delta_times_real_balance() {
-        let fixture = fixture(NOW);
-        initialize(&fixture);
-        fixture.client.mint(&fixture.alice, &(200 * WAD));
-        fixture
-            .client
-            .seed_checkpoint(&fixture.admin, &fixture.alice, &1_010_000_000_000_000_000);
-
-        let accrued = fixture
-            .client
-            .claim_yield(&fixture.alice, &1_030_000_000_000_000_000);
-
-        assert_eq!(accrued, 4 * WAD);
-        assert_eq!(
-            fixture.client.checkpoint(&fixture.alice),
-            1_030_000_000_000_000_000
-        );
+    fn first_claim_at_mint_rate_accrues_nothing() {
+        let f = fixture(NOW);
+        f.client.mint(&f.alice, &(100 * WAD)); // minted at rate 1.00
+        let claimable = f.client.claim_yield(&f.alice, &RATE_1_00);
+        assert_eq!(claimable, 0);
+        assert_eq!(f.client.checkpoint(&f.alice), RATE_1_00);
     }
 
     #[test]
-    fn checkpoints_are_isolated_per_holder() {
-        let fixture = fixture(NOW);
-        initialize(&fixture);
-        fixture.client.mint(&fixture.alice, &(100 * WAD));
-        fixture.client.mint(&fixture.bob, &(100 * WAD));
-        fixture
-            .client
-            .seed_checkpoint(&fixture.admin, &fixture.alice, &1_020_000_000_000_000_000);
+    fn yield_is_conserved_across_a_transfer() {
+        let f = fixture(NOW);
+        f.client.mint(&f.alice, &(100 * WAD)); // at 1.00
 
-        assert_eq!(
-            fixture
-                .client
-                .preview_claim_yield(&fixture.alice, &1_030_000_000_000_000_000),
-            WAD
-        );
-        assert_eq!(
-            fixture
-                .client
-                .preview_claim_yield(&fixture.bob, &1_030_000_000_000_000_000),
-            0
+        // Rate rises, Alice accrues, then sends half to Bob without claiming.
+        f.sy.set_exchange_rate(&f.admin, &RATE_1_10);
+        f.client.transfer(&f.alice, &f.bob, &(50 * WAD));
+
+        // Alice keeps the yield she earned on 100 over 1.00 -> 1.10. Bob starts
+        // fresh at 1.10, so he has nothing yet.
+        let alice_pending = f.client.preview_claim_yield(&f.alice, &RATE_1_10);
+        let bob_pending = f.client.preview_claim_yield(&f.bob, &RATE_1_10);
+        let expected_alice = (100 * WAD) * (RATE_1_10 - RATE_1_00) / RATE_1_00 * WAD / RATE_1_10;
+        assert!((alice_pending - expected_alice).abs() <= 2);
+        assert_eq!(bob_pending, 0, "Bob earns only from 1.10 forward");
+
+        // Rate rises again; now both earn on their post-transfer balances.
+        f.sy.set_exchange_rate(&f.admin, &(RATE_1_10 + WAD / 10));
+        let r2 = RATE_1_10 + WAD / 10;
+        let alice2 = f.client.preview_claim_yield(&f.alice, &r2);
+        let bob2 = f.client.preview_claim_yield(&f.bob, &r2);
+
+        // Conservation: Alice's total + Bob's total equals the yield a single
+        // 100 balance would have earned from 1.00 to r2.
+        let single = (100 * WAD) * (r2 - RATE_1_00) / RATE_1_00 * WAD / r2;
+        assert!(
+            (alice2 + bob2 - single).abs() <= 4,
+            "alice {} + bob {} vs single {}",
+            alice2,
+            bob2,
+            single
         );
     }
 
     #[test]
     fn mint_increases_balance_and_supply() {
-        let fixture = fixture(NOW);
-        initialize(&fixture);
-        fixture.client.mint(&fixture.alice, &1_000);
-        assert_eq!(fixture.client.balance(&fixture.alice), 1_000);
-        assert_eq!(fixture.client.total_supply(), 1_000);
-        assert_eq!(
-            fixture.client.symbol(),
-            String::from_str(&fixture.env, "sYT")
-        );
+        let f = fixture(NOW);
+        f.client.mint(&f.alice, &1_000);
+        assert_eq!(f.client.balance(&f.alice), 1_000);
+        assert_eq!(f.client.total_supply(), 1_000);
+        assert_eq!(f.client.symbol(), String::from_str(&f.env, "sYT"));
     }
 
     #[test]
     fn transfer_moves_balance() {
-        let fixture = fixture(NOW);
-        initialize(&fixture);
-        fixture.client.mint(&fixture.alice, &1_000);
-        fixture.client.transfer(&fixture.alice, &fixture.bob, &400);
-        assert_eq!(fixture.client.balance(&fixture.alice), 600);
-        assert_eq!(fixture.client.balance(&fixture.bob), 400);
+        let f = fixture(NOW);
+        f.client.mint(&f.alice, &1_000);
+        f.client.transfer(&f.alice, &f.bob, &400);
+        assert_eq!(f.client.balance(&f.alice), 600);
+        assert_eq!(f.client.balance(&f.bob), 400);
     }
 
     #[test]
     #[should_panic(expected = "Error(Contract, #7)")]
     fn transfer_rejects_insufficient_balance() {
-        let fixture = fixture(NOW);
-        initialize(&fixture);
-        fixture.client.mint(&fixture.alice, &100);
-        fixture.client.transfer(&fixture.alice, &fixture.bob, &101);
+        let f = fixture(NOW);
+        f.client.mint(&f.alice, &100);
+        f.client.transfer(&f.alice, &f.bob, &101);
     }
 
     #[test]
     fn approve_and_transfer_from_spend_allowance() {
-        let fixture = fixture(NOW);
-        initialize(&fixture);
-        fixture.client.mint(&fixture.alice, &1_000);
-        fixture
-            .client
-            .approve(&fixture.alice, &fixture.bob, &500, &(NOW as u32 + 1_000));
-        fixture
-            .client
-            .transfer_from(&fixture.bob, &fixture.alice, &fixture.bob, &300);
-        assert_eq!(fixture.client.balance(&fixture.alice), 700);
-        assert_eq!(fixture.client.balance(&fixture.bob), 300);
-        assert_eq!(fixture.client.allowance(&fixture.alice, &fixture.bob), 200);
+        let f = fixture(NOW);
+        f.client.mint(&f.alice, &1_000);
+        f.client
+            .approve(&f.alice, &f.bob, &500, &(NOW as u32 + 1_000));
+        f.client
+            .transfer_from(&f.bob, &f.alice, &f.bob, &300);
+        assert_eq!(f.client.balance(&f.alice), 700);
+        assert_eq!(f.client.balance(&f.bob), 300);
+        assert_eq!(f.client.allowance(&f.alice, &f.bob), 200);
     }
 
     #[test]
     fn burn_reduces_balance_and_supply() {
-        let fixture = fixture(NOW);
-        initialize(&fixture);
-        fixture.client.mint(&fixture.alice, &1_000);
-        fixture.client.burn(&fixture.alice, &400);
-        assert_eq!(fixture.client.balance(&fixture.alice), 600);
-        assert_eq!(fixture.client.total_supply(), 600);
+        let f = fixture(NOW);
+        f.client.mint(&f.alice, &1_000);
+        f.client.burn(&f.alice, &400);
+        assert_eq!(f.client.balance(&f.alice), 600);
+        assert_eq!(f.client.total_supply(), 600);
     }
 }
