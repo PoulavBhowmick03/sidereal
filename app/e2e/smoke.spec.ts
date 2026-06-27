@@ -5,16 +5,23 @@ import { test, expect } from "@playwright/test";
 // Smoke coverage that runs without a deployed market: the app boots, routes
 // render, navigation works, and the wallet entry point is present.
 
-test("landing page renders the protocol pitch and pool stats section", async ({ page }) => {
+test("landing page renders the protocol pitch and a launch CTA", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: /fix or trade your stellar yield/i })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Pool stats" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /connect wallet/i })).toBeVisible();
+  // Marketing hero: editorial headline, the PT+YT=SY invariant, and a Launch App CTA.
+  await expect(
+    page.getByRole("heading", { name: /split stellar yield into principal and yield/i }),
+  ).toBeVisible();
+  await expect(page.getByText("PT + YT = SY")).toBeVisible();
+  await expect(page.getByRole("link", { name: /launch app/i }).first()).toBeVisible();
 });
 
 test("nav reaches mint, trade, and redeem", async ({ page }) => {
+  // The in-app tabs live in the app shell, not on the marketing landing. Enter
+  // the app first via Launch App, then exercise the header tabs.
   await page.goto("/");
-  // Scope to the header nav: the landing page also has CTA links named Mint/Trade.
+  await page.getByRole("link", { name: /launch app/i }).first().click();
+  await expect(page.getByRole("heading", { name: "Trade" })).toBeVisible();
+
   const nav = page.locator("header nav");
 
   await nav.getByRole("link", { name: "Mint" }).click();
