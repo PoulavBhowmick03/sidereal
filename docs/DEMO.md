@@ -33,13 +33,17 @@ SY wrapper, PT, YT, tokenizer, and AMM, initializes them in dependency order
 with a 90 day maturity, and writes the addresses to `app/.env.local`. The
 deployer public key and all five contract IDs are printed.
 
-Then seed the fresh market with some activity (a deposit, a split, and AMM
-liquidity) so the UI shows real numbers, otherwise the pool is empty and quotes
-fail with `MarketNotSeeded`:
+Then seed the fresh market with core activity (a deposit and a split) so the
+demo shows real balances:
 
 ```bash
 make seed
 ```
+
+By default `make seed` seeds only the Tier 1 core (deposit + split). It does not
+seed AMM liquidity, because the AMM/YT flash route is experimental and its auth
+is not yet proven on testnet. Once that verification passes, opt in with
+`SEED_AMM=1 make seed` to add PT/SY liquidity for the AMM demo.
 
 ## 3. Run the frontend
 
