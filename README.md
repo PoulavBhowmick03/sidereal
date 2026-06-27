@@ -8,10 +8,12 @@
 
 ## What this is
 
-A protocol that takes a yield-bearing asset on Stellar (initially USDC deposited into a [Blend](https://docs.blend.capital/) lending pool) and splits it into two tradable tokens:
+A protocol that takes a yield-bearing asset on Stellar and splits it into two tradable tokens:
 
-- **PT (Principal Token)** — redeemable 1:1 for the underlying at maturity. Buy at a discount, hold to maturity, lock in a fixed yield.
-- **YT (Yield Token)** — claims all the variable yield the underlying generates between now and maturity. Expires worthless at maturity.
+- **PT (Principal Token)**, redeems for its principal in the underlying at maturity (`amount * WAD / maturity_rate` of SY). Buy at a discount, hold to maturity, lock in a fixed yield.
+- **YT (Yield Token)**, claims all the variable yield the underlying generates between now and maturity, paid in SY out of escrow on claim. Expires worthless at maturity.
+
+The yield source is pluggable behind the SY wrapper's exchange rate. For testnet the rate is admin-controlled (a mock); wiring it to a real source ([Blend](https://docs.blend.capital/) USDC, or a DeFindex 4626-style vault) is a future milestone, not yet in the code.
 
 `PT + YT = SY` (Standardized Yield) at all times. You can always recombine.
 
@@ -36,15 +38,17 @@ Status legend: **built** (real settlement, tested) · **experimental** (works un
 | SY wrapper real vault (real underlying transfer in/out, share mint/burn) | ✅ built |
 | PT SEP-41 token (balance/transfer/allowance, tokenizer-gated mint/burn) | ✅ built |
 | YT SEP-41 token (balance/transfer/allowance, per-holder yield checkpoints) | ✅ built |
-| Tokenizer split / recombine / redeem (real SY custody, PT+YT=SY) | ✅ built |
-| YT yield claim (reads real YT balance against exchange-rate growth) | ✅ built |
+| Tokenizer split / recombine / redeem (asset-unit PT/YT, principal redemption) | ✅ built |
+| YT yield claim (pays accrued yield in SY out of escrow, transfer-safe) | ✅ built |
+| Insolvency guard + escrow-coverage invariant (pro-rata cap, YT subordinated) | ✅ built |
 | Checked tokenization math + initialize gates (audit M2/M3) | ✅ built |
-| TypeScript SDK (typed client, quote, build, submit) | ✅ built |
+| AMM integer fixed-point math (no float opcodes) + CI guard | ✅ built |
+| TypeScript SDK (typed client, quote, build, claim, submit) | ✅ built |
 | Frontend (mint, split, recombine, redeem, claim) | ✅ built |
 | PT/SY AMM (custody, swaps, TWAP, time decay) | ⚠️ experimental, mock-auth only |
 | YT flash route (split/recombine through tokenizer in one tx) | ⚠️ experimental, auth not proven |
-| Cross-contract integration tests | ✅ real-balance journeys (core); YT flash under permissive auth mock |
-| Testnet deploy script | ✅ `scripts/deploy-testnet.sh` |
+| Cross-contract integration tests | ✅ real-balance journeys + 10k-case economics property test; YT flash under permissive auth mock |
+| Testnet deploy script | ✅ `scripts/deploy-testnet.sh` (now passes `--yt_token`, pins source commit) |
 | Live testnet end-to-end demo | 🚧 pending testnet deploy + verification |
 
 The core settlement lifecycle moves real SEP-41 tokens and is covered by tests
@@ -136,9 +140,15 @@ make sdk-test         # SDK typecheck + vitest
 make app-test         # app typecheck + vitest
 ```
 
-The AMM has property tests verifying that `PT + YT = SY` holds across random
-swap sequences. If a contract change causes any of those to fail, the change
-does not ship. CI (`.github/workflows/ci.yml`) runs all three layers on every PR.
+The AMM has property tests verifying `PT + YT = SY` across random swap sequences,
+and the economics suite runs a 10,000-case conservation property test over random
+split/transfer/claim/recombine/redeem sequences with rate changes. These run on
+the native target. Because the AMM curve math compiles differently for native
+(where it once used floats) than for the wasm VM (which rejects float opcodes),
+CI also builds every contract to `wasm32v1-none` and fails if any float opcode
+appears (`scripts/check-wasm-floats.sh`). That guard, not the property tests, is
+what catches a float regression before it reaches a deploy. CI
+(`.github/workflows/ci.yml`) runs all three layers on every PR.
 
 ## Current limitations
 

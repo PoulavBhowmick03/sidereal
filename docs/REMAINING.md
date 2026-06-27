@@ -22,12 +22,16 @@ token contracts.
 - ☑ **PT and YT are real SEP-41 tokens.** Full balance/transfer/allowance
   surface. `mint`/`burn` are restricted to the tokenizer; unauthorized mint/burn
   is rejected.
-- ☑ **YT yield claim reads real balances.** Yield accrues against the holder's
-  real YT balance and exchange-rate growth, with per-holder checkpoints.
-- ☑ **Tokenizer custodies SY.** `split` pulls SY from the user and mints equal
-  PT+YT; `recombine` burns equal PT+YT and returns SY; `redeem_at_maturity`
-  burns PT and returns SY 1:1. Minting after maturity is refused. A test asserts
-  the tokenizer's SY balance equals outstanding PT (== YT).
+- ☑ **YT yield claim pays out.** `tokenizer.claim_yield` settles the holder's
+  accrued yield and transfers it in SY out of escrow. Yield uses the
+  conservation-correct telescoping formula and is transfer-safe (both parties
+  settle on every YT balance change). Per-holder state is persistent.
+- ☑ **Tokenizer custodies SY, asset-unit denomination.** `split` pulls SY and
+  mints `sy_amount * rate / WAD` of PT and YT (asset units); `recombine` burns
+  equal PT+YT and returns principal; `redeem_at_maturity` redeems PT for its
+  principal (`amount * WAD / maturity_rate`), not 1:1 in shares, so PT no longer
+  captures the yield that belongs to YT. The escrow-coverage invariant is
+  asserted in-contract on every mutation, with a pro-rata insolvency cap.
 - ☑ **Audit M2/M3.** SY methods are gated on `initialize`; tokenization uses
   checked math (overflow rejected).
 - ☑ **SDK + frontend track the real-token model** for the core lifecycle
@@ -36,6 +40,41 @@ token contracts.
 Verification: `cargo test --workspace` green; integration journeys assert real
 balances; frontend smoke/interaction e2e green (deployed-market flow gated on
 `E2E_MARKET_DEPLOYED`).
+
+## 1b. Closed by the audit remediation (2026-06-27)
+
+The pre-testnet audit found defects that are now fixed. Closed items:
+
+- ☑ **AMM wasm float blocker (audit Layer 1 finding 1).** The AMM used `libm`
+  f64 sqrt/log/exp, which the Soroban wasm VM rejects at upload, so `main` was
+  undeployable. Replaced with integer fixed-point; `libm` removed. A CI guard
+  (`scripts/check-wasm-floats.sh`) builds every contract to wasm and fails on any
+  float opcode, so this cannot regress. Closed in `6132f1c`, guard in `826cb31`.
+- ☑ **Inverted PT/YT economics (audit Layer 1 findings 3, 4).** PT redeemed 1:1
+  in appreciating shares (capturing the yield) and `claim_yield` paid nothing.
+  Reworked: PT redeems to principal, YT is paid its yield in SY from escrow,
+  conserved across transfers. See `ARCHITECTURE.md` section 3.
+- ☑ **Escrow insolvency (audit Layer 1 finding 5, Layer 8).** Escrow-coverage
+  invariant asserted in-contract; redemption capped pro-rata under a rate
+  regression; maturity rate frozen so post-maturity moves cannot change
+  redemption.
+- ☑ **SDK simulation source-account bug (audit Layer 4).** Reads sourced
+  simulations from the market C-address, which RPC cannot load. Now uses a funded
+  G-account (connected wallet or a public fallback). Closed in `7a62124`.
+- ☑ **SDK interface drift.** `getPosition` dropped the removed rate argument and
+  added LP balance; a `buildClaimYield` builder targets `tokenizer.claim_yield`.
+- ☑ **Deploy script missing `--yt_token` (audit Layer 7).** `scripts/deploy-testnet.sh`
+  now passes `--yt_token` to the AMM init and pins the source commit. A
+  resumable variant and a committed `deployments/testnet.toml` provenance record
+  are still pending (the live redeploy from a pinned commit needs a funded
+  testnet run, see section 2).
+- ☑ **TTL strategy (audit Layer 7).** SY/PT/YT/tokenizer now bump instance and
+  per-holder persistent TTL on every mutating entrypoint; YT checkpoints are
+  persistent and per-holder.
+- ☑ **SY principal-on-transfer (audit Layer 1 cosmetic).** Principal now moves
+  pro-rata with shares, so `accrued_yield` stays correct after a transfer.
+
+Provenance of the live testnet deployment is recorded in `docs/PROVENANCE.md`.
 
 ## 2. Remaining: AMM + auth (Tier 2, gated)
 
