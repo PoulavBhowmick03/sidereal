@@ -117,12 +117,49 @@ settlement. The escrow-coverage invariant is asserted across a full multi-holder
 claim/redeem walk in the tests; Phase 3 step 7 will also assert it inside the
 contract on every mutation.
 
-## Next: Phase 3 (insolvency guard and post-maturity)
+## Phase 3 (COMPLETE): insolvency guard and post-maturity
 
-- Step 7: assert the escrow-coverage invariant in-contract after every tokenizer
-  mutation (helper, debug_assert in release / hard check in tests).
-- Step 8: insolvency guard, cap redemption to recoverable underlying when the
-  rate goes backwards; document pro-rata loss allocation.
-- Step 9: snapshot the maturity rate so post-maturity rate moves do not change
-  redemption; define post-maturity YT settlement (grace window).
-Then Phase 4: property test (10k sequences) and ARCHITECTURE reconciliation.
+Running autonomously in a loop (human approved).
+
+- Step 7: in-contract escrow-coverage invariant. After split, recombine, redeem,
+  and claim the tokenizer asserts `escrow_sy * rate / WAD >= pt_supply`. YT yield
+  coverage holds by construction (escrow excess above PT principal == outstanding
+  YT yield), and total YT yield is not enumerable on-chain, so the computable PT
+  half is asserted. New `Insolvent` error.
+- Step 8: insolvency guard. `redeem_at_maturity` caps the payout to
+  `escrow_shares * pt_amount / pt_supply` when a rate regression has left the
+  escrow short, so PT holders share the loss pro-rata (capping preserves the
+  escrow/PT ratio, keeping later redeemers fair). YT is subordinate: a claim that
+  would breach PT coverage reverts (Insolvent), flooring YT at zero during
+  insolvency while the holder keeps their banked ledger. Tests: 1.00->0.95 cap
+  with equal pro-rata loss; banked-then-crash claim revert.
+- Step 9: maturity rate snapshot. Tokenizer freezes the SY rate at maturity
+  (lazy + permissionless `freeze_maturity_rate` poke + `maturity_rate` view);
+  redemption and the solvency check use the frozen rate, so post-maturity rate
+  moves cannot change redemption. YT freezes accrual at maturity the same way
+  (no phantom post-maturity yield); post-maturity claims stay open (grace
+  window) at the maturity rate. Tests: frozen-rate redemption, exact-maturity
+  boundary gating.
+
+Test state: economics 9, yt 9, tokenizer 9, journey 5, amm 21, pt 11, sy 11,
+auth 1 (+1 ignored). Full workspace green.
+
+### Phase 3 summary (human checkpoint)
+
+The economics are now defended against the adversarial cases, not just the happy
+path: a rate regression cannot let early redeemers drain the escrow (pro-rata
+cap), YT cannot drain escrow below PT coverage (subordinated, reverts), and
+post-maturity rate moves cannot change redemption (frozen snapshot). The
+escrow-coverage invariant is enforced in-contract on every mutation. The one
+documented assumption is that the SY rate is flat post-maturity, which holds for
+a real yield source (accrual stops at maturity) and for the mock requires the
+admin not to bump it after expiry.
+
+## Next: Phase 4 (property test and docs)
+
+- Step 10: 10k-sequence conservation property test across split/transfer/claim/
+  recombine/redeem with rate changes; assert the invariant holds every step and
+  value paid out equals deposited plus net yield.
+- Step 11: maturity-boundary tests (done as part of step 9; extend if needed).
+- Step 12: reconcile ARCHITECTURE section 3 with the final code (insolvency
+  guard, post-maturity, frozen rate).
