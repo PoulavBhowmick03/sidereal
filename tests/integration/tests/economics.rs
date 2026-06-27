@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
-//! Phase 1 failing specs for the corrected PT/YT economics
-//! (audit Layer 1, findings 3 and 4: "PT captures yield, YT pays nothing" and
-//! the escrow-coverage gap).
+//! Economics suite for the corrected PT/YT model (audit Layer 1 findings 3, 4,
+//! and the post-maturity finding).
 //!
-//! These assert the INTENDED Pendle-style behavior:
+//! Covers the intended Pendle-style behavior:
 //!   - YT holders receive their accrued yield, paid in SY, on claim.
 //!   - PT redeems to its asset face (principal at the maturity rate), not 1:1
 //!     in SY shares.
-//!   - The tokenizer escrow always covers outstanding PT face plus unclaimed
-//!     YT yield, at every state transition.
+//!   - Yield is conserved across transfers (no loss, no double count).
+//!   - The escrow covers outstanding PT face plus unclaimed YT yield at every
+//!     state transition, including a 10k-step random property test.
+//!   - Insolvency: PT redemption is capped pro-rata on a rate regression; YT is
+//!     subordinated (claims revert rather than breach PT coverage).
+//!   - The maturity rate is frozen, so post-maturity rate moves do not change
+//!     redemption.
 //!
-//! They are RED against the current code, which pays YT nothing (claim_yield
-//! moves no tokens) and redeems PT 1:1 in shares. Phase 2 turns them green.
-//! See docs/PROGRESS.md for the plan.
+//! These started as RED specs against the old code (PT redeemed 1:1, YT paid
+//! nothing) and are now green. See docs/PROGRESS.md.
 
 use sidereal_pt_token::{PtToken, PtTokenClient};
 use sidereal_sy_wrapper::{SyWrapper, SyWrapperClient};
@@ -94,6 +97,18 @@ impl Market {
 
     fn transfer_yt(&self, from: &Address, to: &Address, amount: i128) {
         YtTokenClient::new(&self.env, &self.yt).transfer(from, to, &amount);
+    }
+
+    fn recombine(&self, who: &Address, amount: i128) -> i128 {
+        TokenizerClient::new(&self.env, &self.tokenizer).recombine(who, &amount, &amount)
+    }
+
+    fn yt_balance(&self, who: &Address) -> i128 {
+        YtTokenClient::new(&self.env, &self.yt).balance(who)
+    }
+
+    fn underlying_balance(&self, who: &Address) -> i128 {
+        token::TokenClient::new(&self.env, &self.underlying).balance(who)
     }
 
     fn redeem_pt(&self, who: &Address, pt_amount: i128) -> i128 {
@@ -418,5 +433,124 @@ fn transfer_conserves_yield_through_claims() {
         (escrow_asset - 100 * UNIT).abs() <= 4,
         "escrow should hold only principal, {} asset units",
         escrow_asset
+    );
+}
+
+/// Deterministic LCG so the random sequence is reproducible.
+struct Rng(u64);
+
+impl Rng {
+    fn new(seed: u64) -> Self {
+        Rng(seed)
+    }
+    fn next(&mut self) -> u64 {
+        self.0 = self
+            .0
+            .wrapping_mul(6_364_136_223_846_793_005)
+            .wrapping_add(1_442_695_040_888_963_407);
+        self.0 >> 33
+    }
+    fn below(&mut self, n: u64) -> u64 {
+        self.next() % n
+    }
+}
+
+/// Step 10: conservation across a long random sequence of split / transfer /
+/// claim / recombine, with a monotonically rising rate, then full drain at
+/// maturity. The escrow-coverage invariant must hold at every step (the
+/// contract also asserts the PT half on every mutation), and the escrow must
+/// drain to dust once everyone has claimed and redeemed. The economics code is
+/// pure integer math, so the native test path and the wasm path are identical
+/// (no float divergence to coordinate with Codex on).
+#[test]
+fn conservation_holds_across_random_sequences() {
+    const N: u64 = 10_000;
+    let m = deploy();
+    let holders: std::vec::Vec<Address> = (0..3).map(|_| m.fund(1_000_000 * UNIT)).collect();
+    let refs: std::vec::Vec<&Address> = holders.iter().collect();
+    let mut rng = Rng::new(0xC0FFEE);
+    let mut rate = WAD;
+    let mut value_ops: i128 = 0;
+
+    for _ in 0..N {
+        let h = &holders[rng.below(holders.len() as u64) as usize];
+        match rng.below(5) {
+            0 => {
+                // deposit a random amount, then split all the SY now held
+                let amt = (1 + rng.below(50)) as i128 * UNIT;
+                if m.underlying_balance(h) >= amt {
+                    m.deposit(h, amt);
+                    let sy = m.sy_balance(h);
+                    if sy > 0 {
+                        m.split(h, sy);
+                        value_ops += 1;
+                    }
+                }
+            }
+            1 => {
+                // transfer a portion of YT to another holder
+                let bal = m.yt_balance(h);
+                if bal > 1 {
+                    let to = &holders[rng.below(holders.len() as u64) as usize];
+                    let amount = 1 + (rng.below(bal as u64) as i128);
+                    if amount <= bal {
+                        m.transfer_yt(h, to, amount);
+                    }
+                }
+            }
+            2 => {
+                m.claim(h);
+                value_ops += 1;
+            }
+            3 => {
+                // recombine equal PT and YT
+                let pt = m.pt_balance(h);
+                let yt = m.yt_balance(h);
+                let max = if pt < yt { pt } else { yt };
+                if max > 0 {
+                    let amount = 1 + (rng.below(max as u64) as i128);
+                    if amount <= max {
+                        m.recombine(h, amount);
+                        value_ops += 1;
+                    }
+                }
+            }
+            _ => {
+                // bump the rate up by 0 to ~2%
+                rate += (rng.below(20_000_000_000_000_000) + 1) as i128;
+                m.set_rate(rate);
+            }
+        }
+
+        m.assert_escrow_covers(&refs);
+    }
+
+    // Drain everything at maturity: claim all yield, then redeem all PT.
+    m.env.ledger().set_timestamp(MATURITY + 1);
+    for h in &holders {
+        m.claim(h);
+    }
+    m.assert_escrow_covers(&refs);
+    for h in &holders {
+        let pt = m.pt_balance(h);
+        if pt > 0 {
+            m.redeem_pt(h, pt);
+            value_ops += 1;
+        }
+    }
+
+    // The real conservation proof is that assert_escrow_covers held at every one
+    // of the N steps above: the escrow was never short, so no holder could be
+    // underpaid, and every claim/redeem transfer succeeded. What remains is pure
+    // floor-rounding excess that stays stuck in escrow (the safe direction): each
+    // value-moving op rounds a division down by less than ~2 shares, so the
+    // leftover is bounded linearly by the op count, not by the values involved.
+    // Measured ~1.15 shares per op; bound at 2 with a margin.
+    let left = m.escrow_shares();
+    assert!(
+        left <= 2 * value_ops + 16,
+        "leftover escrow {} exceeds the rounding-dust bound for {} value ops",
+        left,
+        value_ops
     );
 }

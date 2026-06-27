@@ -121,7 +121,34 @@ escrow_sy * R / WAD  >=  pt_supply + total_unclaimed_yt_yield
 
 The escrow, valued at the current rate, always covers every PT at face plus
 every YT's unclaimed yield. Equality holds at split and is preserved by claim,
-redeem, and recombine. A code path that can break this is a bug.
+redeem, and recombine. The tokenizer asserts the computable half of this,
+`escrow_sy * R / WAD >= pt_supply`, after every mutating call (split, recombine,
+redeem, claim) and rejects with `Insolvent` if it fails. The YT half follows by
+construction: the escrow asset value above PT principal is exactly the total
+outstanding YT yield, and total YT yield is not enumerable on-chain. A 10k-step
+random property test checks the full invariant (PT plus YT) holds at every step.
+
+**Insolvency (negative yield).** If the SY rate regresses (a slash, a loss) the
+escrow may no longer cover all PT principal. The protocol fails safe rather than
+first-come-first-served:
+
+- PT redemption is capped to the holder's pro-rata share of escrow,
+  `escrow_shares * pt_amount / pt_supply`. PT holders share the shortfall
+  pro-rata; capping preserves the escrow/PT ratio so later redeemers are not
+  disadvantaged. When solvent, this equals full principal.
+- YT is subordinate to PT. A claim that would push the escrow below PT coverage
+  reverts (the coverage assertion fails), flooring YT at zero during insolvency.
+  The holder keeps their banked ledger and can claim once the rate recovers.
+
+**Maturity and post-maturity.** The tokenizer freezes the SY rate at maturity
+(snapshotted on the first post-maturity access, or via a permissionless
+`freeze_maturity_rate` poke). Redemption and the solvency check use the frozen
+rate, so a post-maturity rate move cannot change what PT redeems for. YT freezes
+accrual at maturity the same way, so no yield accrues after the term ends;
+post-maturity YT claims remain open (a grace window) and pay at the maturity
+rate. This assumes the SY rate is flat after maturity, which holds for a real
+yield source (accrual stops at maturity) and, for the current admin-set mock
+rate, requires the admin not to bump it post-expiry.
 
 **Storage.** YT per-holder yield state is two persistent entries keyed by holder
 address: `Checkpoint(holder)` (last settled rate) and `AccruedYield(holder)`

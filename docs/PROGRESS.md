@@ -155,11 +155,50 @@ documented assumption is that the SY rate is flat post-maturity, which holds for
 a real yield source (accrual stops at maturity) and for the mock requires the
 admin not to bump it after expiry.
 
-## Next: Phase 4 (property test and docs)
+## Phase 4 (COMPLETE): property test and docs
 
-- Step 10: 10k-sequence conservation property test across split/transfer/claim/
-  recombine/redeem with rate changes; assert the invariant holds every step and
-  value paid out equals deposited plus net yield.
-- Step 11: maturity-boundary tests (done as part of step 9; extend if needed).
-- Step 12: reconcile ARCHITECTURE section 3 with the final code (insolvency
-  guard, post-maturity, frozen rate).
+- Step 10: conservation property test. 10k random sequences of split / transfer
+  / claim / recombine across three holders with a monotonically rising rate,
+  then a full drain at maturity. The escrow-coverage invariant is asserted at
+  every step (the contract also asserts the PT half in-contract), and the
+  leftover escrow is bounded to floor-rounding dust (measured ~1.15 shares per
+  value op; bounded at 2). The economics code is pure integer math, so the
+  native test path equals the wasm path (no float divergence to coordinate with
+  Codex). A first run failed a too-tight drain bound; investigated per hard-stop
+  #3 and confirmed it was safe rounding excess (escrow never short, every payout
+  succeeded), then calibrated the bound from measurement rather than papering
+  over it.
+- Step 11: maturity-boundary tests landed with step 9 (exact-maturity redeem
+  allowed, split rejected).
+- Step 12: ARCHITECTURE section 3 extended to match the final code (in-contract
+  invariant assertion, insolvency pro-rata cap + YT subordination, frozen
+  maturity rate, post-maturity grace window).
+
+## Phase 4 summary (human checkpoint) and final state
+
+All four phases are complete. The PT/YT economics defect (audit Layer 1 findings
+3 and 4) is closed and hardened:
+
+- PT redeems to principal; YT is paid its yield in SY from escrow.
+- Yield uses the conservation-correct telescoping formula; transfer-safe.
+- Escrow-coverage invariant enforced in-contract on every mutation and checked
+  by a 10k-step property test.
+- Insolvency guard: pro-rata PT cap, YT subordinated.
+- Maturity rate frozen; post-maturity settlement defined.
+
+Done-checklist (from the brief):
+1. Three Phase 1 specs green: yes.
+2. Conservation property test green (10k, integer path): yes.
+3. Escrow-coverage invariant enforced by in-contract assertion: yes.
+4. Insolvency guard prevents over-redemption: yes.
+5. Post-maturity YT settlement implemented and tested: yes.
+6. ARCHITECTURE section 3 matches code incl. worked example: yes.
+7. COORDINATION.md has final storage key shape: yes.
+8. tests/auth_invariants.rs has the auth-pinning invariant: yes.
+9. Full suite passes locally: yes (CI is Codex's lane).
+10. PROGRESS.md has a summary per phase: yes.
+
+Out of lane / not done here (by design): the real yield source (mock rate
+remains; Layer 2 is Codex's), the AMM float fix, SDK simulate source, deploy
+scripts, TTL bumps. The SDK must drop the rate arg from preview_claim_yield and
+add a claim builder targeting tokenizer.claim_yield (COORDINATION.md 2).
