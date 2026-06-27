@@ -86,16 +86,23 @@ impl Market {
         TokenizerClient::new(&self.env, &self.tokenizer).split(who, &sy_amount);
     }
 
+    /// A bare address that holds no underlying (it can still receive YT and be
+    /// paid SY yield).
+    fn account(&self) -> Address {
+        Address::generate(&self.env)
+    }
+
+    fn transfer_yt(&self, from: &Address, to: &Address, amount: i128) {
+        YtTokenClient::new(&self.env, &self.yt).transfer(from, to, &amount);
+    }
+
     fn redeem_pt(&self, who: &Address, pt_amount: i128) -> i128 {
         TokenizerClient::new(&self.env, &self.tokenizer).redeem_at_maturity(who, &pt_amount)
     }
 
-    /// The YT yield-claim entrypoint. Phase 2 step 5 may move this onto the
-    /// tokenizer and drop the explicit rate argument once the contract reads
-    /// the SY rate itself. Update here in one place when it does.
+    /// Claims YT yield through the tokenizer, which pays SY out of escrow.
     fn claim(&self, holder: &Address) -> i128 {
-        let rate = self.rate();
-        YtTokenClient::new(&self.env, &self.yt).claim_yield(holder, &rate)
+        TokenizerClient::new(&self.env, &self.tokenizer).claim_yield(holder)
     }
 
     fn set_rate(&self, rate: i128) {
@@ -123,21 +130,23 @@ impl Market {
         PtTokenClient::new(&self.env, &self.pt).total_supply()
     }
 
-    /// Asset-unit YT yield owed but unclaimed, summed over the known holders.
+    /// SY-share YT yield owed but unclaimed, summed over the known holders.
     fn yt_outstanding(&self, holders: &[&Address]) -> i128 {
         let yt = YtTokenClient::new(&self.env, &self.yt);
-        let rate = self.rate();
         holders
             .iter()
-            .map(|h| yt.preview_claim_yield(h, &rate))
+            .map(|h| yt.preview_claim_yield(h))
             .sum::<i128>()
     }
 
     /// The hard invariant: escrow, valued at the current rate, must cover every
-    /// outstanding PT at face plus every YT's unclaimed yield.
+    /// outstanding PT at face plus every YT's unclaimed yield. All terms are in
+    /// asset units (YT yield is reported in SY shares, so convert at the rate).
     fn assert_escrow_covers(&self, holders: &[&Address]) {
-        let escrow_asset = self.escrow_shares() * self.rate() / WAD;
-        let covered = self.pt_supply() + self.yt_outstanding(holders);
+        let rate = self.rate();
+        let escrow_asset = self.escrow_shares() * rate / WAD;
+        let yt_asset = self.yt_outstanding(holders) * rate / WAD;
+        let covered = self.pt_supply() + yt_asset;
         assert!(
             escrow_asset >= covered,
             "escrow {} asset units must cover PT+YT claims {}",
@@ -238,5 +247,52 @@ fn escrow_covers_outstanding_claims() {
         m.escrow_shares() <= 4,
         "escrow should drain to ~0, {} shares left",
         m.escrow_shares()
+    );
+}
+
+#[test]
+fn transfer_conserves_yield_through_claims() {
+    let m = deploy();
+    let alice = m.fund(100 * UNIT);
+    let bob = m.account(); // holds no underlying, only receives YT
+    m.deposit(&alice, 100 * UNIT);
+    m.split(&alice, 100 * UNIT); // 100 YT to Alice, checkpoint 1.00
+
+    // Rate rises to 1.10, then Alice sends half her YT to Bob without claiming.
+    // The transfer settles both: Alice banks her yield on 100 over 1.00->1.10,
+    // Bob starts fresh at 1.10.
+    m.set_rate(RATE_1_10);
+    m.transfer_yt(&alice, &bob, 50 * UNIT);
+
+    // Rate rises again to 1.20; now Alice earns on 50 and Bob earns on 50.
+    let rate_1_20: i128 = 1_200_000_000_000_000_000;
+    m.set_rate(rate_1_20);
+
+    let claimed_alice = m.claim(&alice);
+    let claimed_bob = m.claim(&bob);
+    assert!(claimed_alice > 0 && claimed_bob > 0, "both earned yield");
+    assert_eq!(m.sy_balance(&alice), claimed_alice);
+    assert_eq!(m.sy_balance(&bob), claimed_bob);
+
+    // Conservation: total yield paid equals what one 100-YT holder would have
+    // earned over 1.00 -> 1.20. The transfer neither lost nor duplicated yield.
+    // owed_shares = 100 * (1/1.00 - 1/1.20) * WAD.
+    let asset_yield = (100 * UNIT) * (rate_1_20 - WAD) / WAD;
+    let single_holder = asset_yield * WAD / rate_1_20;
+    assert!(
+        (claimed_alice + claimed_bob - single_holder).abs() <= 4,
+        "claimed {} + {} should equal single-holder {}",
+        claimed_alice,
+        claimed_bob,
+        single_holder
+    );
+
+    // No PT was redeemed, so escrow still exactly covers the 100 units of
+    // principal and nothing more (all yield was claimed out).
+    let escrow_asset = m.escrow_shares() * m.rate() / WAD;
+    assert!(
+        (escrow_asset - 100 * UNIT).abs() <= 4,
+        "escrow should hold only principal, {} asset units",
+        escrow_asset
     );
 }

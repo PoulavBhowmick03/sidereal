@@ -219,6 +219,35 @@ impl Tokenizer {
         Ok(sy_to_pay)
     }
 
+    /// Pays `holder` their accrued YT yield in SY out of escrow, and returns the
+    /// SY amount paid. The YT contract settles the holder and reports the owed
+    /// SY shares (consuming its banked ledger); the tokenizer, which custodies
+    /// the escrow, transfers that SY. Allowed any time, including after maturity,
+    /// so a holder can always collect yield earned over the term.
+    pub fn claim_yield(env: Env, holder: Address) -> Result<i128, Error> {
+        holder.require_auth();
+        let config = Self::read_config(&env)?;
+
+        let owed = settle_and_consume_yt(&env, &config.yt_token, &holder);
+        if owed > 0 {
+            push_token(&env, &config.sy_token, &holder, owed);
+        }
+
+        Ok(owed)
+    }
+
+    /// SY shares `holder` could claim right now, for display. Reads through to
+    /// the YT contract, which reads the SY rate itself.
+    pub fn preview_claim_yield(env: Env, holder: Address) -> Result<i128, Error> {
+        let config = Self::read_config(&env)?;
+        let args: Vec<Val> = vec![&env, holder.into_val(&env)];
+        Ok(env.invoke_contract(
+            &config.yt_token,
+            &Symbol::new(&env, "preview_claim_yield"),
+            args,
+        ))
+    }
+
     fn read_config(env: &Env) -> Result<Config, Error> {
         env.storage()
             .instance()
@@ -268,6 +297,15 @@ fn mul_div_floor(a: i128, b: i128, c: i128) -> Result<i128, Error> {
     a.checked_mul(b)
         .and_then(|v| v.checked_div(c))
         .ok_or(Error::MathOverflow)
+}
+
+/// Settles `holder` on the YT contract and consumes their banked yield, returning
+/// the SY shares owed. Authorizes the call as the tokenizer, since YT gates
+/// `settle_and_consume` on the tokenizer's address.
+fn settle_and_consume_yt(env: &Env, yt_token: &Address, holder: &Address) -> i128 {
+    let args: Vec<Val> = vec![env, holder.into_val(env)];
+    authorize_self_call(env, yt_token, "settle_and_consume", args.clone());
+    env.invoke_contract(yt_token, &Symbol::new(env, "settle_and_consume"), args)
 }
 
 /// Pulls `amount` of `token_id` from `from` into the tokenizer (holder-authorized).

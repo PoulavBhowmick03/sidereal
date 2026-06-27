@@ -117,40 +117,30 @@ impl YtToken {
     }
 
     /// Total SY shares claimable by `holder` right now: already-banked yield
-    /// plus what a settle at `current_exchange_rate` would add.
-    ///
-    /// The `current_exchange_rate` argument is retained for SDK compatibility
-    /// through the economics rework; the settle path itself reads the rate from
-    /// the SY contract. Phase 2 step 5 drops this argument (see
-    /// docs/COORDINATION.md).
-    pub fn preview_claim_yield(
-        env: Env,
-        holder: Address,
-        current_exchange_rate: i128,
-    ) -> Result<i128, Error> {
-        Self::read_config(&env)?;
-        if current_exchange_rate <= 0 {
-            return Err(Error::InvalidExchangeRate);
-        }
-
+    /// plus what a settle at the current SY rate would add. The contract reads
+    /// the rate from the SY contract itself, so no caller can supply a fake one.
+    pub fn preview_claim_yield(env: Env, holder: Address) -> Result<i128, Error> {
+        let config = Self::read_config(&env)?;
+        let rate = Self::current_rate(&env, &config);
         let banked = Self::read_accrued(&env, &holder);
-        let pending = Self::pending_yield(&env, &holder, current_exchange_rate)?;
+        let pending = Self::pending_yield(&env, &holder, rate)?;
         banked.checked_add(pending).ok_or(Error::MathOverflow)
     }
 
-    /// Settles the holder against the current SY rate, banking accrued yield,
-    /// and returns their total claimable SY shares. The actual SY payout from
-    /// escrow lands in Phase 2 step 5; today this reports the claimable amount
-    /// and advances the checkpoint so yield is never double counted.
-    pub fn claim_yield(
-        env: Env,
-        holder: Address,
-        _current_exchange_rate: i128,
-    ) -> Result<i128, Error> {
-        holder.require_auth();
-        Self::read_config(&env)?;
+    /// Settles `holder` to the current SY rate, then consumes (zeroes) and
+    /// returns their banked yield in SY shares. Restricted to the tokenizer,
+    /// which calls this from its own `claim_yield` and then pays the returned SY
+    /// out of escrow. This moves no tokens itself; it is the bookkeeping half of
+    /// a claim, paired with the tokenizer's escrow transfer.
+    pub fn settle_and_consume(env: Env, holder: Address) -> Result<i128, Error> {
+        let config = Self::read_config(&env)?;
+        config.tokenizer.require_auth();
         Self::settle(&env, &holder);
-        Ok(Self::read_accrued(&env, &holder))
+        let owed = Self::read_accrued(&env, &holder);
+        if owed > 0 {
+            Self::write_accrued(&env, &holder, 0);
+        }
+        Ok(owed)
     }
 
     // --- Minter-privileged supply control (only the tokenizer) -------------
@@ -539,7 +529,7 @@ mod test {
         f.client.mint(&f.alice, &(100 * WAD));
 
         f.sy.set_exchange_rate(&f.admin, &RATE_1_10);
-        let claimable = f.client.claim_yield(&f.alice, &RATE_1_10);
+        let claimable = f.client.settle_and_consume(&f.alice);
 
         // owed = 100 * (1/1.05 - 1/1.10) * WAD = 100 * 0.0432900 = 4.329 SY.
         // A naive (r-c)/WAD form would wrongly bank 100*0.05 = 5.0 SY.
@@ -557,7 +547,7 @@ mod test {
     fn first_claim_at_mint_rate_accrues_nothing() {
         let f = fixture(NOW);
         f.client.mint(&f.alice, &(100 * WAD)); // minted at rate 1.00
-        let claimable = f.client.claim_yield(&f.alice, &RATE_1_00);
+        let claimable = f.client.settle_and_consume(&f.alice);
         assert_eq!(claimable, 0);
         assert_eq!(f.client.checkpoint(&f.alice), RATE_1_00);
     }
@@ -573,8 +563,8 @@ mod test {
 
         // Alice keeps the yield she earned on 100 over 1.00 -> 1.10. Bob starts
         // fresh at 1.10, so he has nothing yet.
-        let alice_pending = f.client.preview_claim_yield(&f.alice, &RATE_1_10);
-        let bob_pending = f.client.preview_claim_yield(&f.bob, &RATE_1_10);
+        let alice_pending = f.client.preview_claim_yield(&f.alice);
+        let bob_pending = f.client.preview_claim_yield(&f.bob);
         let expected_alice = (100 * WAD) * (RATE_1_10 - RATE_1_00) / RATE_1_00 * WAD / RATE_1_10;
         assert!((alice_pending - expected_alice).abs() <= 2);
         assert_eq!(bob_pending, 0, "Bob earns only from 1.10 forward");
@@ -582,8 +572,8 @@ mod test {
         // Rate rises again; now both earn on their post-transfer balances.
         f.sy.set_exchange_rate(&f.admin, &(RATE_1_10 + WAD / 10));
         let r2 = RATE_1_10 + WAD / 10;
-        let alice2 = f.client.preview_claim_yield(&f.alice, &r2);
-        let bob2 = f.client.preview_claim_yield(&f.bob, &r2);
+        let alice2 = f.client.preview_claim_yield(&f.alice);
+        let bob2 = f.client.preview_claim_yield(&f.bob);
 
         // Conservation: Alice's total + Bob's total equals the yield a single
         // 100 balance would have earned from 1.00 to r2.

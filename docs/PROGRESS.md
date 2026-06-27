@@ -84,15 +84,45 @@ Test state after steps 1-4:
   design, waiting on the step 5 claim payout.
 - yt-token 9, tokenizer 9, journey 5: green. Rate-1.0 numbers unchanged.
 
-## Next: Phase 2 step 5 (claim payout) and step 6 (transfer hooks)
+## Phase 2 steps 5-6 (COMPLETE): claim payout + transfer-safe conservation
 
-- Step 5: make claim pay the banked `AccruedYield` SY out of the tokenizer
-  escrow, zero the ledger, drop the `current_exchange_rate` arg from
-  preview/claim (read internally). This is the hard-stop #1 interface change;
-  human approved the "read rate internally" direction. Turns the last two
-  economics specs green.
-- Step 6 transfer hooks are already implemented as part of the settle engine;
-  step 5 will add the dedicated conservation test that pays out and asserts no
-  yield is lost or double counted.
-- Then Phase 3: escrow-coverage assertion in code, insolvency guard, maturity
-  rate snapshot, post-maturity YT settlement.
+Human approved proceeding with the "read rate internally" interface.
+
+- Step 5 (claim payout): claiming moved to `tokenizer.claim_yield(holder)`. The
+  tokenizer (escrow custodian) calls the new tokenizer-gated
+  `yt.settle_and_consume(holder)`, which settles and zeroes the holder's banked
+  yield and reports the owed SY shares; the tokenizer then transfers that SY out
+  of escrow. `yt.claim_yield(holder, rate)` removed;
+  `yt.preview_claim_yield(holder)` and `tokenizer.preview_claim_yield(holder)`
+  read the rate internally. Interface change recorded in COORDINATION.md 2 for
+  the SDK.
+- Step 6 (transfer hooks): already wired in the settle engine. Added the
+  dedicated payout-conservation integration test: Alice splits 100 YT, accrues,
+  transfers 50 to Bob, rate rises again, both claim. Total SY claimed equals a
+  single 100-YT holder's yield over the same rate path (no loss, no double
+  count), and escrow is left holding exactly the principal.
+
+Test state: all four economics specs GREEN
+(`yt_receives_yield_on_claim`, `pt_redeems_to_principal_not_share`,
+`escrow_covers_outstanding_claims`, `transfer_conserves_yield_through_claims`).
+The central defect (PT captures yield, YT pays nothing) is closed: PT redeems to
+principal, YT is paid its yield in SY, conserved across transfers.
+
+## Phase 2 summary (human checkpoint)
+
+PT and YT now have correct, conservation-clean economics on a mock SY rate:
+asset-unit denomination, principal-only PT redemption, telescoping YT yield with
+a per-holder ledger, real SY payout from escrow on claim, and transfer-safe
+settlement. The escrow-coverage invariant is asserted across a full multi-holder
+claim/redeem walk in the tests; Phase 3 step 7 will also assert it inside the
+contract on every mutation.
+
+## Next: Phase 3 (insolvency guard and post-maturity)
+
+- Step 7: assert the escrow-coverage invariant in-contract after every tokenizer
+  mutation (helper, debug_assert in release / hard check in tests).
+- Step 8: insolvency guard, cap redemption to recoverable underlying when the
+  rate goes backwards; document pro-rata loss allocation.
+- Step 9: snapshot the maturity rate so post-maturity rate moves do not change
+  redemption; define post-maturity YT settlement (grace window).
+Then Phase 4: property test (10k sequences) and ARCHITECTURE reconciliation.

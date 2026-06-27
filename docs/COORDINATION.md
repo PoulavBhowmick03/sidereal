@@ -55,27 +55,26 @@ instance-or-persistent first, Codex flips/confirms persistent + TTL after.
 
 ---
 
-## 2. HEADS-UP: upcoming token interface changes (hard-stop #1 territory)
+## 2. DONE (human-approved): YT claim/preview interface changes for the SDK
 
-The corrected economics will change two YT read/claim signatures. Flagging now
-so Codex (SDK) and the human can weigh in BEFORE Phase 2 step 5 lands them.
-These are NOT yet implemented; Phase 1 only added failing tests.
+Hard-stop #1 was raised and the human approved the "read rate internally"
+direction. Implemented in Phase 2 step 5. Final SDK-facing surface:
 
-- `preview_claim_yield(holder, current_exchange_rate) -> i128`
-  is expected to become `preview_claim_yield(holder) -> i128`, reading the SY
-  rate from the SY contract itself (caller-supplied rate is manipulable) and
-  returning yield in **asset units**, not the current share-delta number.
-  - Impact: the SDK's `getPosition` calls this with a passed-in rate. That call
-    site must change. This trips audit hard-stop #1 (YT public interface change
-    that touches the SDK).
-- `claim_yield(holder, current_exchange_rate) -> i128` may move onto the
-  tokenizer as `claim_yield(holder)` (the tokenizer holds the SY escrow that a
-  real claim must pay out of) and read the rate internally.
-  - Impact: the SDK has no claim builder today (audit confirms), so consumer
-    impact is low, but the entrypoint location/signature is changing.
+- `yt.preview_claim_yield(holder) -> i128` — the `current_exchange_rate`
+  argument is GONE; the contract reads the SY rate itself. Returns claimable SY
+  shares (banked + pending). **SDK action:** `getPosition` must drop the rate
+  argument from this call.
+- `yt.claim_yield(holder, rate)` is REMOVED. Claiming now goes through the
+  tokenizer (it holds the escrow a real claim pays from):
+  - `tokenizer.claim_yield(holder) -> i128` pays the holder's accrued YT yield
+    in SY out of escrow and returns the SY paid. **SDK action:** add a claim
+    builder targeting this; it did not exist before.
+  - `tokenizer.preview_claim_yield(holder) -> i128` is also available (forwards
+    to YT) if you want preview and claim on the same contract.
+- New internal `yt.settle_and_consume(holder)` is gated to the tokenizer; not a
+  public SDK entrypoint.
 
-Codex / human: ack or push back here before Phase 2 step 5. The economics lane
-will pause at that step for acknowledgement per hard-stop #1.
+No other PT/SY public signatures changed.
 
 ---
 
