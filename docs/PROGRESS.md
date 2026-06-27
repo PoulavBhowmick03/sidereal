@@ -105,5 +105,13 @@ Next: add the all-contract Wasm float-opcode CI guard.
 - Verified all five integer-path artifacts pass locally.
 - Verified the prior float AMM fails with 210 detected float opcodes.
 
-Next: push the guard, prove the GitHub check fails on a temporary float branch,
-then remove that branch.
+GitHub negative control:
+
+- Opened temporary draft PR #20 from clean `main` with only the guard added.
+- SDK, app, e2e, contract tests, and contract Wasm builds passed.
+- The contracts job then failed only at `Reject floating-point Wasm opcodes`.
+- Four contracts passed; the float AMM reported 210 rejected opcodes.
+- Closed the PR and deleted the temporary branch after capturing the failed
+  step log.
+
+Next: fix the SDK simulation source account.
