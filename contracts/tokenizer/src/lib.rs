@@ -32,6 +32,9 @@ pub struct Position {
 #[contracttype]
 enum DataKey {
     Config,
+    /// SY rate frozen at maturity, used for all post-maturity redemption so
+    /// later rate moves cannot change what PT redeems for.
+    MaturityRate,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -95,6 +98,28 @@ impl Tokenizer {
     pub fn is_matured(env: Env) -> Result<bool, Error> {
         let config = Self::read_config(&env)?;
         Ok(env.ledger().timestamp() >= config.maturity)
+    }
+
+    /// Permissionless: after maturity, snapshot and return the SY rate used for
+    /// all redemption. Any caller may poke this so the maturity rate is captured
+    /// promptly; redemption also snapshots it lazily on first use. Idempotent
+    /// once set.
+    pub fn freeze_maturity_rate(env: Env) -> Result<i128, Error> {
+        let config = Self::read_config(&env)?;
+        if env.ledger().timestamp() < config.maturity {
+            return Err(Error::LiveMarket);
+        }
+        Ok(effective_rate(&env, &config))
+    }
+
+    /// The frozen maturity rate, or 0 if not yet snapshotted.
+    pub fn maturity_rate(env: Env) -> Result<i128, Error> {
+        Self::read_config(&env)?;
+        Ok(env
+            .storage()
+            .instance()
+            .get(&DataKey::MaturityRate)
+            .unwrap_or(0))
     }
 
     /// PT and YT minted for `sy_amount` SY at the current rate, in asset units.
@@ -221,7 +246,7 @@ impl Tokenizer {
         Self::require_positive_amount(pt_amount)?;
         let config = Self::read_config(&env)?;
 
-        let rate = current_rate(&env, &config.sy_token);
+        let rate = effective_rate(&env, &config);
         let full = mul_div_floor(pt_amount, WAD, rate)?;
 
         let escrow_shares =
@@ -333,6 +358,27 @@ fn pt_total_supply(env: &Env, pt_token: &Address) -> i128 {
     env.invoke_contract(pt_token, &Symbol::new(env, "total_supply"), args)
 }
 
+/// The rate to value the escrow at: the live SY rate before maturity, and the
+/// rate frozen at maturity afterwards. The first post-maturity caller snapshots
+/// it; later callers reuse the snapshot, so post-maturity rate moves cannot
+/// change redemption. Real yield sources stop accruing at maturity, so the live
+/// rate is expected flat by then; the snapshot defends against a stray late move.
+fn effective_rate(env: &Env, config: &Config) -> i128 {
+    if env.ledger().timestamp() < config.maturity {
+        return current_rate(env, &config.sy_token);
+    }
+    if let Some(rate) = env
+        .storage()
+        .instance()
+        .get::<_, i128>(&DataKey::MaturityRate)
+    {
+        return rate;
+    }
+    let rate = current_rate(env, &config.sy_token);
+    env.storage().instance().set(&DataKey::MaturityRate, &rate);
+    rate
+}
+
 /// The escrow-coverage invariant, checked after every state-mutating entrypoint:
 ///
 ///   escrow_sy * rate / WAD  >=  pt_supply
@@ -346,7 +392,7 @@ fn pt_total_supply(env: &Env, pt_token: &Address) -> i128 {
 /// A violation means the escrow can no longer cover principal (a rate regression
 /// past solvency), which redemption handles by capping payouts pro-rata.
 fn check_solvency(env: &Env, config: &Config) -> Result<(), Error> {
-    let rate = current_rate(env, &config.sy_token);
+    let rate = effective_rate(env, config);
     let escrow_shares = token_balance(env, &config.sy_token, &env.current_contract_address());
     let escrow_asset = mul_div_floor(escrow_shares, rate, WAD)?;
     let pt_supply = pt_total_supply(env, &config.pt_token);

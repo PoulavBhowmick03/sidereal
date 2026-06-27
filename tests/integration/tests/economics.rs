@@ -100,6 +100,10 @@ impl Market {
         TokenizerClient::new(&self.env, &self.tokenizer).redeem_at_maturity(who, &pt_amount)
     }
 
+    fn maturity_rate(&self) -> i128 {
+        TokenizerClient::new(&self.env, &self.tokenizer).maturity_rate()
+    }
+
     /// Claims YT yield through the tokenizer, which pays SY out of escrow.
     fn claim(&self, holder: &Address) -> i128 {
         TokenizerClient::new(&self.env, &self.tokenizer).claim_yield(holder)
@@ -248,6 +252,59 @@ fn escrow_covers_outstanding_claims() {
         "escrow should drain to ~0, {} shares left",
         m.escrow_shares()
     );
+}
+
+#[test]
+fn redemption_uses_frozen_maturity_rate() {
+    let m = deploy();
+    let alice = m.fund(100 * UNIT);
+    m.deposit(&alice, 100 * UNIT);
+    m.split(&alice, 100 * UNIT);
+
+    // The rate at maturity is 1.10.
+    m.set_rate(RATE_1_10);
+    m.env.ledger().set_timestamp(MATURITY + 1);
+
+    let half = 50 * UNIT;
+    let expected = half * WAD / RATE_1_10;
+    let sy1 = m.redeem_pt(&alice, half); // first post-maturity redeem snapshots 1.10
+    assert!((sy1 - expected).abs() <= 4, "first redeem at the maturity rate");
+    assert_eq!(m.maturity_rate(), RATE_1_10, "rate frozen at maturity");
+
+    // The admin bumps the rate AFTER maturity; redemption must ignore it.
+    let rate_1_20: i128 = 1_200_000_000_000_000_000;
+    m.set_rate(rate_1_20);
+    let sy2 = m.redeem_pt(&alice, half);
+    assert!(
+        (sy2 - expected).abs() <= 4,
+        "post-maturity rate bump ignored: {} vs {}",
+        sy2,
+        expected
+    );
+}
+
+#[test]
+fn redeem_allowed_at_exact_maturity() {
+    let m = deploy();
+    let alice = m.fund(100 * UNIT);
+    m.deposit(&alice, 100 * UNIT);
+    m.split(&alice, 100 * UNIT);
+
+    m.env.ledger().set_timestamp(MATURITY); // exactly at maturity
+    let pt = m.pt_balance(&alice);
+    let out = m.redeem_pt(&alice, pt);
+    assert!(out > 0, "redemption works at exactly the maturity timestamp");
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #6)")]
+fn split_rejects_at_exact_maturity() {
+    let m = deploy();
+    let alice = m.fund(100 * UNIT);
+    m.deposit(&alice, 100 * UNIT);
+
+    m.env.ledger().set_timestamp(MATURITY); // the market is no longer live
+    m.split(&alice, 100 * UNIT);
 }
 
 #[test]

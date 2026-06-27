@@ -42,6 +42,9 @@ enum DataKey {
     /// SY shares accrued to the holder but not yet claimed, carried across
     /// transfers. Persistent, holder-keyed.
     AccruedYield(Address),
+    /// SY rate frozen at maturity. After maturity YT stops accruing new yield;
+    /// settlement uses this snapshot so post-maturity rate moves add nothing.
+    MaturityRate,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -121,7 +124,7 @@ impl YtToken {
     /// the rate from the SY contract itself, so no caller can supply a fake one.
     pub fn preview_claim_yield(env: Env, holder: Address) -> Result<i128, Error> {
         let config = Self::read_config(&env)?;
-        let rate = Self::current_rate(&env, &config);
+        let rate = Self::effective_rate(&env, &config);
         let banked = Self::read_accrued(&env, &holder);
         let pending = Self::pending_yield(&env, &holder, rate)?;
         banked.checked_add(pending).ok_or(Error::MathOverflow)
@@ -259,6 +262,27 @@ impl YtToken {
         env.invoke_contract(&config.sy_token, &Symbol::new(env, "exchange_rate"), args)
     }
 
+    /// The rate yield settles against: the live SY rate before maturity, and the
+    /// rate frozen at maturity afterwards, so YT stops accruing new yield once
+    /// the term ends. The first post-maturity settlement snapshots it. (A
+    /// read-only simulation that triggers the snapshot does not persist it, so
+    /// the value is fixed by the first state-committing settle.)
+    fn effective_rate(env: &Env, config: &Config) -> i128 {
+        let raw = Self::current_rate(env, config);
+        if env.ledger().timestamp() < config.maturity {
+            return raw;
+        }
+        if let Some(rate) = env
+            .storage()
+            .instance()
+            .get::<_, i128>(&DataKey::MaturityRate)
+        {
+            return rate;
+        }
+        env.storage().instance().set(&DataKey::MaturityRate, &raw);
+        raw
+    }
+
     /// SY shares `holder` would accrue if settled at `rate` right now, without
     /// writing anything. Zero before the holder is first settled.
     fn pending_yield(env: &Env, holder: &Address, rate: i128) -> Result<i128, Error> {
@@ -283,7 +307,7 @@ impl YtToken {
     /// resumes accruing only once the rate climbs back above it.
     fn settle(env: &Env, holder: &Address) {
         let config = Self::read_config_or_panic(env);
-        let rate = Self::current_rate(env, &config);
+        let rate = Self::effective_rate(env, &config);
 
         let last = match Self::read_checkpoint(env, holder) {
             Some(c) => c,
