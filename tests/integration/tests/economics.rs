@@ -251,6 +251,73 @@ fn escrow_covers_outstanding_claims() {
 }
 
 #[test]
+fn redemption_is_capped_when_rate_regresses() {
+    let m = deploy();
+    let alice = m.fund(100 * UNIT);
+    let bob = m.fund(100 * UNIT);
+    m.deposit(&alice, 100 * UNIT);
+    m.deposit(&bob, 100 * UNIT);
+    m.split(&alice, 100 * UNIT);
+    m.split(&bob, 100 * UNIT);
+    // Solvent: escrow 200 shares worth 200, PT principal 200, rate 1.00.
+
+    // The yield source is slashed to 0.95: escrow now worth 190 < 200 of PT.
+    let rate_0_95: i128 = 950_000_000_000_000_000;
+    m.set_rate(rate_0_95);
+    m.env.ledger().set_timestamp(MATURITY + 1);
+
+    let alice_pt = m.pt_balance(&alice);
+    let full_uncapped = alice_pt * WAD / rate_0_95;
+    let sy_alice = m.redeem_pt(&alice, alice_pt);
+    assert!(
+        sy_alice < full_uncapped,
+        "redemption must be capped below full principal under insolvency: {} vs {}",
+        sy_alice,
+        full_uncapped
+    );
+
+    let bob_pt = m.pt_balance(&bob);
+    let sy_bob = m.redeem_pt(&bob, bob_pt);
+
+    // The shortfall is shared pro-rata: equal PT redeems for equal SY, and the
+    // escrow drains to ~0 with no redeemer favored over another.
+    assert!(
+        (sy_alice - sy_bob).abs() <= 4,
+        "loss shared equally: {} vs {}",
+        sy_alice,
+        sy_bob
+    );
+    assert!(
+        m.escrow_shares() <= 4,
+        "escrow drains, {} shares left",
+        m.escrow_shares()
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #9)")]
+fn yt_claim_reverts_when_it_would_breach_pt_coverage() {
+    let m = deploy();
+    let alice = m.fund(100 * UNIT);
+    let bob = m.account();
+    m.deposit(&alice, 100 * UNIT);
+    m.split(&alice, 100 * UNIT);
+
+    // Rate rises; Alice banks her yield by moving 1 unit of YT (which settles
+    // her), then the yield source crashes below PT coverage.
+    m.set_rate(RATE_1_10);
+    m.transfer_yt(&alice, &bob, UNIT);
+    let rate_0_90: i128 = 900_000_000_000_000_000;
+    m.set_rate(rate_0_90);
+
+    // Escrow (100 shares) is now worth 90 < 100 of PT principal. Paying Alice's
+    // banked yield would push coverage further underwater, so the claim reverts
+    // with Insolvent (#9): YT is floored at zero while PT is under-covered, and
+    // Alice keeps her banked ledger for when the rate recovers.
+    m.claim(&alice);
+}
+
+#[test]
 fn transfer_conserves_yield_through_claims() {
     let m = deploy();
     let alice = m.fund(100 * UNIT);

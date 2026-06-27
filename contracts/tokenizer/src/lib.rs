@@ -202,10 +202,19 @@ impl Tokenizer {
     }
 
     /// After maturity, burns `pt_amount` PT (asset units) from `from` and returns
-    /// principal in SY shares: `sy_to_pay = pt_amount * WAD / rate`. PT is fixed
-    /// principal, so this does not pay yield. The rate read here is the current
-    /// SY rate; Phase 3 snapshots a maturity rate so post-maturity rate moves do
-    /// not change redemption.
+    /// principal in SY shares: `pt_amount * WAD / rate`, capped to the holder's
+    /// pro-rata share of escrow.
+    ///
+    /// Insolvency guard: if a rate regression (negative yield, a slash) has left
+    /// the escrow unable to cover all PT principal, the payout is capped to
+    /// `escrow_shares * pt_amount / pt_supply`, so PT holders share the shortfall
+    /// pro-rata rather than letting the first redeemers drain the escrow at the
+    /// expense of the last. When solvent, the ideal payout is the smaller of the
+    /// two, so this pays principal in full. Capping preserves the escrow/PT ratio,
+    /// keeping every later redeemer's share fair.
+    ///
+    /// The rate read here is the current SY rate; Phase 3 step 9 snapshots a
+    /// maturity rate so post-maturity rate moves do not change redemption.
     pub fn redeem_at_maturity(env: Env, from: Address, pt_amount: i128) -> Result<i128, Error> {
         from.require_auth();
         Self::require_matured(&env)?;
@@ -213,13 +222,18 @@ impl Tokenizer {
         let config = Self::read_config(&env)?;
 
         let rate = current_rate(&env, &config.sy_token);
-        let sy_to_pay = mul_div_floor(pt_amount, WAD, rate)?;
+        let full = mul_div_floor(pt_amount, WAD, rate)?;
+
+        let escrow_shares =
+            token_balance(&env, &config.sy_token, &env.current_contract_address());
+        let pt_supply = pt_total_supply(&env, &config.pt_token);
+        let pro_rata = mul_div_floor(escrow_shares, pt_amount, pt_supply)?;
+        let sy_to_pay = if full < pro_rata { full } else { pro_rata };
         Self::require_positive_amount(sy_to_pay)?;
 
         burn_token(&env, &config.pt_token, &from, pt_amount);
         push_token(&env, &config.sy_token, &from, sy_to_pay);
 
-        check_solvency(&env, &config)?;
         Ok(sy_to_pay)
     }
 
