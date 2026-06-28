@@ -24,11 +24,18 @@ export function SubmitButton({
   disabled: boolean;
   onClick: () => void;
 }) {
+  const working = address !== null && phase.kind === "working";
   const label =
-    address === null ? connectLabel : phase.kind === "working" ? `${phase.step}...` : idleLabel;
+    address === null ? connectLabel : working ? `${phase.step}...` : idleLabel;
 
   return (
     <button type="button" disabled={disabled} onClick={onClick} className="btn-solid">
+      {working ? (
+        <span
+          aria-hidden
+          className="h-3.5 w-3.5 animate-spin rounded-pill border border-ink/40 border-t-ink"
+        />
+      ) : null}
       {label}
     </button>
   );

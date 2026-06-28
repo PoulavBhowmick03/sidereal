@@ -15,7 +15,7 @@ test("landing page renders the protocol pitch and a launch CTA", async ({ page }
   await expect(page.getByRole("link", { name: /launch app/i }).first()).toBeVisible();
 });
 
-test("nav reaches mint, trade, and redeem", async ({ page }) => {
+test("nav reaches mint, trade, and portfolio", async ({ page }) => {
   // The in-app tabs live in the app shell, not on the marketing landing. Enter
   // the app first via Launch App, then exercise the header tabs.
   await page.goto("/");
@@ -35,9 +35,9 @@ test("nav reaches mint, trade, and redeem", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Trade" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Buy PT" })).toBeVisible();
 
-  await nav.getByRole("link", { name: "Redeem" }).click();
-  await expect(page).toHaveURL(/\/redeem$/, { timeout: 15_000 });
-  await expect(page.getByRole("heading", { name: "Redeem", exact: true })).toBeVisible();
+  await nav.getByRole("link", { name: "Portfolio" }).click();
+  await expect(page).toHaveURL(/\/portfolio$/, { timeout: 15_000 });
+  await expect(page.getByRole("heading", { name: "Portfolio", exact: true })).toBeVisible();
 });
 
 test("trade page exposes all four pool routes", async ({ page }) => {

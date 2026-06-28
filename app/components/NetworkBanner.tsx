@@ -16,8 +16,8 @@ export function NetworkBanner() {
   if (!networkMismatch) return null;
 
   return (
-    <div className="border-b border-black/10 bg-neutral-100">
-      <p className="mx-auto max-w-3xl px-4 py-2 text-xs font-medium text-neutral-900">
+    <div className="border-b border-white/10 bg-carbon">
+      <p className="mx-auto max-w-[1280px] px-6 py-2.5 text-xs font-medium text-amber">
         Your wallet is on a different network. Switch it to {expected} to sign transactions for this
         market.
       </p>

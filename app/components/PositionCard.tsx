@@ -5,16 +5,23 @@
 import type { Position } from "@sidereal/sdk";
 import { formatTokenAmount } from "../lib/format";
 
-function Cell({ label, value }: { label: string; value: string }) {
+function Cell({ label, value, signal }: { label: string; value: string; signal?: boolean }) {
   return (
-    <div className="panel-subtle p-3">
-      <dt className="text-xs uppercase tracking-wide text-neutral-500">{label}</dt>
-      <dd className="tabular-nums">{value}</dd>
+    <div className="border-t border-white/10 px-1 pt-4">
+      <dt className="label-data">{label}</dt>
+      <dd
+        className={`mt-3 text-3xl font-light tabular-nums ${signal ? "text-amber" : "text-paper"}`}
+      >
+        {value}
+      </dd>
     </div>
   );
 }
 
-/** Compact view of a holder's SY/PT/YT balances and claimable yield. */
+/** Compact view of a holder's SY/PT/YT balances and claimable yield. Always
+ *  rendered, even when disconnected: the bar shows zeroed placeholders so the
+ *  app shell reads as a real surface before a wallet connects. The claimable
+ *  yield is the one live/risk value, so it carries the amber accent. */
 export function PositionCard({
   position,
   decimals,
@@ -22,13 +29,13 @@ export function PositionCard({
   position: Position | null;
   decimals: number;
 }) {
-  if (!position) return null;
+  const fmt = (v: bigint) => formatTokenAmount(position ? v : 0n, decimals);
   return (
-    <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
-      <Cell label="SY" value={formatTokenAmount(position.syBalance, decimals)} />
-      <Cell label="PT" value={formatTokenAmount(position.ptBalance, decimals)} />
-      <Cell label="YT" value={formatTokenAmount(position.ytBalance, decimals)} />
-      <Cell label="Claimable" value={formatTokenAmount(position.claimableYield, decimals)} />
+    <dl className="grid grid-cols-2 gap-x-6 gap-y-8 sm:grid-cols-4">
+      <Cell label="SY balance" value={fmt(position?.syBalance ?? 0n)} />
+      <Cell label="PT balance" value={fmt(position?.ptBalance ?? 0n)} />
+      <Cell label="YT balance" value={fmt(position?.ytBalance ?? 0n)} />
+      <Cell label="Claimable yield" value={fmt(position?.claimableYield ?? 0n)} signal />
     </dl>
   );
 }

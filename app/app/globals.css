@@ -5,53 +5,65 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light;
+  color-scheme: dark;
 }
 
+/* The functional app canvas is the dark carbon/ink darkroom. The marketing
+   route group overrides per section where it needs a paper-white block. */
 body {
-  @apply bg-white text-neutral-900 antialiased;
+  @apply bg-ink text-paper antialiased;
 }
 
 ::selection {
-  background: rgba(0, 0, 0, 0.08);
+  background: rgba(255, 255, 255, 0.16);
 }
 
-/* Thin, light scrollbar to match the black-and-white theme. */
+/* Thin, light scrollbar to match the darkroom theme. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.18) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
 }
 *::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.14);
+  background: rgba(255, 255, 255, 0.14);
   border-radius: 9999px;
 }
 
 @layer components {
-  /* White card panel with a hairline border. */
+  /* Mono utility label: uppercase, tracked, ash. The "protocol data" voice for
+     field labels and metadata. Uppercasing is CSS only, never in the literal
+     strings the e2e suite asserts on. */
+  .label-data {
+    @apply text-[13px] uppercase tracking-[0.12em] text-ash;
+  }
+
+  /* Sharp carbon panel with a hairline border. Depth via tonal contrast. */
   .card {
-    @apply rounded-2xl border border-black/10 bg-white;
+    @apply rounded-none border border-white/10 bg-carbon;
   }
 
-  /* Inset, secondary panel in a very light grey. */
+  /* Inset, secondary panel: a hairline frame over the base, no fill jump. */
   .panel-subtle {
-    @apply rounded-lg border border-black/10 bg-neutral-50;
+    @apply rounded-none border border-white/10 bg-white/[0.02];
   }
 
-  /* Text input. */
+  /* Text input: sharp, transparent over carbon, hairline that brightens to
+     paper on focus. No amber on borders (single-accent rule). */
   .field {
-    @apply mt-1 w-full rounded-lg border border-black/15 bg-white px-3 py-2 text-lg
-      tabular-nums outline-none transition placeholder:text-neutral-400
-      focus:border-neutral-900;
+    @apply mt-2 w-full rounded-none border border-white/15 bg-transparent px-3 py-2.5
+      text-lg tabular-nums text-paper outline-none transition
+      placeholder:text-ash focus:border-paper;
   }
 
-  /* Primary solid (black) action button, full width inside forms. */
+  /* Primary action: solid monochrome pill, paper fill on ink text. Never amber
+     (amber marks signals, not actions). Full width inside forms. */
   .btn-solid {
-    @apply inline-flex w-full items-center justify-center gap-2 rounded-lg
-      bg-neutral-900 px-4 py-2.5 text-sm font-medium text-white transition
-      hover:bg-neutral-700 disabled:cursor-not-allowed disabled:opacity-40;
+    @apply inline-flex w-full items-center justify-center gap-2 rounded-pill
+      bg-paper px-5 py-3 text-sm font-semibold uppercase tracking-[0.08em]
+      text-ink transition hover:bg-smoke disabled:cursor-not-allowed
+      disabled:bg-white/20 disabled:text-ash;
   }
 }

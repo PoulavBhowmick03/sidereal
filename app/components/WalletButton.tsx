@@ -16,7 +16,7 @@ export function WalletButton() {
       <button
         type="button"
         onClick={disconnect}
-        className="rounded-lg border border-black/15 px-3 py-1.5 text-sm tabular-nums transition hover:border-neutral-900"
+        className="rounded-pill border border-white/30 px-4 py-2 text-[13px] uppercase tracking-[0.12em] tabular-nums text-paper transition hover:bg-paper hover:text-ink"
         title={address}
       >
         {shorten(address)}
@@ -29,7 +29,7 @@ export function WalletButton() {
       type="button"
       onClick={connect}
       disabled={connecting}
-      className="rounded-lg bg-neutral-900 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-neutral-700 disabled:opacity-60"
+      className="rounded-pill border border-white/30 px-4 py-2 text-[13px] uppercase tracking-[0.12em] text-paper transition hover:bg-paper hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
     >
       {connecting ? "Connecting..." : "Connect wallet"}
     </button>

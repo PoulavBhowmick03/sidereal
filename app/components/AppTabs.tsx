@@ -8,24 +8,26 @@ import { usePathname } from "next/navigation";
 const TABS = [
   { href: "/mint", label: "Mint" },
   { href: "/trade", label: "Trade" },
-  { href: "/redeem", label: "Redeem" },
+  { href: "/portfolio", label: "Portfolio" },
 ];
 
-/** In-app navigation tabs with active-route highlighting. */
+/** In-app navigation tabs. The active tab is the one live signal here, so it
+ *  carries the single accent: amber label over an amber underline tick. */
 export function AppTabs() {
   const pathname = usePathname();
   return (
-    <ul className="flex flex-1 items-center justify-center gap-1 text-sm">
+    <ul className="flex flex-1 items-center justify-center gap-6 sm:gap-10">
       {TABS.map((tab) => {
         const active = pathname === tab.href;
         return (
           <li key={tab.href}>
             <Link
               href={tab.href}
+              aria-current={active ? "page" : undefined}
               className={
                 active
-                  ? "rounded-lg bg-neutral-900 px-3 py-1.5 font-medium text-white"
-                  : "rounded-lg px-3 py-1.5 text-neutral-500 transition hover:bg-black/5 hover:text-neutral-900"
+                  ? "relative pb-1 text-[13px] uppercase tracking-[0.12em] text-amber after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-amber"
+                  : "pb-1 text-[13px] uppercase tracking-[0.12em] text-smoke transition hover:text-paper"
               }
             >
               {tab.label}

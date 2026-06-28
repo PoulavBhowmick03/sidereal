@@ -15,11 +15,11 @@ export function DeploymentBanner() {
   if (deployed) return null;
 
   return (
-    <div className="border-b border-black/10 bg-neutral-50">
-      <p className="mx-auto max-w-3xl px-4 py-2 text-xs text-neutral-600">
+    <div className="border-b border-white/10 bg-carbon">
+      <p className="mx-auto max-w-[1280px] px-6 py-2.5 text-xs text-smoke">
         No market is configured yet. Pool stats and actions stay inert until contracts are deployed
-        (run <code className="font-mono text-neutral-900">make deploy</code> to wire testnet
-        addresses into <code className="font-mono text-neutral-900">app/.env.local</code>).
+        (run <code className="font-mono text-paper">make deploy</code> to wire testnet
+        addresses into <code className="font-mono text-paper">app/.env.local</code>).
       </p>
     </div>
   );

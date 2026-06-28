@@ -29,7 +29,7 @@ test("mint validates the amount and gates on wallet connection", async ({ page }
 });
 
 test("redeem validates the amount", async ({ page }) => {
-  await page.goto("/redeem");
+  await page.goto("/portfolio");
   const input = page.getByRole("textbox", { name: /pt \+ yt to recombine|pt to redeem/i });
 
   await input.fill("abc");
@@ -40,7 +40,7 @@ test("redeem validates the amount", async ({ page }) => {
 });
 
 test("redeem exposes claim, recombine, and SY unwrap actions", async ({ page }) => {
-  await page.goto("/redeem");
+  await page.goto("/portfolio");
   await expect(page.getByRole("button", { name: /connect wallet to claim/i })).toBeDisabled();
   await expect(
     page.getByRole("button", { name: "Connect wallet to redeem", exact: true }),

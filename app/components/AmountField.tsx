@@ -25,14 +25,14 @@ export function AmountField({
   max?: bigint;
 }) {
   return (
-    <label className="block text-sm">
-      <span className="flex items-center justify-between text-neutral-600">
-        <span>{label}</span>
+    <label className="block">
+      <span className="flex items-center justify-between">
+        <span className="label-data">{label}</span>
         {max !== undefined && max > 0n ? (
           <button
             type="button"
             onClick={() => onChange(formatTokenAmount(max, decimals))}
-            className="text-xs text-neutral-900 hover:underline"
+            className="rounded-pill border border-white/20 px-2.5 py-1 text-[13px] uppercase tracking-[0.1em] text-smoke transition hover:border-paper hover:text-paper"
           >
             Max {formatTokenAmount(max, decimals)}
           </button>
@@ -45,7 +45,7 @@ export function AmountField({
         placeholder="0.0"
         className="field"
       />
-      {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
+      {error ? <p className="mt-2 text-xs text-red-400">{error}</p> : null}
     </label>
   );
 }

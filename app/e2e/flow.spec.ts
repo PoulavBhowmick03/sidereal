@@ -32,8 +32,8 @@ test.describe("end-to-end protocol flow", () => {
     await page.getByRole("button", { name: "Sell PT" }).nth(1).click();
     await expect(page.getByText(/confirmed/i)).toBeVisible({ timeout: 60_000 });
 
-    // 4. Recombine remaining PT + YT back into SY on redeem.
-    await page.goto("/redeem");
+    // 4. Recombine remaining PT + YT back into SY on the portfolio page.
+    await page.goto("/portfolio");
     await page.getByPlaceholder("0.0").fill("10");
     await page.getByRole("button", { name: /recombine to sy/i }).click();
     await expect(page.getByText(/confirmed/i)).toBeVisible({ timeout: 60_000 });
