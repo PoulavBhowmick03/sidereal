@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import Link from "next/link";
-import { HeroBackground } from "@/components/HeroBackground";
 import { StepNumeral } from "@/components/StepNumeral";
 
 // The three token legs, defined in the protocol's own terms. No invented
@@ -94,9 +93,9 @@ function StepDiagram({ n }: { n: string }) {
 export default function LandingPage() {
   return (
     <>
-      {/* Hero: atmospheric "mercury flow" render with ambient drift + parallax. */}
+      {/* Hero: clean ink editorial frame, no atmospheric render. The headline
+          carries the section; the metallic background lives on the app screens. */}
       <section className="relative flex min-h-screen flex-col justify-center overflow-hidden">
-        <HeroBackground />
         <div className="relative mx-auto w-full max-w-[1280px] px-6 sm:px-16">
           <h1 className="max-w-4xl text-5xl font-light leading-[1.02] tracking-tight sm:text-7xl lg:text-8xl">
             Split Stellar yield into principal and yield.
