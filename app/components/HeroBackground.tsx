@@ -4,6 +4,7 @@
 
 import { useEffect, useRef } from "react";
 import Image from "next/image";
+import metallic from "./metallic.png";
 
 // Marketing hero background. The "mercury flow" render now carries three layers
 // of motion so it is alive even at rest: a continuous CSS drift, a continuous
@@ -72,17 +73,18 @@ export function HeroBackground() {
         className="absolute inset-0 animate-mercury-drift"
         style={{ filter: "url(#liquid-glass)" }}
       >
-        <Image src="/hero.png" alt="" fill priority sizes="100vw" className="object-cover" />
+        <Image src={metallic} alt="" fill priority sizes="100vw" className="object-cover" />
       </div>
 
       {/* Frosted glass: a translucent blur over the flowing render, plus a
           slow drifting specular highlight, gives the liquid-glass texture. */}
       <div className="absolute inset-0 backdrop-blur-[2px]" />
-      <div className="absolute inset-0 animate-glass-sheen bg-[radial-gradient(120%_90%_at_28%_18%,rgba(255,255,255,0.12),transparent_55%)]" />
+      <div className="absolute inset-0 animate-glass-sheen bg-[radial-gradient(120%_90%_at_28%_18%,rgba(255,255,255,0.14),transparent_55%)]" />
 
-      {/* Legibility wash for the hero copy: dark at top and bottom, the glass
-          shows through the middle band. */}
-      <div className="absolute inset-0 bg-gradient-to-b from-ink/75 via-ink/35 to-ink" />
+      {/* Legibility wash for the hero copy. The metallic render is already near
+          black, so the wash is light: dark enough to seat the headline, sheer
+          enough that the chrome streaks read through the middle. */}
+      <div className="absolute inset-0 bg-gradient-to-b from-ink/65 via-ink/20 to-ink" />
     </div>
   );
 }
