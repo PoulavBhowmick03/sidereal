@@ -297,7 +297,34 @@ export class StellarYT {
     if (result.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
       throw new Error(`transaction ${sent.hash} did not succeed: ${result.status}`);
     }
+
+    // The transaction-result store can report SUCCESS before the account-state
+    // view catches up to the consumed sequence. A follow-up build in the same
+    // flow (e.g. split right after deposit) calls getAccount and would read a
+    // stale sequence, then fail on submit with txBadSeq. Wait until getAccount
+    // reflects this transaction's sequence before returning, so the next build
+    // picks up the advanced value.
+    const consumed = tx as unknown as { source?: string; sequence?: string };
+    await this.waitForSequence(consumed.source, consumed.sequence);
+
     return { hash: sent.hash, status: result.status };
+  }
+
+  /**
+   * Polls getAccount until the source account's on-chain sequence has reached
+   * `sequence` (the value the just-confirmed transaction consumed). Best effort:
+   * returns once the sequence is observed or a short deadline passes, so a
+   * lagging RPC view cannot make the next sequential build reuse a stale number.
+   */
+  private async waitForSequence(source?: string, sequence?: string): Promise<void> {
+    if (!source || !sequence) return;
+    const target = BigInt(sequence);
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+      const account = await this.server.getAccount(source).catch(() => null);
+      if (account !== null && BigInt(account.sequenceNumber()) >= target) return;
+      await new Promise((resolve) => setTimeout(resolve, 500));
+    }
   }
 
   // --- internals -----------------------------------------------------------

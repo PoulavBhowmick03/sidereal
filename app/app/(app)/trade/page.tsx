@@ -23,6 +23,12 @@ const DIRECTIONS = [
 
 const SLIPPAGE_BPS = 50n; // 0.5% default tolerance.
 
+// Above this price impact a PT/SY swap is almost certainly draining the pool to
+// the point where the AMM rejects it (the implied rate would cross zero and the
+// contract reverts with ExchangeRateBelowOne). Block the submit and tell the
+// trader to size down rather than letting them sign a transaction that reverts.
+const MAX_PRICE_IMPACT_BPS = 2_000n; // 20%
+
 function applySlippage(amountOut: bigint): bigint {
   return (amountOut * (10_000n - SLIPPAGE_BPS)) / 10_000n;
 }
@@ -77,7 +83,13 @@ export default function TradePage() {
   }, [amount, address, direction.assetIn, direction.assetOut, cfg, client]);
 
   const amtError = amountError(amount, cfg.decimals, position ? balanceIn : undefined);
-  const canSubmit = address !== null && quote !== null && !amtError && phase.kind !== "working";
+  const priceImpactTooHigh = quote !== null && quote.priceImpactBps > MAX_PRICE_IMPACT_BPS;
+  const canSubmit =
+    address !== null &&
+    quote !== null &&
+    !amtError &&
+    !priceImpactTooHigh &&
+    phase.kind !== "working";
 
   async function onSubmit() {
     if (!address || !quote) return;
@@ -163,6 +175,13 @@ export default function TradePage() {
           </dl>
         ) : quoteError ? (
           <p className="text-xs text-neutral-500">Quote unavailable: {describeError(quoteError, "amm")}</p>
+        ) : null}
+
+        {priceImpactTooHigh ? (
+          <p className="panel-subtle px-3 py-2 text-xs text-amber-700">
+            Price impact is too high for the current pool depth, so this swap would be rejected
+            on-chain. Reduce the amount and try again.
+          </p>
         ) : null}
 
         <SubmitButton

@@ -51,7 +51,12 @@ vi.mock("@stellar/stellar-sdk", () => {
       return { ops: this.ops };
     }
     static fromXDR(xdr: string) {
-      return { __tx: xdr, ops: [] as Array<{ method: string; args: unknown[] }> };
+      return {
+        __tx: xdr,
+        ops: [] as Array<{ method: string; args: unknown[] }>,
+        source: "GSIGNERSOURCE",
+        sequence: "1",
+      };
     }
   }
 
@@ -333,5 +338,14 @@ describe("submit", () => {
   it("throws when the network rejects the submission", async () => {
     state().sendStatus = "ERROR";
     await expect(newClient().submit("SIGNEDXDR")).rejects.toThrow(/submit rejected/);
+  });
+
+  it("waits for the account sequence to advance before returning", async () => {
+    state().sendStatus = "PENDING";
+    state().getTxStatus = "SUCCESS";
+    await newClient().submit("SIGNEDXDR");
+    // After confirmation it re-reads the signer account so a follow-up build
+    // (e.g. split after deposit) cannot pick up a stale sequence (txBadSeq).
+    expect(state().accountRequests).toContain("GSIGNERSOURCE");
   });
 });
