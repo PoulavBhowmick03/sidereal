@@ -10,6 +10,7 @@ import type {
   Position,
   Quote,
   RedeemArgs,
+  RedeemSyArgs,
   ClaimArgs,
   RemoveLiquidityArgs,
   StellarYTOptions,
@@ -231,6 +232,17 @@ export class StellarYT {
     const op = matured
       ? tokenizer.call("redeem_at_maturity", from, amount)
       : tokenizer.call("recombine", from, amount, amount);
+    return this.buildEnvelope(args.from, [op]);
+  }
+
+  /** Burns SY shares and returns the corresponding underlying from the vault. */
+  async buildRedeemSy(args: RedeemSyArgs): Promise<TransactionEnvelope> {
+    requirePositive("syAmount", args.syAmount);
+    const op = new Contract(this.contracts.sy).call(
+      "redeem",
+      new Address(args.from).toScVal(),
+      nativeToScVal(args.syAmount, { type: "i128" }),
+    );
     return this.buildEnvelope(args.from, [op]);
   }
 

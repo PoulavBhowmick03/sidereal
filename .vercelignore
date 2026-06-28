@@ -1,0 +1,17 @@
+.git
+.vercel
+node_modules
+**/node_modules
+target
+**/.next
+**/dist
+**/test-results
+**/playwright-report
+
+# The Vercel application builds only the app and its workspace SDK dependency.
+contracts
+deployments
+docs
+scripts
+tests
+.github

@@ -13,8 +13,7 @@ export const TESTNET_RPC = "https://soroban-testnet.stellar.org";
 export const TESTNET_SIMULATION_SOURCE =
   "GBGHELMOABS7WCYOMJTWQRGQ6VZYLYXXMLE7JJAHJ6I4WW7FMJSDERN3";
 
-function env(name: string, fallback = ""): string {
-  const value = process.env[name];
+function publicEnv(value: string | undefined, fallback = ""): string {
   return value === undefined || value === "" ? fallback : value;
 }
 
@@ -31,20 +30,26 @@ export interface AppConfig {
 
 export function appConfig(): AppConfig {
   return {
-    rpcUrl: env("NEXT_PUBLIC_SOROBAN_RPC_URL", TESTNET_RPC),
-    networkPassphrase: env("NEXT_PUBLIC_NETWORK_PASSPHRASE", TESTNET_PASSPHRASE),
-    simulationSourceAccount: env(
-      "NEXT_PUBLIC_SIMULATION_SOURCE_ADDRESS",
+    // Keep every NEXT_PUBLIC_* access static. Next.js only inlines direct
+    // property references into browser bundles; process.env[name] is not
+    // replaced at build time.
+    rpcUrl: publicEnv(process.env.NEXT_PUBLIC_SOROBAN_RPC_URL, TESTNET_RPC),
+    networkPassphrase: publicEnv(
+      process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE,
+      TESTNET_PASSPHRASE,
+    ),
+    simulationSourceAccount: publicEnv(
+      process.env.NEXT_PUBLIC_SIMULATION_SOURCE_ADDRESS,
       TESTNET_SIMULATION_SOURCE,
     ),
-    marketId: env("NEXT_PUBLIC_MARKET_ID", "blend-usdc-q3"),
-    decimals: Number(env("NEXT_PUBLIC_TOKEN_DECIMALS", "7")),
+    marketId: publicEnv(process.env.NEXT_PUBLIC_MARKET_ID, "blend-usdc-q3"),
+    decimals: Number(publicEnv(process.env.NEXT_PUBLIC_TOKEN_DECIMALS, "7")),
     contracts: {
-      sy: env("NEXT_PUBLIC_SY_ADDRESS"),
-      pt: env("NEXT_PUBLIC_PT_ADDRESS"),
-      yt: env("NEXT_PUBLIC_YT_ADDRESS"),
-      tokenizer: env("NEXT_PUBLIC_TOKENIZER_ADDRESS"),
-      market: env("NEXT_PUBLIC_MARKET_ADDRESS"),
+      sy: publicEnv(process.env.NEXT_PUBLIC_SY_ADDRESS),
+      pt: publicEnv(process.env.NEXT_PUBLIC_PT_ADDRESS),
+      yt: publicEnv(process.env.NEXT_PUBLIC_YT_ADDRESS),
+      tokenizer: publicEnv(process.env.NEXT_PUBLIC_TOKENIZER_ADDRESS),
+      market: publicEnv(process.env.NEXT_PUBLIC_MARKET_ADDRESS),
     },
   };
 }

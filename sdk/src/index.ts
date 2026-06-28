@@ -16,6 +16,7 @@ export type {
   MintArgs,
   SplitArgs,
   RedeemArgs,
+  RedeemSyArgs,
   ClaimArgs,
   AddLiquidityArgs,
   RemoveLiquidityArgs,

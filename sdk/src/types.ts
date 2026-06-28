@@ -134,6 +134,13 @@ export interface RedeemArgs {
   amount: bigint;
 }
 
+export interface RedeemSyArgs {
+  marketId: string;
+  from: string;
+  /** SY shares to burn for the corresponding underlying asset amount. */
+  syAmount: bigint;
+}
+
 export interface ClaimArgs {
   marketId: string;
   from: string;

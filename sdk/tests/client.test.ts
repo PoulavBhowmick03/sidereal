@@ -291,6 +291,15 @@ describe("transaction builders", () => {
     expect(env.xdr).toBe("PREPARED:claim_yield");
   });
 
+  it("buildRedeemSy targets the SY wrapper redeem entrypoint", async () => {
+    const env = await newClient().buildRedeemSy({
+      marketId: "mkt",
+      from: "G1",
+      syAmount: 5n,
+    });
+    expect(env.xdr).toBe("PREPARED:redeem");
+  });
+
   it("buildAddLiquidity and buildRemoveLiquidity hit the Market methods", async () => {
     const add = await newClient().buildAddLiquidity({ marketId: "mkt", from: "G1", ptIn: 10n, syIn: 10n });
     expect(add.xdr).toBe("PREPARED:add_liquidity");
@@ -307,6 +316,7 @@ describe("transaction builders", () => {
       c.buildSwap({ marketId: "mkt", from: "G1", assetIn: "PT", assetOut: "SY", amountIn: -1n, minAmountOut: 0n }),
     ).rejects.toThrow(/positive/);
     await expect(c.buildRedeem({ marketId: "mkt", from: "G1", amount: 0n })).rejects.toThrow(/positive/);
+    await expect(c.buildRedeemSy({ marketId: "mkt", from: "G1", syAmount: 0n })).rejects.toThrow(/positive/);
     await expect(c.buildRemoveLiquidity({ marketId: "mkt", from: "G1", lpIn: 0n })).rejects.toThrow(/positive/);
   });
 });
