@@ -131,7 +131,7 @@ inv() {
 #    expect_read already confirmed). Bounded retry lets the replica catch up; a
 #    genuinely failing op never recovers and still dies after the retries.
 is_transient() {
-  grep -Eq "TxBadSeq|submission timeout|TryAgainLater|rate.?limit|50[0-9] |timed out|Timeout|transaction simulation failed" "$1"
+  grep -Eq "TxBadSeq|submission timeout|TryAgainLater|rate.?limit|50[0-9] |timed out|Timeout|transaction simulation failed|Contract Code not found" "$1"
 }
 # An error that means the effect already happened (a timed-out submit did land).
 is_already_applied() {
@@ -182,8 +182,10 @@ MATURITY="$(( $(date -u +%s) + TERM_SECONDS ))"
 log "Deployer: $ADMIN"
 log "Throwaway market maturity: $MATURITY (now + ${TERM_SECONDS}s)"
 
-# --- underlying SAC (reuse the deployer's test USDC) -------------------------
-UNDERLYING="$(stellar contract id asset --asset "USDC:$ADMIN" --network "$NETWORK")"
+# --- underlying SAC (deploy or reuse the deployer's test USDC) ---------------
+UNDERLYING="$(retry_out "deploy underlying SAC" contract asset deploy \
+  --asset "USDC:$ADMIN" --source "$IDENTITY" --network "$NETWORK")"
+settle
 log "Underlying USDC SAC: $UNDERLYING"
 
 # --- deploy a fresh market ---------------------------------------------------
