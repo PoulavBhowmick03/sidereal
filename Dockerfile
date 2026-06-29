@@ -51,6 +51,7 @@ RUN pnpm install --frozen-lockfile \
     -p sidereal-yt-token \
     -p sidereal-tokenizer \
     -p sidereal-amm \
+  && cargo test -p sidereal-integration-tests --test auth_invariants --no-run --locked \
   && pnpm --filter @sidereal/sdk build \
   && pnpm --filter @sidereal/app run build \
   && chmod +x scripts/render-demo-runner-start.sh
