@@ -341,3 +341,43 @@ Blocker:
 - `stellar` CLI is not installed in this environment, so the pinned testnet
   redeploy, `deployments/testnet.toml`, AMM liquidity seed, and wallet/manual
   frontend verification remain pending for a funded testnet machine.
+
+---
+
+## Codex integration check (2026-06-28)
+
+Pulled `main` to `127e034` and verified the current merged integration.
+
+Checks run:
+
+- `cargo test --workspace`: green. The strict flash auth test remains ignored as
+  documented.
+- `pnpm --filter @sidereal/sdk run typecheck`, `test`, and `build`: green.
+- `pnpm --filter @sidereal/app run lint`, `typecheck`, `test`, and `build`:
+  green after aligning `eslint-config-next` to the app's Next 14 version.
+- Desktop Playwright smoke and interaction e2e: green, with only wallet-gated
+  tests skipped.
+- Desktop Playwright live-read smoke with committed testnet addresses: green.
+- Release Wasm build for all five contracts: green.
+- `scripts/check-wasm-floats.sh` over all five release Wasm artifacts: green.
+- `TERM_SECONDS=600 DEPLOY_IDENTITY=sidereal-smoke bash scripts/smoke-testnet.sh`:
+  green on a fresh throwaway testnet market.
+
+Fixes found during verification:
+
+- App build printed an ESLint circular-config error because `eslint-config-next`
+  was `16.2.9` while the app uses Next `14.2.35`. Aligned the package to
+  `14.2.35`; lint and build now pass cleanly.
+- `scripts/smoke-testnet.sh` failed for a fresh identity because it derived the
+  test USDC SAC address without deploying the SAC. It now deploys or reuses the
+  SAC before the smoke market, and treats `Contract Code not found` after upload
+  as transient testnet propagation lag.
+
+Remaining integration gates:
+
+- Seed the main testnet AMM and prove PT/SY swaps with a real wallet.
+- Prove YT flash-route auth on testnet, then unignore
+  `flash_route_user_only_signs_the_swap` if the real auth tree succeeds without
+  relaxing arg pinning.
+- Run the full wallet-driven frontend flow: deposit, split, claim, recombine,
+  redeem, add/remove liquidity, PT/SY swap, and YT routes only if auth is proven.
