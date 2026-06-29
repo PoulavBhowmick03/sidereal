@@ -38,6 +38,7 @@ test("nav reaches mint, trade, and portfolio", async ({ page }) => {
   await nav.getByRole("link", { name: "Portfolio" }).click();
   await expect(page).toHaveURL(/\/portfolio$/, { timeout: 15_000 });
   await expect(page.getByRole("heading", { name: "Portfolio", exact: true })).toBeVisible();
+
 });
 
 test("trade page exposes all four pool routes", async ({ page }) => {
@@ -45,6 +46,17 @@ test("trade page exposes all four pool routes", async ({ page }) => {
   for (const label of ["Buy PT", "Sell PT", "Buy YT", "Sell YT"]) {
     await expect(page.getByRole("button", { name: label })).toBeVisible();
   }
+});
+
+test("demo page exposes the automated proof runner without starting it", async ({ page }) => {
+  await page.goto("/demo?manual=1");
+  await expect(page.getByRole("heading", { name: "Demo", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /run full demo/i })).toBeVisible();
+  for (const label of ["Auth invariant", "Live AMM proof"]) {
+    await expect(page.getByRole("heading", { name: label })).toBeVisible();
+  }
+  await expect(page.getByRole("heading", { name: "Browser smoke" })).toHaveCount(0);
+  await expect(page.getByText("No output yet.")).toBeVisible();
 });
 
 test("production public contract configuration reaches the browser", async ({ page }) => {

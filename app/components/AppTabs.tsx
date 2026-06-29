@@ -9,6 +9,7 @@ const TABS = [
   { href: "/mint", label: "Mint" },
   { href: "/trade", label: "Trade" },
   { href: "/portfolio", label: "Portfolio" },
+  { href: "/demo", label: "Demo" },
 ];
 
 /** In-app navigation tabs. The active tab is the one live signal here, so it
@@ -16,7 +17,7 @@ const TABS = [
 export function AppTabs() {
   const pathname = usePathname();
   return (
-    <ul className="flex flex-1 items-center justify-center gap-6 sm:gap-10">
+    <ul className="flex flex-1 flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:gap-x-10">
       {TABS.map((tab) => {
         const active = pathname === tab.href;
         return (
