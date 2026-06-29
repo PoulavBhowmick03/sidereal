@@ -92,9 +92,6 @@ const TASK_TIMEOUT_MS: Record<DemoTaskId, number> = {
   "amm-routes": 25 * 60_000,
 };
 const STELLAR_EXPERT_TESTNET = "https://stellar.expert/explorer/testnet";
-const LOCAL_DEMO_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"]);
-const CLIENT_REMOTE_DEMO_RUNNER_ENABLED = process.env.NEXT_PUBLIC_DEMO_RUNNER_ENABLED === "1";
-const CLIENT_LOCAL_DEMO_API_ENABLED = process.env.NODE_ENV !== "production";
 
 function duration(ms?: number): string {
   if (ms === undefined) return "";
@@ -176,16 +173,17 @@ function logTime(): string {
   });
 }
 
-function localDemoRunnerAvailable(): boolean {
-  return CLIENT_LOCAL_DEMO_API_ENABLED && typeof window !== "undefined" && LOCAL_DEMO_HOSTS.has(window.location.hostname);
-}
-
-function demoRunnerAvailable(): boolean {
-  return CLIENT_REMOTE_DEMO_RUNNER_ENABLED || localDemoRunnerAvailable();
-}
-
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+async function detectDemoRunnerAvailable(): Promise<boolean> {
+  try {
+    const response = await fetch("/api/demo", { cache: "no-store" });
+    return response.ok;
+  } catch {
+    return false;
+  }
 }
 
 function failedStartResult(step: DemoStep, response: Response, value: Partial<DemoResult> & { error?: string }): DemoResult {
@@ -220,7 +218,13 @@ export default function DemoPage() {
   const [runnerAvailability, setRunnerAvailability] = useState<DemoRunnerAvailability>("checking");
 
   useEffect(() => {
-    setRunnerAvailability(demoRunnerAvailable() ? "available" : "unavailable");
+    let mounted = true;
+    void detectDemoRunnerAvailable().then((available) => {
+      if (mounted) setRunnerAvailability(available ? "available" : "unavailable");
+    });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const allPassed = useMemo(
