@@ -11,6 +11,7 @@ type DemoTask = "auth" | "amm-routes" | "frontend-proof";
 
 interface DemoRequest {
   task?: DemoTask;
+  async?: boolean;
 }
 
 interface TaskConfig {
@@ -31,8 +32,20 @@ interface ActiveDemoTask {
   stderr: string;
 }
 
+interface DemoResult {
+  ok: boolean;
+  task: DemoTask;
+  label: string;
+  code: number | null;
+  durationMs: number;
+  stdout: string;
+  stderr: string;
+  error?: string;
+}
+
 type DemoGlobal = typeof globalThis & {
   __siderealActiveDemoTask?: ActiveDemoTask;
+  __siderealLastDemoResult?: DemoResult;
 };
 
 const MAX_OUTPUT_CHARS = 80_000;
@@ -49,6 +62,59 @@ function repoRoot(): string {
 
 function demoApiEnabled(): boolean {
   return process.env.NODE_ENV !== "production" || process.env.SIDEREAL_ENABLE_DEMO_API === "1";
+}
+
+function demoRunnerEndpoint(): string | null {
+  const value = process.env.DEMO_RUNNER_API_URL?.trim();
+  if (!value) return null;
+  const base = value.replace(/\/+$/, "");
+  return base.endsWith("/api/demo") ? base : `${base}/api/demo`;
+}
+
+function demoRunnerToken(): string | null {
+  const value = process.env.DEMO_RUNNER_TOKEN?.trim();
+  return value ? value : null;
+}
+
+function noStoreJson(body: unknown, init?: ResponseInit): NextResponse {
+  const headers = new Headers(init?.headers);
+  headers.set("cache-control", "no-store");
+  return NextResponse.json(body, {
+    ...init,
+    headers,
+  });
+}
+
+function authorizedRunnerRequest(request: Request): boolean {
+  const token = demoRunnerToken();
+  if (!token) return true;
+  return request.headers.get("authorization") === `Bearer ${token}`;
+}
+
+async function proxyDemoRequest(request: Request): Promise<Response | null> {
+  const endpoint = demoRunnerEndpoint();
+  if (!endpoint) return null;
+
+  const headers = new Headers();
+  headers.set("content-type", request.headers.get("content-type") ?? "application/json");
+  const token = demoRunnerToken();
+  if (token) headers.set("authorization", `Bearer ${token}`);
+
+  const upstream = await fetch(endpoint, {
+    method: request.method,
+    headers,
+    body: request.method === "POST" ? await request.text() : undefined,
+    cache: "no-store",
+  });
+  const text = await upstream.text();
+
+  return new NextResponse(text, {
+    status: upstream.status,
+    headers: {
+      "cache-control": "no-store",
+      "content-type": upstream.headers.get("content-type") ?? "application/json",
+    },
+  });
 }
 
 function taskConfig(task: DemoTask): TaskConfig {
@@ -158,24 +224,72 @@ async function runTask(config: TaskConfig, activeTask: ActiveDemoTask): Promise<
   });
 }
 
+function activeTaskStatus(activeTask: ActiveDemoTask) {
+  return {
+    active: true,
+    task: activeTask.task,
+    label: activeTask.label,
+    commandLine: activeTask.commandLine,
+    startedAt: activeTask.startedAt,
+    lastOutputAt: activeTask.lastOutputAt,
+    durationMs: Date.now() - activeTask.startedAt,
+    stdout: activeTask.stdout,
+    stderr: activeTask.stderr,
+  };
+}
+
+async function executeTask(
+  task: DemoTask,
+  config: TaskConfig,
+  activeTask: ActiveDemoTask,
+): Promise<DemoResult> {
+  try {
+    const result = await runTask(config, activeTask);
+    return {
+      ok: result.code === 0,
+      task,
+      label: config.label,
+      ...result,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      task,
+      label: config.label,
+      code: 1,
+      durationMs: Date.now() - activeTask.startedAt,
+      stdout: activeTask.stdout,
+      stderr: trimOutput(`${activeTask.stderr}\n${message}`),
+      error: message,
+    };
+  }
+}
+
 export async function POST(request: Request) {
+  const proxied = await proxyDemoRequest(request);
+  if (proxied) return proxied;
+
   if (!demoApiEnabled()) {
-    return NextResponse.json(
+    return noStoreJson(
       { ok: false, error: "Demo automation API is disabled in production" },
       { status: 403 },
     );
+  }
+  if (!authorizedRunnerRequest(request)) {
+    return noStoreJson({ ok: false, error: "Unauthorized demo runner request" }, { status: 401 });
   }
 
   const body = (await request.json().catch(() => ({}))) as DemoRequest;
   const task = body.task;
   if (task !== "auth" && task !== "amm-routes" && task !== "frontend-proof") {
-    return NextResponse.json({ ok: false, error: "Unknown demo task" }, { status: 400 });
+    return noStoreJson({ ok: false, error: "Unknown demo task" }, { status: 400 });
   }
 
   const config = taskConfig(task);
   const state = demoGlobal();
   if (state.__siderealActiveDemoTask) {
-    return NextResponse.json(
+    return noStoreJson(
       {
         ok: false,
         task,
@@ -199,14 +313,38 @@ export async function POST(request: Request) {
     stderr: "",
   };
   state.__siderealActiveDemoTask = activeTask;
+  state.__siderealLastDemoResult = undefined;
+
+  if (body.async) {
+    void executeTask(task, config, activeTask)
+      .then((result) => {
+        state.__siderealLastDemoResult = result;
+      })
+      .finally(() => {
+        if (state.__siderealActiveDemoTask === activeTask) {
+          state.__siderealActiveDemoTask = undefined;
+        }
+      });
+
+    return noStoreJson(
+      {
+        ok: true,
+        task,
+        label: config.label,
+        started: true,
+        code: null,
+        durationMs: 0,
+        stdout: "",
+        stderr: "",
+      },
+      { status: 202 },
+    );
+  }
+
   try {
-    const result = await runTask(config, activeTask);
-    return NextResponse.json({
-      ok: result.code === 0,
-      task,
-      label: config.label,
-      ...result,
-    });
+    const result = await executeTask(task, config, activeTask);
+    state.__siderealLastDemoResult = result;
+    return noStoreJson(result);
   } finally {
     if (state.__siderealActiveDemoTask === activeTask) {
       state.__siderealActiveDemoTask = undefined;
@@ -214,28 +352,25 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
+  const proxied = await proxyDemoRequest(request);
+  if (proxied) return proxied;
+
   if (!demoApiEnabled()) {
-    return NextResponse.json(
+    return noStoreJson(
       { active: false, error: "Demo automation API is disabled in production" },
       { status: 403 },
     );
   }
-
-  const activeTask = demoGlobal().__siderealActiveDemoTask;
-  if (!activeTask) {
-    return NextResponse.json({ active: false });
+  if (!authorizedRunnerRequest(request)) {
+    return noStoreJson({ active: false, error: "Unauthorized demo runner request" }, { status: 401 });
   }
 
-  return NextResponse.json({
-    active: true,
-    task: activeTask.task,
-    label: activeTask.label,
-    commandLine: activeTask.commandLine,
-    startedAt: activeTask.startedAt,
-    lastOutputAt: activeTask.lastOutputAt,
-    durationMs: Date.now() - activeTask.startedAt,
-    stdout: activeTask.stdout,
-    stderr: activeTask.stderr,
-  });
+  const state = demoGlobal();
+  const activeTask = state.__siderealActiveDemoTask;
+  if (!activeTask) {
+    return noStoreJson({ active: false, result: state.__siderealLastDemoResult });
+  }
+
+  return noStoreJson(activeTaskStatus(activeTask));
 }

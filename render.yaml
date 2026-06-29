@@ -1,0 +1,22 @@
+# SPDX-License-Identifier: Apache-2.0
+
+services:
+  - type: web
+    name: sidereal-demo-runner
+    env: docker
+    repo: https://github.com/PoulavBhowmick03/sidereal
+    region: oregon
+    plan: free
+    branch: main
+    healthCheckPath: /api/health
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: SIDEREAL_ENABLE_DEMO_API
+        value: "1"
+      - key: DEPLOY_IDENTITY
+        value: sidereal-smoke
+      - key: SETTLE_SECONDS
+        value: "4"
+      - key: DEMO_RUNNER_TOKEN
+        sync: false

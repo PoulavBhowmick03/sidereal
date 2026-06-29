@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: Apache-2.0
+
+.git
+.github
+node_modules
+app/node_modules
+sdk/node_modules
+app/.next
+target
+coverage
+playwright-report
+test-results
+.env
+.env.*
+app/.env.local
+*.log

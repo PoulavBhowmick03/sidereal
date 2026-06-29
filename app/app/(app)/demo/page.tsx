@@ -52,6 +52,7 @@ interface DemoStatusPoll {
   stdout?: string;
   stderr?: string;
   error?: string;
+  result?: DemoResult;
 }
 
 interface DemoTaskOutput {
@@ -86,9 +87,14 @@ const STEPS: DemoStep[] = [
 const MAX_LOG_ENTRIES = 400;
 const HEARTBEAT_MS = 15_000;
 const POLL_MS = 2_000;
+const TASK_TIMEOUT_MS: Record<DemoTaskId, number> = {
+  auth: 6 * 60_000,
+  "amm-routes": 25 * 60_000,
+};
 const STELLAR_EXPERT_TESTNET = "https://stellar.expert/explorer/testnet";
 const LOCAL_DEMO_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"]);
-const CLIENT_DEMO_API_ENABLED = process.env.NODE_ENV !== "production";
+const CLIENT_REMOTE_DEMO_RUNNER_ENABLED = process.env.NEXT_PUBLIC_DEMO_RUNNER_ENABLED === "1";
+const CLIENT_LOCAL_DEMO_API_ENABLED = process.env.NODE_ENV !== "production";
 
 function duration(ms?: number): string {
   if (ms === undefined) return "";
@@ -171,7 +177,28 @@ function logTime(): string {
 }
 
 function localDemoRunnerAvailable(): boolean {
-  return CLIENT_DEMO_API_ENABLED && typeof window !== "undefined" && LOCAL_DEMO_HOSTS.has(window.location.hostname);
+  return CLIENT_LOCAL_DEMO_API_ENABLED && typeof window !== "undefined" && LOCAL_DEMO_HOSTS.has(window.location.hostname);
+}
+
+function demoRunnerAvailable(): boolean {
+  return CLIENT_REMOTE_DEMO_RUNNER_ENABLED || localDemoRunnerAvailable();
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+function failedStartResult(step: DemoStep, response: Response, value: Partial<DemoResult> & { error?: string }): DemoResult {
+  return {
+    ok: false,
+    task: step.id,
+    label: step.title,
+    code: value.code ?? response.status,
+    durationMs: value.durationMs ?? 0,
+    stdout: value.stdout ?? "",
+    stderr: [value.error, value.stderr].filter(Boolean).join("\n"),
+    error: value.error,
+  };
 }
 
 export default function DemoPage() {
@@ -193,7 +220,7 @@ export default function DemoPage() {
   const [runnerAvailability, setRunnerAvailability] = useState<DemoRunnerAvailability>("checking");
 
   useEffect(() => {
-    setRunnerAvailability(localDemoRunnerAvailable() ? "available" : "unavailable");
+    setRunnerAvailability(demoRunnerAvailable() ? "available" : "unavailable");
   }, []);
 
   const allPassed = useMemo(
@@ -262,10 +289,23 @@ export default function DemoPage() {
 
   const pollTaskStatus = useCallback(async (step: DemoStep) => {
     const response = await fetch("/api/demo", { cache: "no-store" });
-    if (!response.ok) return;
+    if (!response.ok) return undefined;
 
     const status = (await response.json()) as DemoStatusPoll;
-    if (!status.active || status.task !== step.id) return;
+    if (status.result?.task === step.id) {
+      setLiveOutputs((prev) => ({
+        ...prev,
+        [step.id]: {
+          stdout: status.result?.stdout ?? "",
+          stderr: status.result?.stderr ?? "",
+        },
+      }));
+      appendStreamOutput(step, "stdout", status.result.stdout ?? "");
+      appendStreamOutput(step, "stderr", status.result.stderr ?? "");
+      return status;
+    }
+
+    if (!status.active || status.task !== step.id) return status;
 
     setLiveOutputs((prev) => ({
       ...prev,
@@ -294,7 +334,27 @@ export default function DemoPage() {
         `Last command output was ${duration(lastOutputAgo)} ago.`,
       );
     }
+    return status;
   }, [appendLog, appendStreamOutput]);
+
+  const waitForTaskResult = useCallback(async (step: DemoStep): Promise<DemoResult> => {
+    const deadline = Date.now() + TASK_TIMEOUT_MS[step.id];
+    while (Date.now() < deadline) {
+      const status = await pollTaskStatus(step);
+      if (status?.result?.task === step.id) return status.result;
+      await sleep(POLL_MS);
+    }
+
+    return {
+      ok: false,
+      task: step.id,
+      label: step.title,
+      code: 1,
+      durationMs: TASK_TIMEOUT_MS[step.id],
+      stdout: liveOutputs[step.id]?.stdout ?? "",
+      stderr: `Timed out waiting for ${step.title} to finish`,
+    };
+  }, [liveOutputs, pollTaskStatus]);
 
   const runAll = useCallback(async () => {
     if (!runnerAvailable) {
@@ -328,20 +388,20 @@ export default function DemoPage() {
       setActiveOutput(step.id);
       setStatuses((prev) => ({ ...prev, [step.id]: "running" }));
       appendLog("info", `${step.title} started`);
-      let pollTimer: number | undefined;
       try {
-        pollTimer = window.setInterval(() => {
-          void pollTaskStatus(step);
-        }, POLL_MS);
-        void pollTaskStatus(step);
-
         const response = await fetch("/api/demo", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ task: step.id }),
+          body: JSON.stringify({ task: step.id, async: true }),
         });
-        const result = (await response.json()) as DemoResult;
-        if (pollTimer) window.clearInterval(pollTimer);
+        const start = (await response.json().catch(() => ({ ok: false, error: "Demo API did not return JSON" }))) as
+          Partial<DemoResult> & { started?: boolean; error?: string };
+        const result =
+          response.ok && start.ok && start.started
+            ? await waitForTaskResult(step)
+            : start.task === step.id && typeof start.ok === "boolean"
+              ? (start as DemoResult)
+              : failedStartResult(step, response, start);
         appendStreamOutput(step, "stdout", result.stdout ?? "");
         appendStreamOutput(step, "stderr", result.stderr ?? "");
         setLiveOutputs((prev) => ({
@@ -365,7 +425,6 @@ export default function DemoPage() {
           break;
         }
       } catch (error) {
-        if (pollTimer) window.clearInterval(pollTimer);
         const result: DemoResult = {
           ok: false,
           task: step.id,
@@ -391,7 +450,7 @@ export default function DemoPage() {
     }
     if (finished) appendLog("info", "Demo complete");
     setRunning(false);
-  }, [appendLog, appendStreamOutput, pollTaskStatus, runnerAvailable, running]);
+  }, [appendLog, appendStreamOutput, runnerAvailable, running, waitForTaskResult]);
 
   const current = results[activeOutput];
   const proofOutput = liveOutputs["amm-routes"]?.stdout || results["amm-routes"]?.stdout || "";
@@ -445,8 +504,8 @@ export default function DemoPage() {
           <h1 className="text-5xl font-light tracking-tight sm:text-6xl">Demo</h1>
           <p className="max-w-2xl text-smoke">
             {runnerAvailable
-              ? "Run the local automated proof from the UI: auth invariant, then live testnet AMM routes against a fresh deployment."
-              : "The automated runner is available from local development only. It runs CLI commands and testnet transactions from your machine."}
+              ? "Run the automated proof from the UI: auth invariant, then live testnet AMM routes against a fresh deployment."
+              : "The automated runner needs either local development or the hosted runner configuration. It runs CLI commands and testnet transactions from a controlled backend."}
           </p>
         </div>
         <button
