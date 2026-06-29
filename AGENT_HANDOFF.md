@@ -88,6 +88,116 @@ Set the Vercel project Root Directory to `app`; it reads `app/vercel.json` and
 builds the SDK then the app. Env vars are all public `NEXT_PUBLIC_*` (see
 `app/.env.example`); the five contract addresses come from `make deploy`.
 
+## Render demo runner account setup for Poulav
+
+The `/demo` page should use a hosted Render Docker service for automation. Vercel
+must proxy to Render. Vercel should not run the testnet commands itself.
+
+Install and authenticate the Render CLI on Poulav's machine:
+
+```bash
+brew install render
+render login
+render whoami
+render workspaces --output json
+render workspace set <poulav-workspace-id>
+render workspace current
+```
+
+Validate the checked-in Render Blueprint before creating or updating the service:
+
+```bash
+render blueprints validate ./render.yaml
+```
+
+Create or adopt the Render web service in Poulav's Render account:
+
+1. Use the GitHub repo `https://github.com/PoulavBhowmick03/sidereal`.
+2. Use branch `main`.
+3. Use Docker with `Dockerfile` at repo root and build context `.`.
+4. Service name should be `sidereal-demo-runner`.
+5. Health check path should be `/api/health`.
+6. Keep the service URL stable. The current expected URL shape is
+   `https://sidereal-demo-runner.onrender.com`.
+
+Set these Render environment variables:
+
+```text
+SIDEREAL_ENABLE_DEMO_API=1
+DEPLOY_IDENTITY=sidereal-smoke
+SETTLE_SECONDS=4
+DEMO_RUNNER_TOKEN=<strong shared secret>
+```
+
+Generate the shared secret locally, save it in a password manager, then put the
+same value in Render and Vercel:
+
+```bash
+openssl rand -base64 32
+```
+
+The runner container builds release Wasm, prebuilds
+`sidereal-integration-tests --test auth_invariants`, builds the SDK and app, then
+starts `pnpm --dir app exec next start` on Render's `$PORT`. On startup,
+`scripts/render-demo-runner-start.sh` creates and friendbot-funds the
+`sidereal-smoke` testnet identity if it does not already exist inside the
+container.
+
+Deploy and inspect with the CLI:
+
+```bash
+render services --output json
+render deploys create <render-service-id> --commit main --wait --confirm --output text
+render logs <render-service-id> --output text
+```
+
+Verify Render directly:
+
+```bash
+curl -sS https://sidereal-demo-runner.onrender.com/api/health
+curl -i https://sidereal-demo-runner.onrender.com/api/demo
+TOKEN="<same DEMO_RUNNER_TOKEN>"
+curl -sS -H "authorization: Bearer $TOKEN" \
+  https://sidereal-demo-runner.onrender.com/api/demo
+```
+
+Expected results:
+
+1. `/api/health` returns `{"ok":true,"service":"sidereal-demo-runner"}`.
+2. Direct `/api/demo` without the token returns `401`.
+3. Direct `/api/demo` with the token returns runner status JSON.
+
+Set these Vercel environment variables for the production frontend:
+
+```text
+DEMO_RUNNER_API_URL=https://sidereal-demo-runner.onrender.com
+DEMO_RUNNER_TOKEN=<same DEMO_RUNNER_TOKEN as Render>
+```
+
+Do not set `SIDEREAL_ENABLE_DEMO_API=1` on Vercel. That flag is only for Render
+or trusted local development. After setting Vercel env vars, redeploy the Vercel
+app and verify:
+
+```bash
+curl -i https://sidereal-app.vercel.app/api/demo
+```
+
+That request should return `200` from Vercel because Vercel injects the bearer
+token server-side when proxying to Render. If it returns `403` with "disabled in
+production", Vercel is missing `DEMO_RUNNER_API_URL` or `DEMO_RUNNER_TOKEN`.
+
+For local UI testing against Render, do not run the local Docker runner. Start
+the app with the same proxy env vars:
+
+```bash
+DEMO_RUNNER_API_URL=https://sidereal-demo-runner.onrender.com \
+DEMO_RUNNER_TOKEN="<same DEMO_RUNNER_TOKEN>" \
+pnpm --dir app exec next dev -p 3109 -H 127.0.0.1
+```
+
+Then open `http://127.0.0.1:3109/demo`. The button should call Render through
+the local Next API proxy.
+
 ## Driving your agents
 
 Per-column prompts (codex-2 to start the critical path, then codex-1 resumes

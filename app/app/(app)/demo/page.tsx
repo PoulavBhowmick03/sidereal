@@ -75,12 +75,12 @@ const STEPS: DemoStep[] = [
   {
     id: "auth",
     title: "Auth invariant",
-    detail: "Runs the strict flash-route auth test with exact argument pinning.",
+    detail: "Runs the host-level invariant that keeps flash-route auth pinned to exact contracts, functions, args, and amounts.",
   },
   {
     id: "amm-routes",
     title: "Live AMM proof",
-    detail: "Deploys a fresh 90-day testnet market and executes all four AMM routes.",
+    detail: "Deploys a fresh 90-day testnet market, seeds liquidity, then executes SY/PT and SY/YT routes.",
   },
 ];
 
@@ -508,7 +508,7 @@ export default function DemoPage() {
           <h1 className="text-5xl font-light tracking-tight sm:text-6xl">Demo</h1>
           <p className="max-w-2xl text-smoke">
             {runnerAvailable
-              ? "Run the automated proof from the UI: auth invariant, then live testnet AMM routes against a fresh deployment."
+              ? "Run the automated integration proof from the UI. A controlled backend runs the auth invariant, deploys a fresh testnet market, seeds liquidity, executes every AMM route, and streams the raw output here."
               : "The automated runner needs either local development or the hosted runner configuration. It runs CLI commands and testnet transactions from a controlled backend."}
           </p>
         </div>
@@ -537,6 +537,24 @@ export default function DemoPage() {
                     : "Run full demo"}
         </button>
       </header>
+
+      <section className="panel-subtle p-5">
+        <p className="label-data">What this demo proves</p>
+        <div className="mt-4 grid gap-4 text-sm text-smoke md:grid-cols-2">
+          <p>
+            It verifies the strict flash-route auth invariant, then performs a live testnet deployment of SY,
+            PT, YT, tokenizer, and AMM contracts from the hosted runner.
+          </p>
+          <p>
+            It initializes the market, deposits and splits SY, seeds AMM liquidity, executes SY-&gt;PT,
+            PT-&gt;SY, SY-&gt;YT, and YT-&gt;SY swaps, then records explorer links and final command output.
+          </p>
+          <p className="md:col-span-2">
+            It does not submit transactions from a browser wallet. Freighter, xBull, and Lobstr signing still need
+            a separate manual wallet pass.
+          </p>
+        </div>
+      </section>
 
       <section className="grid gap-6 lg:grid-cols-3">
         {STEPS.map((step, index) => {
