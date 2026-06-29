@@ -143,12 +143,9 @@ fn flash_route_top_level_auth_is_arg_pinned() {
 /// single SY transfer that funds it) can complete the flash route, because the
 /// AMM scopes every other sub-call itself via authorize_as_current_contract.
 ///
-/// This is #[ignore]d until Codex wires the real (non-mock) auth tree. The open
-/// item is the recipient encoding of the user's SY transfer (MuxedAddress vs
-/// Address) inside `sub_invokes`; Codex finalizes it on testnet, then removes
-/// the ignore. See docs/COORDINATION.md.
+/// This stays in CI so the flash route cannot regress to requiring users to
+/// authorize AMM-internal split, recombine, mint, burn, or transfer calls.
 #[test]
-#[ignore = "blocked on Codex flash-route auth tree (MuxedAddress recipient encoding)"]
 fn flash_route_user_only_signs_the_swap() {
     let env = Env::default();
     let m = deploy(env.clone());
@@ -156,8 +153,7 @@ fn flash_route_user_only_signs_the_swap() {
 
     let sy_in = 1_000_000_i128;
     // The user authorizes exactly the swap and the SY transfer that funds it.
-    // The recipient of that SY transfer (and its address encoding) is the part
-    // Codex must pin down; this tree is the target shape, not yet correct.
+    // Every AMM-internal call is authorized by the AMM with exact args.
     env.mock_auths(&[MockAuth {
         address: &m.user,
         invoke: &MockAuthInvoke {

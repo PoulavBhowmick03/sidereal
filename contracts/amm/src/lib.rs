@@ -959,12 +959,8 @@ fn solve_yt_out_for_sy_in(
     best
 }
 
-/// Calls `tokenizer.split(amm, amount)`, authorizing the call and the SY pull it
-/// performs from the pool, and returns the (pt, yt) minted to the pool.
-///
-/// AUTH CAVEAT: the nested authorization tree is exercised only under
-/// mock_all_auths in tests. The exact production entries (argument encoding for
-/// the muxed SY transfer in particular) need review and a testnet check.
+/// Calls `tokenizer.split(amm, amount)`, authorizing the exact tokenizer call
+/// and the exact SY pull it performs from the pool.
 fn flash_split(env: &Env, config: &Config, amount: i128) -> (i128, i128) {
     let amm = env.current_contract_address();
     let split_args: Vec<Val> =
@@ -972,7 +968,7 @@ fn flash_split(env: &Env, config: &Config, amount: i128) -> (i128, i128) {
     let pull_args: Vec<Val> = soroban_sdk::vec![
         env,
         amm.clone().into_val(env),
-        MuxedAddress::from(&config.tokenizer).into_val(env),
+        config.tokenizer.clone().into_val(env),
         amount.into_val(env),
     ];
     env.authorize_as_current_contract(vec![
@@ -983,17 +979,15 @@ fn flash_split(env: &Env, config: &Config, amount: i128) -> (i128, i128) {
                 fn_name: Symbol::new(env, "split"),
                 args: split_args.clone(),
             },
-            sub_invocations: vec![
-                env,
-                InvokerContractAuthEntry::Contract(SubContractInvocation {
-                    context: ContractContext {
-                        contract: config.sy_token.clone(),
-                        fn_name: Symbol::new(env, "transfer"),
-                        args: pull_args,
-                    },
-                    sub_invocations: vec![env],
-                }),
-            ],
+            sub_invocations: vec![env],
+        }),
+        InvokerContractAuthEntry::Contract(SubContractInvocation {
+            context: ContractContext {
+                contract: config.sy_token.clone(),
+                fn_name: Symbol::new(env, "transfer"),
+                args: pull_args,
+            },
+            sub_invocations: vec![env],
         }),
     ]);
     env.invoke_contract::<(i128, i128)>(&config.tokenizer, &Symbol::new(env, "split"), split_args)
@@ -1001,8 +995,6 @@ fn flash_split(env: &Env, config: &Config, amount: i128) -> (i128, i128) {
 
 /// Calls `tokenizer.recombine(amm, amount, amount)`, authorizing the call and
 /// the PT and YT burns it performs on the pool's balances, and returns SY out.
-///
-/// AUTH CAVEAT: same as flash_split.
 fn flash_recombine(env: &Env, config: &Config, amount: i128) -> i128 {
     let amm = env.current_contract_address();
     let recombine_args: Vec<Val> = soroban_sdk::vec![
@@ -1021,25 +1013,23 @@ fn flash_recombine(env: &Env, config: &Config, amount: i128) -> i128 {
                 fn_name: Symbol::new(env, "recombine"),
                 args: recombine_args.clone(),
             },
-            sub_invocations: vec![
-                env,
-                InvokerContractAuthEntry::Contract(SubContractInvocation {
-                    context: ContractContext {
-                        contract: config.pt_token.clone(),
-                        fn_name: Symbol::new(env, "burn"),
-                        args: burn_args.clone(),
-                    },
-                    sub_invocations: vec![env],
-                }),
-                InvokerContractAuthEntry::Contract(SubContractInvocation {
-                    context: ContractContext {
-                        contract: config.yt_token.clone(),
-                        fn_name: Symbol::new(env, "burn"),
-                        args: burn_args,
-                    },
-                    sub_invocations: vec![env],
-                }),
-            ],
+            sub_invocations: vec![env],
+        }),
+        InvokerContractAuthEntry::Contract(SubContractInvocation {
+            context: ContractContext {
+                contract: config.pt_token.clone(),
+                fn_name: Symbol::new(env, "burn"),
+                args: burn_args.clone(),
+            },
+            sub_invocations: vec![env],
+        }),
+        InvokerContractAuthEntry::Contract(SubContractInvocation {
+            context: ContractContext {
+                contract: config.yt_token.clone(),
+                fn_name: Symbol::new(env, "burn"),
+                args: burn_args,
+            },
+            sub_invocations: vec![env],
         }),
     ]);
     env.invoke_contract::<i128>(
