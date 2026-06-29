@@ -3,6 +3,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { StarfieldBackground } from "./StarfieldBackground";
 
 // Parallax "reveal" footer: the footer is pinned to the bottom of the viewport
 // behind the page content, and a spacer the height of the footer sits at the
@@ -27,8 +28,12 @@ export function RevealFooter({ children }: { children: React.ReactNode }) {
     <>
       {/* Reserves the scroll distance that reveals the fixed footer. */}
       <div aria-hidden style={{ height }} />
-      <footer ref={ref} className="fixed inset-x-0 bottom-0 z-0 border-t border-white/10 bg-carbon">
-        {children}
+      <footer
+        ref={ref}
+        className="fixed inset-x-0 bottom-0 z-0 overflow-hidden border-t border-white/10 bg-carbon"
+      >
+        <StarfieldBackground />
+        <div className="relative z-10">{children}</div>
       </footer>
     </>
   );

@@ -3,6 +3,7 @@
 import { Wordmark } from "@/components/Logo";
 import { MarketingNav } from "@/components/MarketingNav";
 import { RevealFooter } from "@/components/RevealFooter";
+import { FooterBrand } from "@/components/FooterBrand";
 
 // Marketing chrome for the "cinematic darkroom" landing: ink-black canvas, a
 // quiet top bar that inverts on scroll, and a single atmospheric hero owned by
@@ -38,6 +39,7 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
             © 2026 Sidereal Protocol. All rights reserved.
           </p>
         </div>
+        <FooterBrand />
       </RevealFooter>
     </div>
   );
