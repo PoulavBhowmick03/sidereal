@@ -145,3 +145,124 @@ storage shape or changing the economics design.
 Codex is working on `fix/audit-operations` in a separate worktree. The live AMM
 provenance check found that its bytecode exactly matches the uncommitted integer
 rewrite and no committed float build. Details are in `docs/PROVENANCE.md`.
+
+---
+
+## 6. 2026-06-29 Codex testnet AMM and flash-route auth findings
+
+Local only, not pushed per human instruction.
+
+Main committed testnet AMM is seeded and readable:
+
+- AMM `CCMUORD273M24VVFANDMNA7ZUCX7L62IX4T6O6FPJGGRSLQVUVSQCG6O`
+- Reserves: PT `2474716124`, SY `2554421944`, total LP `2500000000`
+- Read quotes for `10000000` input succeeded:
+  - SY to PT: `10435294`
+  - PT to SY: `9545732`
+  - SY to YT: `168940071`
+  - YT to SY: `417522`
+
+Controlled testnet AMM proof with local `sidereal-smoke` identity:
+
+- Reused throwaway tokens from a fresh market:
+  - SY `CA7HZX3Z62AD4KPOA56Q5H2WWAKN3QZUGJIQWUYJZKM2TZPMIRB56CXX`
+  - PT `CBCTT2CIC33UFCPZDOKGL3ASXF5337BWF6ZFSNEDU65ZZJILUPHYDZSQ`
+  - YT `CD7DGGF4U5XSA5MN4EQP3QRS3UKVRCLZJ2LA7ZJSQIFVVPOADMJNPATN`
+  - Tokenizer `CB3KPFGYJ2G7MWYYYOCCKTR2IERBP73IRNLCSKR3ZNYPRPGSTD42ZQHG`
+- Short-maturity AMM `CD2G6JQFNDOKUMKU7ZQYNTPGAJGJ3K2BRBR64OOI5KBJSBHKSX5G4QBI`
+  seeded liquidity but PT/SY swap simulation overflowed in TWAP math with AMM
+  error `#13`. Cause: intentionally short maturity made the WAD-scaled implied
+  rate too large for `state.twap_ln_implied_rate * retained`.
+- Long-maturity AMM `CBA6Y4GDCBMI5PMDWPWGFBQXBTWKCBSQIAASWNRRS7SQ3ES63NPYZNNU`
+  initialized and seeded `100000000` PT and `100000000` SY, minting `99999000`
+  LP.
+- PT/SY swaps are testnet-proven on the long-maturity AMM:
+  - SY to PT, input `1000000`, quote `1046372`, output `1046372`
+  - PT to SY, input `1000000`, quote `951481`, output `951481`
+- YT flash routes still fail auth on testnet:
+  - SY to YT, quote `13014167`, fails `Error(Auth, InvalidAction)` at
+    tokenizer `split`, specifically the nested SY `transfer` from AMM to
+    tokenizer for amount `13014167`.
+  - YT to SY, quote `44314`, fails `Error(Auth, InvalidAction)` at tokenizer
+    `recombine`, specifically the nested PT `burn` from AMM for amount
+    `1000000`.
+
+Local code experiment:
+
+- Changed the SY-to-YT internal pull auth recipient from
+  `MuxedAddress::from(&config.tokenizer)` to `config.tokenizer` in
+  `contracts/amm/src/lib.rs`.
+- `cargo test -p sidereal-integration-tests --test auth_invariants
+  flash_route_user_only_signs_the_swap -- --ignored --nocapture` still fails
+  with the same AMM-to-tokenizer SY transfer auth rejection.
+- The always-on invariant remains green:
+  `cargo test -p sidereal-integration-tests --test auth_invariants
+  flash_route_top_level_auth_is_arg_pinned`.
+
+Hard stop:
+
+The next plausible fix is changing AMM self-auth entries from nested
+sub-invocations under `tokenizer.split` and `tokenizer.recombine` into separate
+exact root entries for the tokenizer call and the exact token call that consumes
+AMM auth. That keeps `(contract, fn_name, args)` pinned, but it changes the
+auth tree shape rather than only the argument encoding. This falls under the
+audit hard stop for flash-route auth structure changes and needs human review
+before continuing.
+
+---
+
+## 7. 2026-06-29 Codex flash-route auth resolved on testnet
+
+Human approved continuing past the auth-tree shape hard stop, with the security
+constraint unchanged: every AMM self-auth entry must remain pinned to exact
+`(contract, fn_name, args)` including concrete amounts.
+
+Fix:
+
+- AMM `flash_split` now authorizes exact root entries for:
+  - `tokenizer.split(amm, amount)`
+  - `sy.transfer(amm, tokenizer, amount)`
+- AMM `flash_recombine` now authorizes exact root entries for:
+  - `tokenizer.recombine(amm, amount, amount)`
+  - `pt.burn(amm, amount)`
+  - `yt.burn(amm, amount)`
+- No wildcard auth was introduced. Amount and address pinning remain exact.
+
+Regression tests:
+
+- `flash_route_user_only_signs_the_swap` is no longer ignored and passes.
+- `flash_route_top_level_auth_is_arg_pinned` still passes.
+- Full `cargo test --workspace` passes.
+
+Reusable scripts added locally:
+
+- `scripts/prove-testnet-amm-routes.sh`
+  - Deploys a fresh 90-day throwaway testnet market from local Wasm.
+  - Seeds AMM liquidity.
+  - Executes SY to PT, PT to SY, SY to YT, and YT to SY with real submitted
+    transactions.
+  - Writes `deployments/amm-routes-testnet.state.env`.
+- `scripts/check-frontend-testnet.sh`
+  - Loads either `deployments/testnet.toml` or the proof file above.
+  - Runs SDK/app static checks and Playwright live-read smoke.
+
+Live proof from `DEPLOY_IDENTITY=sidereal-smoke bash
+scripts/prove-testnet-amm-routes.sh`:
+
+- AMM `CDTRM37BXPDROHB74WI7R5FPQIJOKLTJQ3X4PDHL6UW6DTXQ2POFR64I`
+- SY `CAJCSB4EQ7WPLSFSOFXIPCLAUHZE5GUUR5SJVBP5JDB3XKQCL7376XUD`
+- PT `CAZTXUL3FPDJAQ6NSF57DXRFPZW3S7HMUNAE5YRL7O5TN5YFAQW4TSE7`
+- YT `CAMACWPNPM4JWYYZOIVJKV56FO5BJ6ENWVDTJFE54E4SD2JL547NP2VH`
+- Tokenizer `CBF47RRJSVYECS3INEPJYKDCBMJZPTB2B55CCDGO6D2423FZV6UEXXJU`
+- Result: all four AMM routes succeeded on testnet, including both YT flash
+  routes.
+
+Frontend live-read proof:
+
+- `bash scripts/check-frontend-testnet.sh` passed against the committed testnet
+  deployment.
+- `PROOF_FILE=deployments/amm-routes-testnet.state.env RUN_STATIC=0 RUN_E2E=1
+  bash scripts/check-frontend-testnet.sh` passed against the fresh updated AMM
+  proof deployment.
+- Wallet-submitted frontend flows remain outside this script because no browser
+  wallet signer harness exists in the repo.

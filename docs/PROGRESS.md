@@ -381,3 +381,124 @@ Remaining integration gates:
   relaxing arg pinning.
 - Run the full wallet-driven frontend flow: deposit, split, claim, recombine,
   redeem, add/remove liquidity, PT/SY swap, and YT routes only if auth is proven.
+
+---
+
+## Codex testnet AMM pass (2026-06-29, local only)
+
+Human instruction: proceed with testnet and do not push. No push was performed.
+
+Baseline:
+
+- `cargo test --workspace`: green. The strict flash auth test remains ignored.
+- Main committed testnet AMM is already seeded:
+  - AMM `CCMUORD273M24VVFANDMNA7ZUCX7L62IX4T6O6FPJGGRSLQVUVSQCG6O`
+  - PT reserve `2474716124`, SY reserve `2554421944`, total LP `2500000000`
+  - Quotes succeeded for PT/SY and YT routes on `10000000` input.
+
+Controlled testnet proof:
+
+- Used local funded identity `sidereal-smoke`.
+- Deployed a throwaway market and seeded AMM liquidity.
+- A short-maturity AMM reproduced a TWAP math overflow on swap simulation
+  (`Error(Contract, #13)`) because the implied rate was intentionally extreme.
+  This is a test setup issue for very short AMM maturities.
+- Reused the throwaway PT/SY/YT/tokenizer with long-maturity AMM
+  `CBA6Y4GDCBMI5PMDWPWGFBQXBTWKCBSQIAASWNRRS7SQ3ES63NPYZNNU`.
+- Seeded `100000000` PT and `100000000` SY, minting `99999000` LP.
+- PT/SY swaps succeeded on testnet:
+  - SY to PT, input `1000000`, quote `1046372`, output `1046372`
+  - PT to SY, input `1000000`, quote `951481`, output `951481`
+
+Flash-route status:
+
+- SY to YT still fails with `Error(Auth, InvalidAction)` at tokenizer `split`,
+  specifically the nested SY transfer from AMM to tokenizer.
+- YT to SY still fails with `Error(Auth, InvalidAction)` at tokenizer
+  `recombine`, specifically the nested PT burn from AMM.
+- An encoding-only local experiment changed the SY pull recipient auth from a
+  muxed tokenizer address to a plain tokenizer address. The strict ignored auth
+  test still fails. The always-on arg-pinning invariant remains green.
+
+Hard stop:
+
+The next plausible fix is changing the AMM self-auth tree shape while keeping
+each `(contract, fn_name, args)` entry exact. That is more than an encoding
+change, so it falls under the audit hard stop and needs human review before
+continuing.
+
+---
+
+## Codex flash-route and frontend script pass (2026-06-29, local only)
+
+Human approved continuing past the flash-route auth-tree shape hard stop. The
+fix keeps exact arg pinning and changes only how the AMM presents its own
+authorizations to Soroban:
+
+- `flash_split`: exact root entries for `tokenizer.split(amm, amount)` and
+  `sy.transfer(amm, tokenizer, amount)`.
+- `flash_recombine`: exact root entries for `tokenizer.recombine(amm, amount,
+  amount)`, `pt.burn(amm, amount)`, and `yt.burn(amm, amount)`.
+- No wildcard auth and no relaxed amount checks.
+
+Scripts added:
+
+- `scripts/prove-testnet-amm-routes.sh`
+  - Deploys a fresh 90-day throwaway testnet market from local Wasm.
+  - Seeds AMM liquidity.
+  - Executes SY to PT, PT to SY, SY to YT, and YT to SY as real testnet
+    transactions.
+  - Writes `deployments/amm-routes-testnet.state.env`.
+- `scripts/check-frontend-testnet.sh`
+  - Loads `deployments/testnet.toml` or the proof file above.
+  - Runs SDK build, app lint/typecheck/tests/build, and Playwright live-read
+    smoke.
+  - Can write `app/.env.local` with `WRITE_ENV_LOCAL=1`.
+
+Verification:
+
+- `cargo test -p sidereal-integration-tests --test auth_invariants`: green,
+  both tests active.
+- `cargo test --workspace`: green.
+- `cargo build --release --target wasm32v1-none --locked -p sidereal-amm`:
+  green.
+- `bash scripts/check-wasm-floats.sh target/wasm32v1-none/release/sidereal_amm.wasm`:
+  green.
+- `bash scripts/check-frontend-testnet.sh`: green against the committed testnet
+  deployment.
+- `DEPLOY_IDENTITY=sidereal-smoke bash scripts/prove-testnet-amm-routes.sh`:
+  green. Fresh proof AMM:
+  `CDTRM37BXPDROHB74WI7R5FPQIJOKLTJQ3X4PDHL6UW6DTXQ2POFR64I`.
+- `PROOF_FILE=deployments/amm-routes-testnet.state.env RUN_STATIC=0 RUN_E2E=1
+  bash scripts/check-frontend-testnet.sh`: green against the fresh proof
+  deployment.
+
+Remaining:
+
+- The fixed AMM has been proven on a throwaway testnet market, but the committed
+  main deployment manifest still points at the older AMM. A pinned redeploy is
+  needed before the public main testnet deployment has working YT flash routes.
+- Browser wallet submitted frontend flows are still manual because the repo has
+  no automated wallet signer harness.
+
+### UI demo route
+
+Added `/demo` as a local UI runner for the same proof path:
+
+- `/demo` starts the three proof steps once on load and shows terminal output.
+- `/demo?manual=1` renders without starting, for smoke tests.
+- `POST /api/demo` runs allowlisted local commands only:
+  - flash auth invariant test
+  - fresh testnet AMM route proof
+  - Playwright live-read smoke against the fresh proof deployment
+- The API is disabled in production unless `SIDEREAL_ENABLE_DEMO_API=1`.
+
+Verification:
+
+- `pnpm --filter @sidereal/app run lint`: green.
+- `pnpm --filter @sidereal/app run typecheck`: green.
+- `pnpm --filter @sidereal/app test`: green.
+- `pnpm --filter @sidereal/app run build`: green.
+- `pnpm --filter @sidereal/app exec playwright test --project=desktop-chromium
+  e2e/smoke.spec.ts`: green, including `/demo`.
+- Local `POST /api/demo` with task `auth`: green.

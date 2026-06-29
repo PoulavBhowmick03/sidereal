@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: Apache-2.0
 # Convenience targets for the sidereal monorepo (contracts + sdk + app).
 
-.PHONY: help install test contracts-test sdk-test app-test wasm build dev deploy clean
+.PHONY: help install test contracts-test sdk-test app-test wasm build dev deploy clean testnet-amm-routes frontend-testnet
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -41,6 +41,12 @@ deploy: ## Deploy the protocol to testnet and wire the frontend
 
 seed: ## Seed the deployed market with activity so the demo shows live numbers
 	bash scripts/seed-demo.sh
+
+testnet-amm-routes: wasm ## Deploy a throwaway market and prove all AMM routes on testnet
+	bash scripts/prove-testnet-amm-routes.sh
+
+frontend-testnet: ## Run frontend checks against the committed testnet deployment
+	bash scripts/check-frontend-testnet.sh
 
 clean: ## Remove build artifacts
 	cargo clean
