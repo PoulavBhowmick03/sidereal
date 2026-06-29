@@ -1,6 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import { Contract, TransactionBuilder, rpc, scValToNative, nativeToScVal, Address } from "@stellar/stellar-sdk";
+import {
+  Contract,
+  TransactionBuilder,
+  rpc,
+  scValToNative,
+  nativeToScVal,
+  Address,
+  StrKey,
+} from "@stellar/stellar-sdk";
 import type {
   AddLiquidityArgs,
   ContractAddresses,
@@ -22,6 +30,8 @@ import { marketMethodFor, quoteMethodFor, priceImpactBps, secondsToMaturity } fr
 import { ContractError, parseContractErrorCode } from "./errors.js";
 
 type Operation = ReturnType<Contract["call"]>;
+type SourceAccount = Awaited<ReturnType<rpc.Server["getAccount"]>>;
+type SubmittedTransaction = ReturnType<typeof TransactionBuilder.fromXDR>;
 
 /** Fails fast on a non-positive amount so we never build a doomed transaction. */
 function requirePositive(label: string, value: bigint): void {
@@ -42,6 +52,7 @@ export class StellarYT {
   private readonly networkPassphrase: string;
   private readonly simulationSourceAccount: string;
   private readonly contracts: ContractAddresses;
+  private static readonly sequenceFloorBySource = new Map<string, bigint>();
 
   constructor(opts: StellarYTOptions) {
     this.server = new rpc.Server(opts.rpcUrl, {
@@ -304,8 +315,19 @@ export class StellarYT {
     // stale sequence, then fail on submit with txBadSeq. Wait until getAccount
     // reflects this transaction's sequence before returning, so the next build
     // picks up the advanced value.
-    const consumed = tx as unknown as { source?: string; sequence?: string };
-    await this.waitForSequence(consumed.source, consumed.sequence);
+    const consumed = tx as unknown as {
+      source?: string;
+      _source?: string;
+      sequence?: string;
+      _sequence?: string;
+    };
+    const consumedSource = consumed.source ?? consumed._source;
+    const envelopeSource = StellarYT.envelopeSource(tx);
+    const consumedSequence =
+      consumed.sequence ?? consumed._sequence ?? StellarYT.envelopeSequence(tx);
+    StellarYT.rememberSequence(consumedSource, consumedSequence);
+    StellarYT.rememberSequence(envelopeSource, consumedSequence);
+    await this.waitForSequence(envelopeSource ?? consumedSource, consumedSequence);
 
     return { hash: sent.hash, status: result.status };
   }
@@ -320,10 +342,53 @@ export class StellarYT {
     if (!source || !sequence) return;
     const target = BigInt(sequence);
     const deadline = Date.now() + 30_000;
+    let observed = 0;
     while (Date.now() < deadline) {
       const account = await this.server.getAccount(source).catch(() => null);
-      if (account !== null && BigInt(account.sequenceNumber()) >= target) return;
+      if (account !== null && BigInt(account.sequenceNumber()) >= target) {
+        observed += 1;
+        if (observed >= 2) return;
+      } else {
+        observed = 0;
+      }
       await new Promise((resolve) => setTimeout(resolve, 500));
+    }
+  }
+
+  private static rememberSequence(source?: string, sequence?: string): void {
+    if (!source || !sequence) return;
+    const target = BigInt(sequence);
+    const current = StellarYT.sequenceFloorBySource.get(source);
+    if (current === undefined || target > current) {
+      StellarYT.sequenceFloorBySource.set(source, target);
+    }
+  }
+
+  private static applySequenceFloor(source: SourceAccount): void {
+    const floor = StellarYT.sequenceFloorBySource.get(source.accountId());
+    if (floor === undefined) return;
+    while (BigInt(source.sequenceNumber()) < floor) {
+      source.incrementSequenceNumber();
+    }
+  }
+
+  private static envelopeSource(tx: SubmittedTransaction): string | undefined {
+    try {
+      const source = tx.toEnvelope().v1().tx().sourceAccount();
+      if (source.switch().name === "keyTypeEd25519") {
+        return StrKey.encodeEd25519PublicKey(source.ed25519());
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+
+  private static envelopeSequence(tx: SubmittedTransaction): string | undefined {
+    try {
+      return tx.toEnvelope().v1().tx().seqNum().toString();
+    } catch {
+      return undefined;
     }
   }
 
@@ -377,6 +442,7 @@ export class StellarYT {
     ops: Operation[],
   ): Promise<TransactionEnvelope> {
     const source = await this.server.getAccount(sourceAccount);
+    StellarYT.applySequenceFloor(source);
     const builder = new TransactionBuilder(source, {
       fee: "1000000",
       networkPassphrase: this.networkPassphrase,

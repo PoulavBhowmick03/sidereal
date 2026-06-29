@@ -10,6 +10,7 @@
     "lint": "next lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "wallet:flow": "node scripts/assisted-wallet-flow.mjs",
     "test:e2e": "playwright test"
   },
   "dependencies": {

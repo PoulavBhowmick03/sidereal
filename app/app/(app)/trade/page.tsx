@@ -93,7 +93,9 @@ export default function TradePage() {
   }, [amount, address, direction.assetIn, direction.assetOut, cfg, client]);
 
   const amtError = amountError(amount, cfg.decimals, position ? balanceIn : undefined);
-  const priceImpactTooHigh = quote !== null && quote.priceImpactBps > MAX_PRICE_IMPACT_BPS;
+  const priceImpactGuardApplies = direction.assetIn !== "YT" && direction.assetOut !== "YT";
+  const priceImpactTooHigh =
+    priceImpactGuardApplies && quote !== null && quote.priceImpactBps > MAX_PRICE_IMPACT_BPS;
   const canSubmit =
     address !== null &&
     quote !== null &&
