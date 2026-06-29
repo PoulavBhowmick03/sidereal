@@ -2,12 +2,13 @@
 
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 type DemoTaskId = "auth" | "amm-routes";
 type DemoStatus = "idle" | "running" | "passed" | "failed";
 type DemoLogLevel = "info" | "error";
 type DemoOutputStream = "stdout" | "stderr";
+type DemoRunnerAvailability = "checking" | "available" | "unavailable";
 
 declare global {
   interface Window {
@@ -86,6 +87,8 @@ const MAX_LOG_ENTRIES = 400;
 const HEARTBEAT_MS = 15_000;
 const POLL_MS = 2_000;
 const STELLAR_EXPERT_TESTNET = "https://stellar.expert/explorer/testnet";
+const LOCAL_DEMO_HOSTS = new Set(["localhost", "127.0.0.1", "0.0.0.0", "::1", "[::1]"]);
+const CLIENT_DEMO_API_ENABLED = process.env.NODE_ENV !== "production";
 
 function duration(ms?: number): string {
   if (ms === undefined) return "";
@@ -167,6 +170,10 @@ function logTime(): string {
   });
 }
 
+function localDemoRunnerAvailable(): boolean {
+  return CLIENT_DEMO_API_ENABLED && typeof window !== "undefined" && LOCAL_DEMO_HOSTS.has(window.location.hostname);
+}
+
 export default function DemoPage() {
   const started = useRef(false);
   const logId = useRef(0);
@@ -183,11 +190,18 @@ export default function DemoPage() {
   const [activeOutput, setActiveOutput] = useState<DemoTaskId>("auth");
   const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState<DemoLogEntry[]>([]);
+  const [runnerAvailability, setRunnerAvailability] = useState<DemoRunnerAvailability>("checking");
+
+  useEffect(() => {
+    setRunnerAvailability(localDemoRunnerAvailable() ? "available" : "unavailable");
+  }, []);
 
   const allPassed = useMemo(
     () => STEPS.every((step) => statuses[step.id] === "passed"),
     [statuses],
   );
+
+  const runnerAvailable = runnerAvailability === "available";
 
   const failedStep = useMemo(
     () => STEPS.find((step) => statuses[step.id] === "failed"),
@@ -283,6 +297,14 @@ export default function DemoPage() {
   }, [appendLog, appendStreamOutput]);
 
   const runAll = useCallback(async () => {
+    if (!runnerAvailable) {
+      appendLog(
+        "info",
+        "Demo runner is local-only",
+        "Open /demo from a local development server such as http://127.0.0.1:3117/demo.",
+      );
+      return;
+    }
     if (running || started.current || window.__siderealDemoStarted) return;
     started.current = true;
     window.__siderealDemoStarted = true;
@@ -369,7 +391,7 @@ export default function DemoPage() {
     }
     if (finished) appendLog("info", "Demo complete");
     setRunning(false);
-  }, [appendLog, appendStreamOutput, pollTaskStatus, running]);
+  }, [appendLog, appendStreamOutput, pollTaskStatus, runnerAvailable, running]);
 
   const current = results[activeOutput];
   const proofOutput = liveOutputs["amm-routes"]?.stdout || results["amm-routes"]?.stdout || "";
@@ -422,14 +444,15 @@ export default function DemoPage() {
         <div className="space-y-3">
           <h1 className="text-5xl font-light tracking-tight sm:text-6xl">Demo</h1>
           <p className="max-w-2xl text-smoke">
-            Run the local automated proof from the UI: auth invariant, then live testnet AMM
-            routes against a fresh deployment.
+            {runnerAvailable
+              ? "Run the local automated proof from the UI: auth invariant, then live testnet AMM routes against a fresh deployment."
+              : "The automated runner is available from local development only. It runs CLI commands and testnet transactions from your machine."}
           </p>
         </div>
         <button
           type="button"
           onClick={() => void runAll()}
-          disabled={hasStarted}
+          disabled={hasStarted || !runnerAvailable}
           className="btn-solid w-full lg:w-auto"
         >
           {running ? (
@@ -438,7 +461,17 @@ export default function DemoPage() {
               className="h-3.5 w-3.5 animate-spin rounded-pill border border-ink/40 border-t-ink"
             />
           ) : null}
-          {running ? "Running demo" : allPassed ? "Demo complete" : hasStarted ? "Demo started" : "Run full demo"}
+          {runnerAvailability === "checking"
+            ? "Checking runner"
+            : !runnerAvailable
+              ? "Run locally"
+              : running
+                ? "Running demo"
+                : allPassed
+                  ? "Demo complete"
+                  : hasStarted
+                    ? "Demo started"
+                    : "Run full demo"}
         </button>
       </header>
 
