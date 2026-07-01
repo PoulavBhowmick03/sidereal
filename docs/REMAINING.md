@@ -139,6 +139,29 @@ implies (the testnet stand-in for real yield accrual).
 - ☐ (Tier 2, only if pursuing) add liquidity and run a PT/SY swap on testnet
   without `mock_all_auths`; then the YT flash route.
 
+## 3b. Blend onboarding surfaces (2026-07-02)
+
+The live frontend deployment now targets a Blend-backed market
+(`deployments/testnet.toml`, underlying = Blend's USDC reserve, rate derived
+via `initialize_blend`). On top of it:
+
+- ☑ **Live rates.** SDK `getBlendRates` reads the pool's reserve and computes
+  utilization, borrow APR, and supply APR with the three-slope curve mirrored
+  from `blend-contracts-v2` (regression-pinned to live pool values). Shown on
+  the yield-source card.
+- ☑ **Position discovery.** SDK `getBlendPosition` values a wallet's supply
+  and collateral bTokens at the current `b_rate`. Portfolio and mint show the
+  detected deposit.
+- ☑ **Tokenize migration.** `buildBlendWithdraw` (user-signed `pool.submit`,
+  Withdraw/WithdrawCollateral) plus the guided withdraw -> deposit -> split
+  flow on mint (three signatures; deposit sizes itself from the balance that
+  actually arrives). Withdraw encoding verified against the live pool: an
+  empty-position withdraw simulation reaches the pool and fails with its
+  domain error 1217 `InvalidBTokenBurnAmount`, not a decode error.
+- ☐ **Funded walkthrough.** A wallet holding Circle testnet USDC (manual
+  faucet step, https://faucet.circle.com) supplies to Blend, then runs the
+  tokenize flow end to end in the browser.
+
 ## 4. Known risks
 
 - The YT flash route's nested auth is the highest-risk surface; passing tests

@@ -162,6 +162,18 @@ export interface RemoveLiquidityArgs {
   lpIn: bigint;
 }
 
+export interface BlendWithdrawArgs {
+  from: string;
+  /** Blend pool contract id. */
+  pool: string;
+  /** Reserve asset contract id (the SY wrapper's underlying). */
+  asset: string;
+  /** Underlying to withdraw from liquid supply (RequestType Withdraw), base units. */
+  supplyAmount: bigint;
+  /** Underlying to withdraw from posted collateral (RequestType WithdrawCollateral). */
+  collateralAmount: bigint;
+}
+
 /** A built, unsigned Soroban transaction the caller hands to a wallet. */
 export interface TransactionEnvelope {
   /** Base64 XDR of the unsigned transaction envelope. */

@@ -21,6 +21,8 @@
  * per accrual, so realized yield differs slightly.
  */
 
+import { Address, nativeToScVal, xdr } from "@stellar/stellar-sdk";
+
 /** Blend's 7-decimal fixed-point scale (rates, utilization, config values). */
 export const BLEND_SCALAR_7 = 10_000_000n;
 /** Blend's 12-decimal fixed-point scale (b_rate / d_rate cumulative indexes). */
@@ -28,6 +30,16 @@ export const BLEND_SCALAR_12 = 1_000_000_000_000n;
 
 /** Second utilization breakpoint of the rate curve (0.95 in 7 decimals). */
 const UTIL_BREAKPOINT = 9_500_000n;
+
+/**
+ * Blend `RequestType` discriminants (pool/src/pool/actions.rs). A withdraw
+ * request larger than the holder's balance is clamped to the full balance by
+ * the pool, so passing a position's current valuation drains the bucket.
+ */
+export const BLEND_REQUEST_SUPPLY = 0;
+export const BLEND_REQUEST_WITHDRAW = 1;
+export const BLEND_REQUEST_SUPPLY_COLLATERAL = 2;
+export const BLEND_REQUEST_WITHDRAW_COLLATERAL = 3;
 
 /** Reserve configuration, decoded from `pool.get_reserve(asset).config`. */
 export interface BlendReserveConfig {
@@ -182,6 +194,27 @@ export function blendRateToBps(rate: bigint): bigint {
 }
 
 /**
+ * Encodes one Blend `Request` struct as a symbol-keyed ScVal map, the shape
+ * `pool.submit` expects inside its request vector.
+ */
+export function encodeBlendRequest(
+  asset: string,
+  requestType: number,
+  amount: bigint,
+): xdr.ScVal {
+  return nativeToScVal(
+    { address: new Address(asset), amount, request_type: requestType },
+    {
+      type: {
+        address: ["symbol"],
+        amount: ["symbol", "i128"],
+        request_type: ["symbol", "u32"],
+      },
+    },
+  );
+}
+
+/**
  * A holder's raw token maps from `pool.get_positions(address)`, keyed by
  * reserve index. Blend splits deposits between liquid supply (RequestType
  * Supply) and posted collateral (RequestType SupplyCollateral); Blend's own
@@ -200,6 +233,10 @@ export interface BlendPosition {
   supplyBTokens: bigint;
   /** bTokens posted as collateral (needs RequestType WithdrawCollateral). */
   collateralBTokens: bigint;
+  /** Underlying value of the liquid supply bucket, base units. */
+  supplyValue: bigint;
+  /** Underlying value of the collateral bucket, base units. */
+  collateralValue: bigint;
   /** Underlying value of both balances at the current b_rate, base units. */
   underlyingValue: bigint;
   /** Underlying owed on borrows against this reserve at the current d_rate. */
@@ -234,13 +271,14 @@ export function blendPositionFor(
   const supplyBTokens = positions.supply.get(index) ?? 0n;
   const collateralBTokens = positions.collateral.get(index) ?? 0n;
   const dTokens = positions.liabilities.get(index) ?? 0n;
+  const supplyValue = blendAssetsFromBTokens(supplyBTokens, reserve.data.bRate);
+  const collateralValue = blendAssetsFromBTokens(collateralBTokens, reserve.data.bRate);
   return {
     supplyBTokens,
     collateralBTokens,
-    underlyingValue: blendAssetsFromBTokens(
-      supplyBTokens + collateralBTokens,
-      reserve.data.bRate,
-    ),
+    supplyValue,
+    collateralValue,
+    underlyingValue: supplyValue + collateralValue,
     borrowedValue: blendAssetsFromDTokens(dTokens, reserve.data.dRate),
   };
 }

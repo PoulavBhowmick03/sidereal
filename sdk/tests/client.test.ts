@@ -81,7 +81,8 @@ vi.mock("@stellar/stellar-sdk", () => {
       if (state.simulationError) return { error: state.simulationError };
       return { result: { retval: state.returns[op.method] } };
     }
-    async prepareTransaction(tx: { ops: Array<{ method: string }> }) {
+    async prepareTransaction(tx: { ops: Array<{ method: string; args: unknown[] }> }) {
+      for (const op of tx.ops) state.calls.push({ method: op.method, args: op.args });
       return { toXDR: () => "PREPARED:" + tx.ops.map((o) => o.method).join("+") };
     }
     async sendTransaction() {
@@ -92,7 +93,9 @@ vi.mock("@stellar/stellar-sdk", () => {
     }
   }
 
-  return { Contract, Address, nativeToScVal, scValToNative, TransactionBuilder, rpc: { Server, Api } };
+  const xdr = { ScVal: { scvVec: (items: unknown[]) => ({ __scVec: items }) } };
+
+  return { Contract, Address, nativeToScVal, scValToNative, TransactionBuilder, rpc: { Server, Api }, xdr };
 });
 
 import { StellarYT } from "../src/index.js";
@@ -347,5 +350,54 @@ describe("submit", () => {
     // After confirmation it re-reads the signer account so a follow-up build
     // (e.g. split after deposit) cannot pick up a stale sequence (txBadSeq).
     expect(state().accountRequests).toContain("GSIGNERSOURCE");
+  });
+});
+
+describe("buildBlendWithdraw", () => {
+  it("submits from, spender, and to as the holder with one request per bucket", async () => {
+    const env = await newClient().buildBlendWithdraw({
+      from: "GUSER",
+      pool: "POOL",
+      asset: "USDC",
+      supplyAmount: 5n,
+      collateralAmount: 7n,
+    });
+    expect(env.xdr).toBe("PREPARED:submit");
+
+    const call = state().calls.find((c) => c.method === "submit");
+    expect(call).toBeDefined();
+    const [from, spender, to, requests] = call!.args as [
+      { __scAddress: string },
+      { __scAddress: string },
+      { __scAddress: string },
+      { __scVec: unknown[] },
+    ];
+    expect(from.__scAddress).toBe("GUSER");
+    expect(spender.__scAddress).toBe("GUSER");
+    expect(to.__scAddress).toBe("GUSER");
+    expect(requests.__scVec).toHaveLength(2);
+  });
+
+  it("skips empty buckets and rejects an all-zero withdraw", async () => {
+    const env = await newClient().buildBlendWithdraw({
+      from: "GUSER",
+      pool: "POOL",
+      asset: "USDC",
+      supplyAmount: 0n,
+      collateralAmount: 7n,
+    });
+    expect(env.xdr).toBe("PREPARED:submit");
+    const call = state().calls.find((c) => c.method === "submit");
+    expect((call!.args[3] as { __scVec: unknown[] }).__scVec).toHaveLength(1);
+
+    await expect(
+      newClient().buildBlendWithdraw({
+        from: "GUSER",
+        pool: "POOL",
+        asset: "USDC",
+        supplyAmount: 0n,
+        collateralAmount: 0n,
+      }),
+    ).rejects.toThrow(/nothing to withdraw/);
   });
 });

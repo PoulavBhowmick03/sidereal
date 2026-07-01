@@ -3,6 +3,10 @@
 export { StellarYT } from "./client.js";
 export { ContractError, parseContractErrorCode } from "./errors.js";
 export {
+  BLEND_REQUEST_SUPPLY,
+  BLEND_REQUEST_SUPPLY_COLLATERAL,
+  BLEND_REQUEST_WITHDRAW,
+  BLEND_REQUEST_WITHDRAW_COLLATERAL,
   BLEND_SCALAR_7,
   BLEND_SCALAR_12,
   blendAssetsFromBTokens,
@@ -15,6 +19,7 @@ export {
   blendUtilization,
   decodeBlendPositions,
   decodeBlendReserve,
+  encodeBlendRequest,
 } from "./blend.js";
 export type {
   BlendPosition,
@@ -29,6 +34,7 @@ export type { MarketMethod, QuoteMethod } from "./routes.js";
 export { WAD, BPS_DENOMINATOR } from "./types.js";
 export type {
   Asset,
+  BlendWithdrawArgs,
   ContractAddresses,
   StellarYTOptions,
   MarketState,

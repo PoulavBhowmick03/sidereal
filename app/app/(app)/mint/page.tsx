@@ -21,6 +21,8 @@ import { SubmitButton } from "@/components/SubmitButton";
 import { TxStatus } from "@/components/TxStatus";
 import { MaturityBadge } from "@/components/MaturityBadge";
 import { YieldSourceCard } from "@/components/YieldSourceCard";
+import { TokenizeBlendPanel } from "@/components/TokenizeBlendPanel";
+import { useBlendPosition } from "@/lib/useBlendPosition";
 
 const MINT_MODES = [
   { id: "deposit", label: "Deposit SY" },
@@ -36,6 +38,7 @@ export default function MintPage() {
   const market = useMarket();
   const blendRates = useBlendRates();
   const position = usePosition(address, phase.kind === "done" ? phase.hash : 0);
+  const blendPosition = useBlendPosition(address, phase.kind === "done" ? phase.hash : 0);
   const split = mode === "split";
 
   // Preview the deposit and split using the contract's own math:
@@ -114,6 +117,17 @@ export default function MintPage() {
       </header>
 
       <PositionCard position={position} decimals={cfg.decimals} />
+
+      <TokenizeBlendPanel
+        cfg={cfg}
+        client={client}
+        address={address}
+        market={market}
+        position={blendPosition}
+        rates={blendRates}
+        phase={phase}
+        submitSequence={submitSequence}
+      />
 
       <div className="grid gap-10 lg:grid-cols-12">
         {/* Deposit form */}

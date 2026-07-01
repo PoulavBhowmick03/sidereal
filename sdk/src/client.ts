@@ -8,9 +8,11 @@ import {
   nativeToScVal,
   Address,
   StrKey,
+  xdr,
 } from "@stellar/stellar-sdk";
 import type {
   AddLiquidityArgs,
+  BlendWithdrawArgs,
   ContractAddresses,
   MarketState,
   MintArgs,
@@ -29,8 +31,11 @@ import { BPS_DENOMINATOR } from "./types.js";
 import { marketMethodFor, quoteMethodFor, priceImpactBps, secondsToMaturity } from "./routes.js";
 import { ContractError, parseContractErrorCode } from "./errors.js";
 import {
+  BLEND_REQUEST_WITHDRAW,
+  BLEND_REQUEST_WITHDRAW_COLLATERAL,
   blendPositionFor,
   blendRates,
+  encodeBlendRequest,
   decodeBlendPositions,
   decodeBlendReserve,
   type BlendPosition,
@@ -304,6 +309,40 @@ export class StellarYT {
       "redeem",
       new Address(args.from).toScVal(),
       nativeToScVal(args.syAmount, { type: "i128" }),
+    );
+    return this.buildEnvelope(args.from, [op]);
+  }
+
+  /**
+   * Builds a user-signed withdraw from a Blend pool, the first step of
+   * migrating an existing Blend deposit into the protocol (Blend bTokens are
+   * not transferable, so a position moves by withdraw-then-deposit). Liquid
+   * supply and posted collateral are separate buckets with separate request
+   * types; both can be drained in one transaction. The pool clamps each
+   * request to the holder's actual balance, and a withdraw can return less
+   * than requested when pool liquidity is tight, so the follow-up deposit must
+   * be sized from the wallet balance after this confirms, not from the request.
+   */
+  async buildBlendWithdraw(args: BlendWithdrawArgs): Promise<TransactionEnvelope> {
+    const requests: xdr.ScVal[] = [];
+    if (args.supplyAmount > 0n) {
+      requests.push(encodeBlendRequest(args.asset, BLEND_REQUEST_WITHDRAW, args.supplyAmount));
+    }
+    if (args.collateralAmount > 0n) {
+      requests.push(
+        encodeBlendRequest(args.asset, BLEND_REQUEST_WITHDRAW_COLLATERAL, args.collateralAmount),
+      );
+    }
+    if (requests.length === 0) {
+      throw new Error("nothing to withdraw: both bucket amounts are zero");
+    }
+    const from = new Address(args.from).toScVal();
+    const op = new Contract(args.pool).call(
+      "submit",
+      from,
+      from,
+      from,
+      xdr.ScVal.scvVec(requests),
     );
     return this.buildEnvelope(args.from, [op]);
   }

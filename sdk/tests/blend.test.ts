@@ -1,6 +1,12 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
+import { scValToNative, xdr } from "@stellar/stellar-sdk";
+import {
+  BLEND_REQUEST_WITHDRAW,
+  BLEND_REQUEST_WITHDRAW_COLLATERAL,
+  encodeBlendRequest,
+} from "../src/blend.js";
 import {
   BLEND_SCALAR_7,
   BLEND_SCALAR_12,
@@ -159,6 +165,31 @@ describe("blendAssetsFromBTokens", () => {
   });
 });
 
+describe("encodeBlendRequest", () => {
+  // Uses the real @stellar/stellar-sdk (unlike client.test.ts, which mocks
+  // it), so this pins the actual on-wire encoding pool.submit will receive.
+  const ASSET = "CAQCFVLOBK5GIULPNZRGATJJMIZL5BSP7X5YJVMGCPTUEPFM4AVSRCJU";
+
+  it("encodes a symbol-keyed struct map that round-trips to native", () => {
+    const scv = encodeBlendRequest(ASSET, BLEND_REQUEST_WITHDRAW, 123n);
+    expect(scv.switch()).toBe(xdr.ScValType.scvMap());
+    for (const entry of scv.map() ?? []) {
+      expect(entry.key().switch()).toBe(xdr.ScValType.scvSymbol());
+    }
+
+    const native = scValToNative(scv) as Record<string, unknown>;
+    expect(native.address).toBe(ASSET);
+    expect(native.amount).toBe(123n);
+    expect(native.request_type).toBe(BLEND_REQUEST_WITHDRAW);
+  });
+
+  it("keeps map keys sorted as Soroban requires", () => {
+    const scv = encodeBlendRequest(ASSET, BLEND_REQUEST_WITHDRAW_COLLATERAL, 1n);
+    const keys = (scv.map() ?? []).map((e) => e.key().sym().toString());
+    expect(keys).toEqual(["address", "amount", "request_type"]);
+  });
+});
+
 describe("blend positions", () => {
   const reserve: BlendReserve = {
     asset: "C_ASSET",
@@ -197,7 +228,9 @@ describe("blend positions", () => {
     );
     expect(position.supplyBTokens).toBe(100_0000000n);
     expect(position.collateralBTokens).toBe(50_0000000n);
-    expect(position.underlyingValue).toBe(165_0000000n); // 150 bTokens * 1.10
+    expect(position.supplyValue).toBe(110_0000000n); // 100 bTokens * 1.10
+    expect(position.collateralValue).toBe(55_0000000n); // 50 bTokens * 1.10
+    expect(position.underlyingValue).toBe(165_0000000n); // sum of both buckets
     expect(position.borrowedValue).toBe(12_0000000n); // 10 dTokens * 1.20
   });
 
