@@ -13,7 +13,7 @@ A protocol that takes a yield-bearing asset on Stellar and splits it into two tr
 - **PT (Principal Token)**, redeems for its principal in the underlying at maturity (`amount * WAD / maturity_rate` of SY). Buy at a discount, hold to maturity, lock in a fixed yield.
 - **YT (Yield Token)**, claims all the variable yield the underlying generates between now and maturity, paid in SY out of escrow on claim. Expires worthless at maturity.
 
-The yield source is pluggable behind the SY wrapper's exchange rate. For testnet the rate is admin-controlled (a mock); wiring it to a real source ([Blend](https://docs.blend.capital/) USDC, or a DeFindex 4626-style vault) is a future milestone, not yet in the code.
+The SY wrapper supports idle mock custody for contract tests and live [Blend](https://docs.blend.capital/) v2 plain-supply custody for testnet. Blend-backed wrappers derive their read-only exchange rate from the wrapper's bToken position and reject the admin rate setter.
 
 `PT + YT = SY` (Standardized Yield) at all times. You can always recombine.
 

@@ -624,6 +624,20 @@
                           },
                           {
                             "key": {
+                              "symbol": "pool"
+                            },
+                            "val": "void"
+                          },
+                          {
+                            "key": {
+                              "symbol": "reserve_index"
+                            },
+                            "val": {
+                              "u32": 0
+                            }
+                          },
+                          {
+                            "key": {
                               "symbol": "underlying"
                             },
                             "val": {

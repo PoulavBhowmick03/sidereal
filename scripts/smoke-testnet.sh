@@ -183,9 +183,15 @@ log "Deployer: $ADMIN"
 log "Throwaway market maturity: $MATURITY (now + ${TERM_SECONDS}s)"
 
 # --- underlying SAC (deploy or reuse the deployer's test USDC) ---------------
-UNDERLYING="$(retry_out "deploy underlying SAC" contract asset deploy \
-  --asset "USDC:$ADMIN" --source "$IDENTITY" --network "$NETWORK")"
+# The SAC address is deterministic from the asset + network passphrase, so derive
+# it independently rather than capturing the deploy's stdout. retry_out's
+# "already applied" path (a timed-out submit that landed, or a pre-existing SAC
+# reporting Error(Storage, ExistingValue)) returns success with empty stdout,
+# which previously left UNDERLYING blank and broke SY initialize.
+retry_out "deploy underlying SAC" contract asset deploy \
+  --asset "USDC:$ADMIN" --source "$IDENTITY" --network "$NETWORK" >/dev/null
 settle
+UNDERLYING="$(stellar contract id asset --asset "USDC:$ADMIN" --network "$NETWORK")"
 log "Underlying USDC SAC: $UNDERLYING"
 
 # --- deploy a fresh market ---------------------------------------------------

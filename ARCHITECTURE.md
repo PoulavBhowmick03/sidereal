@@ -147,7 +147,7 @@ rate, so a post-maturity rate move cannot change what PT redeems for. YT freezes
 accrual at maturity the same way, so no yield accrues after the term ends;
 post-maturity YT claims remain open (a grace window) and pay at the maturity
 rate. This assumes the SY rate is flat after maturity, which holds for a real
-yield source (accrual stops at maturity) and, for the current admin-set mock
+yield source (accrual stops at maturity) and, for the test-only admin-set mock
 rate, requires the admin not to bump it post-expiry.
 
 **Storage.** YT per-holder yield state is two persistent entries keyed by holder

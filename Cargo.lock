@@ -1488,10 +1488,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "sidereal-blend-adapter"
+version = "0.1.0"
+dependencies = [
+ "soroban-sdk",
+]
+
+[[package]]
 name = "sidereal-integration-tests"
 version = "0.1.0"
 dependencies = [
  "sidereal-amm",
+ "sidereal-blend-adapter",
  "sidereal-pt-token",
  "sidereal-shared-types",
  "sidereal-sy-wrapper",
@@ -1518,6 +1526,7 @@ dependencies = [
 name = "sidereal-sy-wrapper"
 version = "0.1.0"
 dependencies = [
+ "sidereal-blend-adapter",
  "sidereal-shared-types",
  "soroban-sdk",
 ]

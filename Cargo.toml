@@ -5,6 +5,7 @@ resolver = "2"
 # All contract crates plus the shared interface, integrated across columns.
 members = [
     "contracts/amm",
+    "contracts/blend-adapter",
     "contracts/pt-token",
     "contracts/sy-wrapper",
     "contracts/shared/types",
