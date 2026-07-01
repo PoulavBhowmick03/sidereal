@@ -12,6 +12,7 @@ type DemoTask = "auth" | "amm-routes" | "frontend-proof";
 interface DemoRequest {
   task?: DemoTask;
   async?: boolean;
+  maturity?: number;
 }
 
 interface TaskConfig {
@@ -117,7 +118,22 @@ async function proxyDemoRequest(request: Request): Promise<Response | null> {
   });
 }
 
-function taskConfig(task: DemoTask): TaskConfig {
+function validatedMaturity(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "number" || !Number.isInteger(value)) {
+    throw new Error("Maturity must be a Unix timestamp in seconds");
+  }
+  const now = Math.floor(Date.now() / 1000);
+  if (value <= now + 60) {
+    throw new Error("Maturity must be at least 60 seconds in the future");
+  }
+  if (value > now + 5 * 365 * 24 * 60 * 60) {
+    throw new Error("Maturity must be within five years");
+  }
+  return String(value);
+}
+
+function taskConfig(task: DemoTask, opts: { maturity?: string | null } = {}): TaskConfig {
   switch (task) {
     case "auth":
       return {
@@ -134,6 +150,7 @@ function taskConfig(task: DemoTask): TaskConfig {
         env: {
           DEPLOY_IDENTITY: process.env.DEPLOY_IDENTITY ?? "sidereal-smoke",
           SETTLE_SECONDS: process.env.SETTLE_SECONDS ?? "4",
+          ...(opts.maturity ? { MATURITY: opts.maturity } : {}),
         },
         timeoutMs: 20 * 60_000,
       };
@@ -286,7 +303,17 @@ export async function POST(request: Request) {
     return noStoreJson({ ok: false, error: "Unknown demo task" }, { status: 400 });
   }
 
-  const config = taskConfig(task);
+  let maturity: string | null = null;
+  try {
+    maturity = task === "amm-routes" ? validatedMaturity(body.maturity) : null;
+  } catch (error) {
+    return noStoreJson(
+      { ok: false, error: error instanceof Error ? error.message : String(error) },
+      { status: 400 },
+    );
+  }
+
+  const config = taskConfig(task, { maturity });
   const state = demoGlobal();
   if (state.__siderealActiveDemoTask) {
     return noStoreJson(

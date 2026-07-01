@@ -54,6 +54,7 @@ test("demo page exposes the automated proof runner without starting it", async (
   await page.goto("/demo?manual=1");
   await expect(page.getByRole("heading", { name: "Demo", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /run full demo/i })).toBeVisible();
+  await expect(page.getByLabel("Maturity date")).toBeVisible();
   for (const label of ["Auth invariant", "Live AMM proof"]) {
     await expect(page.getByRole("heading", { name: label })).toBeVisible();
   }

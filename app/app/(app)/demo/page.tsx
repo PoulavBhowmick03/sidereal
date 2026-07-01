@@ -92,6 +92,7 @@ const TASK_TIMEOUT_MS: Record<DemoTaskId, number> = {
   "amm-routes": 25 * 60_000,
 };
 const STELLAR_EXPERT_TESTNET = "https://stellar.expert/explorer/testnet";
+const DEFAULT_TERM_SECONDS = 90 * 24 * 60 * 60;
 
 function duration(ms?: number): string {
   if (ms === undefined) return "";
@@ -177,6 +178,35 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+function pad(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function datetimeLocalValue(date: Date): string {
+  return [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+  ].join("-") + `T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function defaultMaturityInput(): string {
+  return datetimeLocalValue(new Date(Date.now() + DEFAULT_TERM_SECONDS * 1000));
+}
+
+function parseMaturityInput(value: string): number | null {
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? Math.floor(ms / 1000) : null;
+}
+
+function maturityError(value: number | null): string | null {
+  if (value === null) return "Select a valid maturity date.";
+  const now = Math.floor(Date.now() / 1000);
+  if (value <= now + 60) return "Maturity must be at least 60 seconds in the future.";
+  if (value > now + 5 * 365 * 24 * 60 * 60) return "Maturity must be within five years.";
+  return null;
+}
+
 async function detectDemoRunnerAvailable(): Promise<boolean> {
   try {
     const response = await fetch("/api/demo", { cache: "no-store" });
@@ -216,6 +246,7 @@ export default function DemoPage() {
   const [running, setRunning] = useState(false);
   const [logs, setLogs] = useState<DemoLogEntry[]>([]);
   const [runnerAvailability, setRunnerAvailability] = useState<DemoRunnerAvailability>("checking");
+  const [maturityInput, setMaturityInput] = useState("");
 
   useEffect(() => {
     let mounted = true;
@@ -227,12 +258,24 @@ export default function DemoPage() {
     };
   }, []);
 
+  useEffect(() => {
+    setMaturityInput(defaultMaturityInput());
+  }, []);
+
   const allPassed = useMemo(
     () => STEPS.every((step) => statuses[step.id] === "passed"),
     [statuses],
   );
 
   const runnerAvailable = runnerAvailability === "available";
+  const selectedMaturity = useMemo(() => parseMaturityInput(maturityInput), [maturityInput]);
+  const selectedMaturityError = useMemo(() => maturityError(selectedMaturity), [selectedMaturity]);
+  const selectedMaturityLabel = selectedMaturity
+    ? new Date(selectedMaturity * 1000).toLocaleString([], {
+        dateStyle: "medium",
+        timeStyle: "short",
+      })
+    : "n/a";
 
   const failedStep = useMemo(
     () => STEPS.find((step) => statuses[step.id] === "failed"),
@@ -369,6 +412,10 @@ export default function DemoPage() {
       );
       return;
     }
+    if (selectedMaturityError || selectedMaturity === null) {
+      appendLog("error", "Maturity is invalid", selectedMaturityError ?? "Select a valid maturity date.");
+      return;
+    }
     if (running || started.current || window.__siderealDemoStarted) return;
     started.current = true;
     window.__siderealDemoStarted = true;
@@ -396,7 +443,11 @@ export default function DemoPage() {
         const response = await fetch("/api/demo", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ task: step.id, async: true }),
+          body: JSON.stringify({
+            task: step.id,
+            async: true,
+            ...(step.id === "amm-routes" ? { maturity: selectedMaturity } : {}),
+          }),
         });
         const start = (await response.json().catch(() => ({ ok: false, error: "Demo API did not return JSON" }))) as
           Partial<DemoResult> & { started?: boolean; error?: string };
@@ -454,7 +505,15 @@ export default function DemoPage() {
     }
     if (finished) appendLog("info", "Demo complete");
     setRunning(false);
-  }, [appendLog, appendStreamOutput, runnerAvailable, running, waitForTaskResult]);
+  }, [
+    appendLog,
+    appendStreamOutput,
+    runnerAvailable,
+    running,
+    selectedMaturity,
+    selectedMaturityError,
+    waitForTaskResult,
+  ]);
 
   const current = results[activeOutput];
   const proofOutput = liveOutputs["amm-routes"]?.stdout || results["amm-routes"]?.stdout || "";
@@ -515,7 +574,7 @@ export default function DemoPage() {
         <button
           type="button"
           onClick={() => void runAll()}
-          disabled={hasStarted || !runnerAvailable}
+          disabled={hasStarted || !runnerAvailable || selectedMaturityError !== null}
           className="btn-solid w-full lg:w-auto"
         >
           {running ? (
@@ -537,6 +596,40 @@ export default function DemoPage() {
                     : "Run full demo"}
         </button>
       </header>
+
+      <section className="panel-subtle p-5">
+        <div className="grid gap-5 lg:grid-cols-[1fr_1.2fr] lg:items-end">
+          <div className="space-y-2">
+            <p className="label-data">Deployment maturity</p>
+            <p className="text-sm text-smoke">
+              The Live AMM proof deploys a fresh market with this maturity. Existing deployed
+              markets keep their original contract maturity.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+            <label className="block">
+              <span className="label-data">Maturity date</span>
+              <input
+                type="datetime-local"
+                value={maturityInput}
+                onChange={(event) => setMaturityInput(event.target.value)}
+                disabled={hasStarted}
+                className="field"
+              />
+            </label>
+            <div className="min-w-[220px] rounded-none border border-white/10 bg-carbon px-4 py-3">
+              <p className="label-data">Selected</p>
+              <p className="mt-1 text-sm tabular-nums text-paper">{selectedMaturityLabel}</p>
+              <p className="mt-1 font-mono text-[12px] text-ash">
+                {selectedMaturity ? `unix ${selectedMaturity}` : "unix n/a"}
+              </p>
+            </div>
+          </div>
+        </div>
+        {selectedMaturityError ? (
+          <p className="mt-3 text-sm text-red-300">{selectedMaturityError}</p>
+        ) : null}
+      </section>
 
       <section className="panel-subtle p-5">
         <p className="label-data">What this demo proves</p>
