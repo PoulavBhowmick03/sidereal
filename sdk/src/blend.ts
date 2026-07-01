@@ -182,6 +182,70 @@ export function blendRateToBps(rate: bigint): bigint {
 }
 
 /**
+ * A holder's raw token maps from `pool.get_positions(address)`, keyed by
+ * reserve index. Blend splits deposits between liquid supply (RequestType
+ * Supply) and posted collateral (RequestType SupplyCollateral); Blend's own
+ * app supplies as collateral by default, so a typical lender's balance is in
+ * `collateral`, not `supply`. Both earn the same b_rate interest.
+ */
+export interface BlendPositions {
+  supply: ReadonlyMap<number, bigint>;
+  collateral: ReadonlyMap<number, bigint>;
+  liabilities: ReadonlyMap<number, bigint>;
+}
+
+/** A holder's position in one Blend reserve, valued at the current indexes. */
+export interface BlendPosition {
+  /** bTokens held as liquid supply (withdrawable with RequestType Withdraw). */
+  supplyBTokens: bigint;
+  /** bTokens posted as collateral (needs RequestType WithdrawCollateral). */
+  collateralBTokens: bigint;
+  /** Underlying value of both balances at the current b_rate, base units. */
+  underlyingValue: bigint;
+  /** Underlying owed on borrows against this reserve at the current d_rate. */
+  borrowedValue: bigint;
+}
+
+/**
+ * Decodes the plain object `scValToNative` produces for Blend's `Positions`
+ * struct. Soroban `Map<u32, i128>` arrives as an object with stringified
+ * numeric keys, so normalize into real maps.
+ */
+export function decodeBlendPositions(raw: {
+  supply: Record<string, bigint>;
+  collateral: Record<string, bigint>;
+  liabilities: Record<string, bigint>;
+}): BlendPositions {
+  const toMap = (entries: Record<string, bigint>): Map<number, bigint> =>
+    new Map(Object.entries(entries ?? {}).map(([k, v]) => [Number(k), BigInt(v)]));
+  return {
+    supply: toMap(raw.supply),
+    collateral: toMap(raw.collateral),
+    liabilities: toMap(raw.liabilities),
+  };
+}
+
+/** Values a holder's balances in `reserve` at the current interest indexes. */
+export function blendPositionFor(
+  reserve: BlendReserve,
+  positions: BlendPositions,
+): BlendPosition {
+  const index = reserve.config.index;
+  const supplyBTokens = positions.supply.get(index) ?? 0n;
+  const collateralBTokens = positions.collateral.get(index) ?? 0n;
+  const dTokens = positions.liabilities.get(index) ?? 0n;
+  return {
+    supplyBTokens,
+    collateralBTokens,
+    underlyingValue: blendAssetsFromBTokens(
+      supplyBTokens + collateralBTokens,
+      reserve.data.bRate,
+    ),
+    borrowedValue: blendAssetsFromDTokens(dTokens, reserve.data.dRate),
+  };
+}
+
+/**
  * Decodes the plain object `scValToNative` produces for a Blend `Reserve`
  * struct (snake_case keys, u32 as number, i128 as bigint) into the typed
  * shape above. Field meanings are pinned by contracts/blend-adapter.

@@ -6,10 +6,12 @@ import {
   BLEND_SCALAR_12,
   blendAssetsFromBTokens,
   blendBorrowApr,
+  blendPositionFor,
   blendRates,
   blendRateToBps,
   blendSupplyApr,
   blendUtilization,
+  decodeBlendPositions,
   decodeBlendReserve,
   type BlendReserve,
 } from "../src/blend.js";
@@ -154,5 +156,57 @@ describe("blendAssetsFromBTokens", () => {
     expect(blendAssetsFromBTokens(100_0000000n, BLEND_SCALAR_12)).toBe(100_0000000n);
     expect(blendAssetsFromBTokens(100_0000000n, 1_100_000_000_000n)).toBe(110_0000000n);
     expect(blendAssetsFromBTokens(1n, 1_999_999_999_999n)).toBe(1n);
+  });
+});
+
+describe("blend positions", () => {
+  const reserve: BlendReserve = {
+    asset: "C_ASSET",
+    config: { index: 3, decimals: 7, maxUtil: 9_500_000n, ...CURVE },
+    data: {
+      bRate: 1_100_000_000_000n, // 1.10
+      bSupply: 0n,
+      dRate: 1_200_000_000_000n, // 1.20
+      dSupply: 0n,
+      irMod: BLEND_SCALAR_7,
+      lastTime: 0n,
+    },
+  };
+
+  it("decodes scValToNative's stringified u32 map keys", () => {
+    const positions = decodeBlendPositions({
+      supply: { "3": 100_0000000n },
+      collateral: { "3": 50_0000000n, "1": 7_0000000n },
+      liabilities: {},
+    });
+    expect(positions.supply.get(3)).toBe(100_0000000n);
+    expect(positions.collateral.get(3)).toBe(50_0000000n);
+    expect(positions.collateral.get(1)).toBe(7_0000000n);
+    expect(positions.liabilities.size).toBe(0);
+  });
+
+  it("values supply plus collateral at b_rate and borrows at d_rate", () => {
+    // Blend's app supplies as collateral by default, so both buckets count.
+    const position = blendPositionFor(
+      reserve,
+      decodeBlendPositions({
+        supply: { "3": 100_0000000n },
+        collateral: { "3": 50_0000000n },
+        liabilities: { "3": 10_0000000n },
+      }),
+    );
+    expect(position.supplyBTokens).toBe(100_0000000n);
+    expect(position.collateralBTokens).toBe(50_0000000n);
+    expect(position.underlyingValue).toBe(165_0000000n); // 150 bTokens * 1.10
+    expect(position.borrowedValue).toBe(12_0000000n); // 10 dTokens * 1.20
+  });
+
+  it("is empty for a holder with no balances in this reserve", () => {
+    const position = blendPositionFor(
+      reserve,
+      decodeBlendPositions({ supply: {}, collateral: { "1": 5n }, liabilities: {} }),
+    );
+    expect(position.underlyingValue).toBe(0n);
+    expect(position.borrowedValue).toBe(0n);
   });
 });

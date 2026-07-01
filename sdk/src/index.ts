@@ -8,13 +8,22 @@ export {
   blendAssetsFromBTokens,
   blendAssetsFromDTokens,
   blendBorrowApr,
+  blendPositionFor,
   blendRates,
   blendRateToBps,
   blendSupplyApr,
   blendUtilization,
+  decodeBlendPositions,
   decodeBlendReserve,
 } from "./blend.js";
-export type { BlendRates, BlendReserve, BlendReserveConfig, BlendReserveData } from "./blend.js";
+export type {
+  BlendPosition,
+  BlendPositions,
+  BlendRates,
+  BlendReserve,
+  BlendReserveConfig,
+  BlendReserveData,
+} from "./blend.js";
 export { marketMethodFor, quoteMethodFor, priceImpactBps, secondsToMaturity } from "./routes.js";
 export type { MarketMethod, QuoteMethod } from "./routes.js";
 export { WAD, BPS_DENOMINATOR } from "./types.js";

@@ -22,6 +22,8 @@ import { SubmitButton } from "@/components/SubmitButton";
 import { TxStatus } from "@/components/TxStatus";
 import { MaturityBadge } from "@/components/MaturityBadge";
 import { YieldSourceCard } from "@/components/YieldSourceCard";
+import { BlendPositionCard } from "@/components/BlendPositionCard";
+import { useBlendPosition } from "@/lib/useBlendPosition";
 
 // The Portfolio page IS the redeem surface: holdings and maturity context up
 // top, then the three independent actions (claim yield, recombine/redeem PT,
@@ -37,6 +39,7 @@ export default function PortfolioPage() {
   const market = useMarket();
   const blendRates = useBlendRates();
   const position = usePosition(address, phase.kind === "done" ? phase.hash : 0);
+  const blendPosition = useBlendPosition(address, phase.kind === "done" ? phase.hash : 0);
 
   const matured = market !== null && market.secondsToMaturity === 0;
 
@@ -106,6 +109,13 @@ export default function PortfolioPage() {
         </p>
         <MaturityBadge maturity={market?.maturity ?? null} />
       </header>
+
+      <BlendPositionCard
+        source={cfg.yieldSource}
+        position={blendPosition}
+        rates={blendRates}
+        decimals={cfg.decimals}
+      />
 
       <PositionCard position={position} decimals={cfg.decimals} />
 

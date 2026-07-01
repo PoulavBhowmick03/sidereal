@@ -28,7 +28,14 @@ import type {
 import { BPS_DENOMINATOR } from "./types.js";
 import { marketMethodFor, quoteMethodFor, priceImpactBps, secondsToMaturity } from "./routes.js";
 import { ContractError, parseContractErrorCode } from "./errors.js";
-import { blendRates, decodeBlendReserve, type BlendRates } from "./blend.js";
+import {
+  blendPositionFor,
+  blendRates,
+  decodeBlendPositions,
+  decodeBlendReserve,
+  type BlendPosition,
+  type BlendRates,
+} from "./blend.js";
 
 type Operation = ReturnType<Contract["call"]>;
 type SourceAccount = Awaited<ReturnType<rpc.Server["getAccount"]>>;
@@ -198,6 +205,25 @@ export class StellarYT {
       this.simulateRead<{ bstop_rate: number }>(poolContract.call("get_config")),
     ]);
     return blendRates(decodeBlendReserve(reserveRaw), BigInt(poolConfig.bstop_rate));
+  }
+
+  /**
+   * Reads a holder's existing position in a Blend reserve, valued at the
+   * current interest indexes. This is how a Blend lender sees the deposit
+   * they could tokenize: supply and collateral bTokens both earn b_rate, but
+   * they migrate with different withdraw request types, so both are reported.
+   */
+  async getBlendPosition(pool: string, asset: string, holder: string): Promise<BlendPosition> {
+    const poolContract = new Contract(pool);
+    const [reserveRaw, positionsRaw] = await Promise.all([
+      this.simulateRead<Parameters<typeof decodeBlendReserve>[0]>(
+        poolContract.call("get_reserve", new Address(asset).toScVal()),
+      ),
+      this.simulateRead<Parameters<typeof decodeBlendPositions>[0]>(
+        poolContract.call("get_positions", new Address(holder).toScVal()),
+      ),
+    ]);
+    return blendPositionFor(decodeBlendReserve(reserveRaw), decodeBlendPositions(positionsRaw));
   }
 
   /**
