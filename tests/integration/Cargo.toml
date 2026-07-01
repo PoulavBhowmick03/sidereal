@@ -12,6 +12,7 @@ doctest = false
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
+sidereal-blend-adapter = { path = "../../contracts/blend-adapter" }
 sidereal-shared-types = { path = "../../contracts/shared/types" }
 sidereal-sy-wrapper = { path = "../../contracts/sy-wrapper" }
 sidereal-pt-token = { path = "../../contracts/pt-token" }

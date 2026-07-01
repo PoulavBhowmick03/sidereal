@@ -13,6 +13,7 @@ publish = false
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+sidereal-blend-adapter = { path = "../blend-adapter" }
 sidereal-shared-types = { path = "../shared/types" }
 soroban-sdk.workspace = true
 

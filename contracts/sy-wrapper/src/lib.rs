@@ -2,6 +2,10 @@
 
 #![cfg_attr(target_family = "wasm", no_std)]
 
+use sidereal_blend_adapter::{
+    assets_from_b_tokens, derived_exchange_rate, BlendPoolClient, Request, REQUEST_SUPPLY,
+    REQUEST_WITHDRAW,
+};
 use sidereal_shared_types::StandardizedYield;
 use soroban_sdk::{
     auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
@@ -25,6 +29,8 @@ const TTL_EXTEND_TO_LEDGERS: u32 = 120 * LEDGERS_PER_DAY;
 pub struct Config {
     pub admin: Address,
     pub underlying: Address,
+    pub pool: Option<Address>,
+    pub reserve_index: u32,
 }
 
 #[derive(Clone)]
@@ -59,6 +65,8 @@ pub enum Error {
     MathOverflow = 6,
     InsufficientAllowance = 7,
     InvalidExpiration = 8,
+    ReadOnlyExchangeRate = 9,
+    InvalidBlendReserve = 10,
 }
 
 #[contract]
@@ -67,17 +75,52 @@ pub struct SyWrapper;
 #[contractimpl]
 impl SyWrapper {
     pub fn initialize(env: Env, admin: Address, underlying: Address) -> Result<(), Error> {
+        Self::initialize_with_config(
+            &env,
+            admin,
+            underlying,
+            None,
+            0,
+        )
+    }
+
+    /// Initializes a production wrapper whose custody and exchange rate are
+    /// backed by a Blend v2 plain-supply position.
+    pub fn initialize_blend(
+        env: Env,
+        admin: Address,
+        underlying: Address,
+        pool: Address,
+    ) -> Result<(), Error> {
         if env.storage().instance().has(&DataKey::Config) {
             return Err(Error::AlreadyInitialized);
         }
-
         admin.require_auth();
 
-        let config = Config { admin, underlying };
-        env.storage().instance().set(&DataKey::Config, &config);
-        env.storage().instance().set(&DataKey::ExchangeRate, &WAD);
-        env.storage().instance().set(&DataKey::TotalSupply, &0_i128);
+        let pool_client = BlendPoolClient::new(&env, &pool);
+        let reserves = pool_client.get_reserve_list();
+        let mut reserve_index = None;
+        for (index, asset) in reserves.iter().enumerate() {
+            if asset == underlying {
+                reserve_index = Some(index as u32);
+                break;
+            }
+        }
+        let reserve_index = reserve_index.ok_or(Error::InvalidBlendReserve)?;
+        let reserve = pool_client.get_reserve(&underlying);
+        if reserve.config.index != reserve_index || reserve.config.decimals != DECIMALS {
+            return Err(Error::InvalidBlendReserve);
+        }
 
+        Self::write_initial_config(
+            &env,
+            Config {
+                admin,
+                underlying,
+                pool: Some(pool),
+                reserve_index,
+            },
+        );
         Ok(())
     }
 
@@ -90,6 +133,9 @@ impl SyWrapper {
         admin.require_auth();
         if admin != config.admin {
             return Err(Error::NotInitialized);
+        }
+        if config.pool.is_some() {
+            return Err(Error::ReadOnlyExchangeRate);
         }
         Self::require_exchange_rate(exchange_rate)?;
         Self::bump_instance_ttl(&env);
@@ -183,6 +229,35 @@ impl SyWrapper {
             .instance()
             .get(&DataKey::Config)
             .ok_or(Error::NotInitialized)
+    }
+
+    fn initialize_with_config(
+        env: &Env,
+        admin: Address,
+        underlying: Address,
+        pool: Option<Address>,
+        reserve_index: u32,
+    ) -> Result<(), Error> {
+        if env.storage().instance().has(&DataKey::Config) {
+            return Err(Error::AlreadyInitialized);
+        }
+        admin.require_auth();
+        Self::write_initial_config(
+            env,
+            Config {
+                admin,
+                underlying,
+                pool,
+                reserve_index,
+            },
+        );
+        Ok(())
+    }
+
+    fn write_initial_config(env: &Env, config: Config) {
+        env.storage().instance().set(&DataKey::Config, &config);
+        env.storage().instance().set(&DataKey::ExchangeRate, &WAD);
+        env.storage().instance().set(&DataKey::TotalSupply, &0_i128);
     }
 
     fn require_positive_amount(amount: i128) -> Result<(), Error> {
@@ -320,11 +395,29 @@ impl StandardizedYield for SyWrapper {
             Err(error) => panic_with_error!(env, error),
         };
 
-        // Pull the underlying into the vault before minting shares.
-        pull_underlying(env, &config.underlying, &from, amount);
-
+        // Price the deposit before its assets enter Blend. For Blend custody,
+        // mint against the actual AUM increase after Blend's bToken rounding,
+        // not the requested transfer amount. This prevents a new deposit from
+        // lowering the rate by creating more SY than the credited position backs.
         let exchange_rate = <Self as StandardizedYield>::exchange_rate(env);
-        let shares = mul_div_or_panic(env, amount, WAD, exchange_rate);
+        let aum_before = config
+            .pool
+            .as_ref()
+            .map(|_| blend_assets_under_management(env, &config));
+
+        pull_underlying(env, &config.underlying, &from, amount);
+        if config.pool.is_some() {
+            blend_submit(env, &config, REQUEST_SUPPLY, amount, false);
+        }
+        let assets_credited = match aum_before {
+            Some(before) => sub_or_panic(
+                env,
+                blend_assets_under_management(env, &config),
+                before,
+            ),
+            None => amount,
+        };
+        let shares = mul_div_or_panic(env, assets_credited, WAD, exchange_rate);
         if shares <= 0 {
             panic_with_error!(env, Error::InvalidAmount);
         }
@@ -362,20 +455,44 @@ impl StandardizedYield for SyWrapper {
             panic_with_error!(env, Error::InsufficientBalance);
         }
 
-        let underlying_out = mul_div_or_panic(env, sy_amount, exchange_rate, WAD);
+        let requested_underlying = mul_div_or_panic(env, sy_amount, exchange_rate, WAD);
+        let (shares_to_burn, underlying_out) = if config.pool.is_some() {
+            let before = underlying_balance(env, &config.underlying);
+            if !blend_submit(env, &config, REQUEST_WITHDRAW, requested_underlying, true) {
+                return 0;
+            }
+            let after = underlying_balance(env, &config.underlying);
+            let received = sub_or_panic(env, after, before);
+            if received <= 0 {
+                return 0;
+            }
+            let burn = if received >= requested_underlying {
+                sy_amount
+            } else {
+                mul_div_or_panic(env, received, WAD, exchange_rate)
+            };
+            (burn, received)
+        } else {
+            (sy_amount, requested_underlying)
+        };
+
         let principal_out = if current_shares == 0 {
             0
         } else {
-            mul_div_or_panic(env, current_principal, sy_amount, current_shares)
+            mul_div_or_panic(env, current_principal, shares_to_burn, current_shares)
         };
 
-        Self::write_balance(env, &from, sub_or_panic(env, current_shares, sy_amount));
+        Self::write_balance(
+            env,
+            &from,
+            sub_or_panic(env, current_shares, shares_to_burn),
+        );
         Self::write_principal(
             env,
             &from,
             sub_or_panic(env, current_principal, principal_out),
         );
-        Self::write_total_supply(env, sub_or_panic(env, total_shares, sy_amount));
+        Self::write_total_supply(env, sub_or_panic(env, total_shares, shares_to_burn));
 
         // Return the underlying from the vault to the holder.
         push_underlying(env, &config.underlying, &from, underlying_out);
@@ -385,10 +502,24 @@ impl StandardizedYield for SyWrapper {
 
     fn exchange_rate(env: &Env) -> i128 {
         require_init(env);
-        env.storage()
-            .instance()
-            .get(&DataKey::ExchangeRate)
-            .unwrap_or(WAD)
+        let config = match Self::read_config(env) {
+            Ok(config) => config,
+            Err(error) => panic_with_error!(env, error),
+        };
+        if config.pool.is_some() {
+            match derived_exchange_rate(
+                blend_assets_under_management(env, &config),
+                Self::read_total_supply(env),
+            ) {
+                Some(value) => value,
+                None => panic_with_error!(env, Error::MathOverflow),
+            }
+        } else {
+            env.storage()
+                .instance()
+                .get(&DataKey::ExchangeRate)
+                .unwrap_or(WAD)
+        }
     }
 
     fn underlying(env: &Env) -> Address {
@@ -462,6 +593,81 @@ fn push_underlying(env: &Env, underlying: &Address, to: &Address, amount: i128) 
         }),
     ]);
     token::TokenClient::new(env, underlying).transfer(&vault, &to_muxed, &amount);
+}
+
+fn underlying_balance(env: &Env, underlying: &Address) -> i128 {
+    token::TokenClient::new(env, underlying).balance(&env.current_contract_address())
+}
+
+fn blend_assets_under_management(env: &Env, config: &Config) -> i128 {
+    let pool = match &config.pool {
+        Some(pool) => pool,
+        None => return 0,
+    };
+    let pool_client = BlendPoolClient::new(env, pool);
+    let positions = pool_client.get_positions(&env.current_contract_address());
+    let b_tokens = positions.supply.get(config.reserve_index).unwrap_or(0);
+    let reserve = pool_client.get_reserve(&config.underlying);
+    match assets_from_b_tokens(b_tokens, reserve.data.b_rate) {
+        Some(value) => value,
+        None => panic_with_error!(env, Error::MathOverflow),
+    }
+}
+
+/// Submits one plain-supply or withdraw request as the wrapper. The wrapper is
+/// the direct invoker of `submit`, so Blend's `spender.require_auth()` is
+/// satisfied by invoker auth. Supply separately authorizes the later nested
+/// token transfer from the wrapper to the pool. Blend authorizes its own
+/// outgoing token transfer during withdraw.
+fn blend_submit(
+    env: &Env,
+    config: &Config,
+    request_type: u32,
+    amount: i128,
+    tolerate_failure: bool,
+) -> bool {
+    let pool = match &config.pool {
+        Some(pool) => pool.clone(),
+        None => return true,
+    };
+    let me = env.current_contract_address();
+    let requests = vec![
+        env,
+        Request {
+            address: config.underlying.clone(),
+            amount,
+            request_type,
+        },
+    ];
+    if request_type == REQUEST_SUPPLY {
+        env.authorize_as_current_contract(vec![
+            env,
+            InvokerContractAuthEntry::Contract(SubContractInvocation {
+                context: ContractContext {
+                    contract: config.underlying.clone(),
+                    fn_name: Symbol::new(env, "transfer"),
+                    args: vec![
+                        env,
+                        me.clone().into_val(env),
+                        pool.clone().into_val(env),
+                        amount.into_val(env),
+                    ],
+                },
+                sub_invocations: vec![env],
+            }),
+        ]);
+    }
+
+    let client = BlendPoolClient::new(env, &pool);
+    if tolerate_failure {
+        matches!(
+            client.try_submit(&me, &me, &me, &requests),
+            Ok(Ok(_))
+        )
+    } else {
+        client.submit(&me, &me, &me, &requests);
+        true
+    }
 }
 
 fn require_init(env: &Env) {
@@ -580,6 +786,8 @@ mod test {
             Config {
                 admin: fixture.admin.clone(),
                 underlying: fixture.underlying.clone(),
+                pool: None,
+                reserve_index: 0,
             }
         );
         assert_eq!(fixture.client.exchange_rate(), WAD);

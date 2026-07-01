@@ -196,15 +196,24 @@ impl Tokenizer {
         mint_token(&env, &config.pt_token, &from, face);
         mint_token(&env, &config.yt_token, &from, face);
 
-        check_solvency(&env, &config)?;
+        // No solvency gate here. Split is collateral-neutral: it adds `sy_amount`
+        // SY to escrow (asset value `face` at the current rate) and mints exactly
+        // `face` of PT, so escrow coverage moves by an equal amount on both sides
+        // and cannot worsen. Gating it only bricked new mints on a market that was
+        // already underwater, which is not how Pendle behaves: minting PT/YT never
+        // reverts on collateralization (PendleYieldToken._mintPY has no such
+        // check). Any shortfall is priced at redemption by the pro-rata cap in
+        // `recombine` and `redeem_at_maturity`, not blocked at mint.
         Ok((face, face))
     }
 
-    /// Burns equal PT and YT (asset units) from `from` and returns the principal
-    /// in SY shares: `sy_equivalent = pt_amount * WAD / rate`. Burning the YT
-    /// settles the holder's accrued yield first (the YT burn hook banks it into
+    /// Burns equal PT and YT (asset units) from `from` and returns principal in SY
+    /// shares: `pt_amount * WAD / rate`, capped to the holder's pro-rata share of
+    /// escrow under a shortfall (identical cap to `redeem_at_maturity`). Burning the
+    /// YT settles the holder's accrued yield first (the YT burn hook banks it into
     /// the holder's claim ledger), so recombine returns only principal and the
-    /// banked yield stays owed and covered by the remaining escrow.
+    /// banked yield stays owed and covered by the remaining escrow. Never reverts on
+    /// collateralization: a shortfall is priced as a haircut, matching Pendle.
     pub fn recombine(
         env: Env,
         from: Address,
@@ -223,14 +232,28 @@ impl Tokenizer {
         let config = Self::read_config(&env)?;
         Self::bump_instance_ttl(&env);
         let rate = current_rate(&env, &config.sy_token);
-        let sy_equivalent = mul_div_floor(pt_amount, WAD, rate)?;
+        let full = mul_div_floor(pt_amount, WAD, rate)?;
+
+        // Cap the principal returned to the holder's pro-rata share of escrow, the
+        // same guard `redeem_at_maturity` uses. When escrow fully covers PT this is
+        // the full principal (`pro_rata >= full`), so solvent recombine is
+        // unchanged; under a rate regression it is a fair haircut that preserves the
+        // escrow/PT ratio for holders who have not yet exited. This replaces the old
+        // hard solvency revert: like Pendle, recombine never blocks a redemption on
+        // collateralization, it prices the shortfall instead. The YT burn above
+        // settles the holder's accrued yield into their claim ledger first, so that
+        // yield is not lost to the haircut.
+        let escrow_shares =
+            token_balance(&env, &config.sy_token, &env.current_contract_address());
+        let pt_supply = pt_total_supply(&env, &config.pt_token);
+        let pro_rata = mul_div_floor(escrow_shares, pt_amount, pt_supply)?;
+        let sy_equivalent = if full < pro_rata { full } else { pro_rata };
         Self::require_positive_amount(sy_equivalent)?;
 
         burn_token(&env, &config.pt_token, &from, pt_amount);
         burn_token(&env, &config.yt_token, &from, yt_amount);
         push_token(&env, &config.sy_token, &from, sy_equivalent);
 
-        check_solvency(&env, &config)?;
         Ok(sy_equivalent)
     }
 

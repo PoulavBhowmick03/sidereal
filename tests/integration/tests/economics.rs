@@ -366,6 +366,50 @@ fn redemption_is_capped_when_rate_regresses() {
     );
 }
 
+/// Pendle alignment: on a rate regression the market is underwater, but the
+/// collateral-neutral operations no longer revert. A new depositor can always
+/// split (mint never blocks on coverage, like `PendleYieldToken._mintPY`), and
+/// recombine prices the shortfall as a pro-rata haircut instead of bricking with
+/// Insolvent (#9). Only `claim` still guards, since paying YT would spend PT
+/// principal. This is exactly the state the frontend hit before the fix.
+#[test]
+fn split_and_recombine_survive_a_rate_regression() {
+    let m = deploy();
+    let alice = m.fund(100 * UNIT);
+    m.deposit(&alice, 100 * UNIT);
+    m.split(&alice, 100 * UNIT);
+    // Solvent: escrow 100 shares worth 100 at rate 1.00, PT principal 100.
+
+    // The yield source is slashed to 0.90: escrow is now worth 90 < 100 of PT.
+    // This is the state that used to revert `split` with Insolvent (#9).
+    let rate_0_90: i128 = 900_000_000_000_000_000;
+    m.set_rate(rate_0_90);
+
+    // A brand-new depositor can still mint. Split is collateral-neutral, so it
+    // does not worsen coverage and must not revert.
+    let bob = m.fund(50 * UNIT);
+    m.deposit(&bob, 50 * UNIT);
+    let bob_sy = m.sy_balance(&bob);
+    m.split(&bob, bob_sy); // previously panicked with Error(Contract, #9)
+    assert!(
+        m.pt_balance(&bob) > 0,
+        "a new depositor must be able to mint PT while the market is underwater"
+    );
+
+    // Recombine succeeds too, returning a fair haircut rather than reverting.
+    // Alice's uncapped principal is pt/rate; underwater she gets her pro-rata
+    // slice of escrow, which is strictly less.
+    let alice_pt = m.pt_balance(&alice);
+    let uncapped = alice_pt * WAD / rate_0_90;
+    let got = m.recombine(&alice, alice_pt);
+    assert!(
+        got > 0 && got < uncapped,
+        "recombine must haircut under a shortfall: got {} vs uncapped {}",
+        got,
+        uncapped
+    );
+}
+
 #[test]
 #[should_panic(expected = "Error(Contract, #9)")]
 fn yt_claim_reverts_when_it_would_breach_pt_coverage() {
