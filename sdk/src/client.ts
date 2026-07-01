@@ -28,6 +28,7 @@ import type {
 import { BPS_DENOMINATOR } from "./types.js";
 import { marketMethodFor, quoteMethodFor, priceImpactBps, secondsToMaturity } from "./routes.js";
 import { ContractError, parseContractErrorCode } from "./errors.js";
+import { blendRates, decodeBlendReserve, type BlendRates } from "./blend.js";
 
 type Operation = ReturnType<Contract["call"]>;
 type SourceAccount = Awaited<ReturnType<rpc.Server["getAccount"]>>;
@@ -180,6 +181,23 @@ export class StellarYT {
     return this.simulateRead<bigint>(
       new Contract(tokenContract).call("balance", new Address(holder).toScVal()),
     );
+  }
+
+  /**
+   * Reads a Blend v2 reserve's live rate curve: utilization, borrow APR, and
+   * the supply APR a depositor earns right now. This is the variable rate the
+   * SY wrapper's derived exchange rate tracks, shown next to the AMM's implied
+   * fixed APY so a user can see what they are locking in against.
+   */
+  async getBlendRates(pool: string, asset: string): Promise<BlendRates> {
+    const poolContract = new Contract(pool);
+    const [reserveRaw, poolConfig] = await Promise.all([
+      this.simulateRead<Parameters<typeof decodeBlendReserve>[0]>(
+        poolContract.call("get_reserve", new Address(asset).toScVal()),
+      ),
+      this.simulateRead<{ bstop_rate: number }>(poolContract.call("get_config")),
+    ]);
+    return blendRates(decodeBlendReserve(reserveRaw), BigInt(poolConfig.bstop_rate));
   }
 
   /**

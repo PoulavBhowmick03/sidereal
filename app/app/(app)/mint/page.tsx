@@ -14,6 +14,7 @@ import {
 import { usePosition } from "@/lib/usePosition";
 import { useSidereal } from "@/lib/useSidereal";
 import { useMarket } from "@/lib/useMarket";
+import { useBlendRates } from "@/lib/useBlendRates";
 import { PositionCard } from "@/components/PositionCard";
 import { AmountField } from "@/components/AmountField";
 import { SubmitButton } from "@/components/SubmitButton";
@@ -33,6 +34,7 @@ export default function MintPage() {
   const [mode, setMode] = useState<(typeof MINT_MODES)[number]["id"]>("deposit");
   const [underlyingBalance, setUnderlyingBalance] = useState<bigint | null>(null);
   const market = useMarket();
+  const blendRates = useBlendRates();
   const position = usePosition(address, phase.kind === "done" ? phase.hash : 0);
   const split = mode === "split";
 
@@ -216,7 +218,7 @@ export default function MintPage() {
 
         {/* Protocol parameters: real maturity data plus the token legend. */}
         <aside className="space-y-8 lg:col-span-5">
-          <YieldSourceCard source={cfg.yieldSource} market={market} />
+          <YieldSourceCard source={cfg.yieldSource} market={market} rates={blendRates} />
 
           <p className="label-data">Protocol parameters</p>
 

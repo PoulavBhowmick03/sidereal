@@ -15,6 +15,7 @@ import {
 import { usePosition } from "@/lib/usePosition";
 import { useSidereal } from "@/lib/useSidereal";
 import { useMarket } from "@/lib/useMarket";
+import { useBlendRates } from "@/lib/useBlendRates";
 import { PositionCard } from "@/components/PositionCard";
 import { AmountField } from "@/components/AmountField";
 import { SubmitButton } from "@/components/SubmitButton";
@@ -34,6 +35,7 @@ export default function PortfolioPage() {
   const [syAmount, setSyAmount] = useState("");
   const [activeAction, setActiveAction] = useState<"claim" | "redeem" | "unwrap" | null>(null);
   const market = useMarket();
+  const blendRates = useBlendRates();
   const position = usePosition(address, phase.kind === "done" ? phase.hash : 0);
 
   const matured = market !== null && market.secondsToMaturity === 0;
@@ -201,7 +203,7 @@ export default function PortfolioPage() {
 
         {/* Maturity context: real time-to-maturity and the SY exchange rate. */}
         <aside className="space-y-8 lg:col-span-5">
-          <YieldSourceCard source={cfg.yieldSource} market={market} />
+          <YieldSourceCard source={cfg.yieldSource} market={market} rates={blendRates} />
 
           <p className="label-data">Maturity context</p>
 

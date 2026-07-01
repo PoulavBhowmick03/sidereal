@@ -2,6 +2,19 @@
 
 export { StellarYT } from "./client.js";
 export { ContractError, parseContractErrorCode } from "./errors.js";
+export {
+  BLEND_SCALAR_7,
+  BLEND_SCALAR_12,
+  blendAssetsFromBTokens,
+  blendAssetsFromDTokens,
+  blendBorrowApr,
+  blendRates,
+  blendRateToBps,
+  blendSupplyApr,
+  blendUtilization,
+  decodeBlendReserve,
+} from "./blend.js";
+export type { BlendRates, BlendReserve, BlendReserveConfig, BlendReserveData } from "./blend.js";
 export { marketMethodFor, quoteMethodFor, priceImpactBps, secondsToMaturity } from "./routes.js";
 export type { MarketMethod, QuoteMethod } from "./routes.js";
 export { WAD, BPS_DENOMINATOR } from "./types.js";

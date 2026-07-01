@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
-import type { MarketState } from "@sidereal/sdk";
+import { blendRateToBps, type BlendRates, type MarketState } from "@sidereal/sdk";
 import type { YieldSourceConfig } from "@/lib/config";
-import { formatTokenAmount, shortAddress } from "@/lib/format";
+import { bpsToPercent, formatTokenAmount, shortAddress } from "@/lib/format";
 
 function sourceStatus(source: YieldSourceConfig): { label: string; body: string; tone: "live" | "idle" } {
   if (source.kind === "blend") {
@@ -29,9 +29,12 @@ function sourceStatus(source: YieldSourceConfig): { label: string; body: string;
 export function YieldSourceCard({
   source,
   market,
+  rates,
 }: {
   source: YieldSourceConfig;
   market: MarketState | null;
+  /** Live Blend reserve rates; omit or null while loading / for other kinds. */
+  rates?: BlendRates | null;
 }) {
   const status = sourceStatus(source);
   const pool = source.poolAddress || "n/a";
@@ -72,6 +75,18 @@ export function YieldSourceCard({
         </div>
         {source.kind === "blend" ? (
           <>
+            <div className="flex justify-between gap-4">
+              <dt className="label-data">Supply APR (variable)</dt>
+              <dd className="tabular-nums text-amber">
+                {rates ? bpsToPercent(blendRateToBps(rates.supplyApr)) : "loading"}
+              </dd>
+            </div>
+            <div className="flex justify-between gap-4">
+              <dt className="label-data">Pool utilization</dt>
+              <dd className="tabular-nums text-paper">
+                {rates ? bpsToPercent(blendRateToBps(rates.utilization)) : "loading"}
+              </dd>
+            </div>
             <div className="flex justify-between gap-4">
               <dt className="label-data">Blend pool</dt>
               <dd className="tabular-nums text-paper" title={pool}>

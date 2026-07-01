@@ -16,6 +16,7 @@ import { describeError } from "@/lib/errors";
 import { usePosition } from "@/lib/usePosition";
 import { useSidereal } from "@/lib/useSidereal";
 import { useMarket } from "@/lib/useMarket";
+import { useBlendRates } from "@/lib/useBlendRates";
 import { PositionCard } from "@/components/PositionCard";
 import { AmountField } from "@/components/AmountField";
 import { SubmitButton } from "@/components/SubmitButton";
@@ -61,6 +62,7 @@ export default function TradePage() {
 
   const direction = DIRECTIONS.find((d) => d.id === directionId) ?? DIRECTIONS[0];
   const market = useMarket();
+  const blendRates = useBlendRates();
   const position = usePosition(address, phase.kind === "done" ? phase.hash : 0);
 
   const balanceIn = position
@@ -145,7 +147,7 @@ export default function TradePage() {
       <div className="grid gap-10 lg:grid-cols-12">
         {/* Market status rail: live, read-only signals from the AMM. */}
         <aside className="space-y-5 lg:col-span-4">
-          <YieldSourceCard source={cfg.yieldSource} market={market} />
+          <YieldSourceCard source={cfg.yieldSource} market={market} rates={blendRates} />
 
           <div className="flex items-center justify-between">
             <p className="label-data">Market status</p>
