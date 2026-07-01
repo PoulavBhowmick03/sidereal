@@ -19,6 +19,22 @@ const contractEnv = {
   NEXT_PUBLIC_MARKET_ADDRESS: "C_MARKET",
 };
 
+// The test runner may inherit a real deployment's env (check-frontend-testnet.sh
+// exports app/.env.local), so fallback tests must clear these explicitly.
+const yieldSourceEnvNames = [
+  "NEXT_PUBLIC_YIELD_SOURCE_KIND",
+  "NEXT_PUBLIC_YIELD_SOURCE_NAME",
+  "NEXT_PUBLIC_YIELD_SOURCE_POOL_ADDRESS",
+  "NEXT_PUBLIC_YIELD_SOURCE_RESERVE_ADDRESS",
+  "NEXT_PUBLIC_YIELD_SOURCE_URL",
+];
+
+function stubYieldSourceEnv(overrides: Record<string, string> = {}): void {
+  for (const name of yieldSourceEnvNames) {
+    vi.stubEnv(name, overrides[name] ?? "");
+  }
+}
+
 afterEach(() => {
   vi.unstubAllEnvs();
 });
@@ -47,6 +63,7 @@ describe("appConfig", () => {
     vi.stubEnv("NEXT_PUBLIC_SIMULATION_SOURCE_ADDRESS", "");
     vi.stubEnv("NEXT_PUBLIC_MARKET_ID", "");
     vi.stubEnv("NEXT_PUBLIC_TOKEN_DECIMALS", "");
+    stubYieldSourceEnv();
     for (const name of Object.keys(contractEnv)) {
       vi.stubEnv(name, "");
     }
@@ -63,11 +80,13 @@ describe("appConfig", () => {
   });
 
   it("reads Blend yield-source metadata from static environment references", () => {
-    vi.stubEnv("NEXT_PUBLIC_YIELD_SOURCE_KIND", "blend");
-    vi.stubEnv("NEXT_PUBLIC_YIELD_SOURCE_NAME", "Blend test market");
-    vi.stubEnv("NEXT_PUBLIC_YIELD_SOURCE_POOL_ADDRESS", TESTNET_BLEND_POOL);
-    vi.stubEnv("NEXT_PUBLIC_YIELD_SOURCE_RESERVE_ADDRESS", TESTNET_BLEND_USDC);
-    vi.stubEnv("NEXT_PUBLIC_YIELD_SOURCE_URL", "https://docs.blend.capital/");
+    stubYieldSourceEnv({
+      NEXT_PUBLIC_YIELD_SOURCE_KIND: "blend",
+      NEXT_PUBLIC_YIELD_SOURCE_NAME: "Blend test market",
+      NEXT_PUBLIC_YIELD_SOURCE_POOL_ADDRESS: TESTNET_BLEND_POOL,
+      NEXT_PUBLIC_YIELD_SOURCE_RESERVE_ADDRESS: TESTNET_BLEND_USDC,
+      NEXT_PUBLIC_YIELD_SOURCE_URL: "https://docs.blend.capital/",
+    });
 
     const cfg = appConfig();
 
@@ -81,7 +100,7 @@ describe("appConfig", () => {
   });
 
   it("falls back to mock metadata for invalid yield-source kind values", () => {
-    vi.stubEnv("NEXT_PUBLIC_YIELD_SOURCE_KIND", "unknown");
+    stubYieldSourceEnv({ NEXT_PUBLIC_YIELD_SOURCE_KIND: "unknown" });
 
     const cfg = appConfig();
 
