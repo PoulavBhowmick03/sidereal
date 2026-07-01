@@ -4,7 +4,14 @@
 
 import { useMemo, useState } from "react";
 import { WAD } from "@sidereal/sdk";
-import { amountError, daysToMaturity, formatTokenAmount, parseTokenAmount } from "@/lib/format";
+import {
+  amountError,
+  daysToMaturity,
+  formatMaturityDate,
+  formatTokenAmount,
+  maturityStatus,
+  parseTokenAmount,
+} from "@/lib/format";
 import { usePosition } from "@/lib/usePosition";
 import { useSidereal } from "@/lib/useSidereal";
 import { useMarket } from "@/lib/useMarket";
@@ -12,6 +19,8 @@ import { PositionCard } from "@/components/PositionCard";
 import { AmountField } from "@/components/AmountField";
 import { SubmitButton } from "@/components/SubmitButton";
 import { TxStatus } from "@/components/TxStatus";
+import { MaturityBadge } from "@/components/MaturityBadge";
+import { YieldSourceCard } from "@/components/YieldSourceCard";
 
 // The Portfolio page IS the redeem surface: holdings and maturity context up
 // top, then the three independent actions (claim yield, recombine/redeem PT,
@@ -84,15 +93,6 @@ export default function PortfolioPage() {
     }
   }, [syAmount, market, cfg.decimals]);
 
-  const maturityDate =
-    market !== null
-      ? new Date(market.maturity * 1000).toLocaleDateString("en-US", {
-          day: "2-digit",
-          month: "short",
-          year: "numeric",
-        })
-      : null;
-
   return (
     <div className="space-y-12">
       <header className="space-y-3">
@@ -102,6 +102,7 @@ export default function PortfolioPage() {
             ? "Maturity reached. Redeem PT for its principal in SY, then unwrap SY to the underlying."
             : "Before maturity, recombine equal amounts of PT and YT back into SY at any time."}
         </p>
+        <MaturityBadge maturity={market?.maturity ?? null} />
       </header>
 
       <PositionCard position={position} decimals={cfg.decimals} />
@@ -200,6 +201,8 @@ export default function PortfolioPage() {
 
         {/* Maturity context: real time-to-maturity and the SY exchange rate. */}
         <aside className="space-y-8 lg:col-span-5">
+          <YieldSourceCard source={cfg.yieldSource} market={market} />
+
           <p className="label-data">Maturity context</p>
 
           <div className="card space-y-3 p-6">
@@ -210,7 +213,8 @@ export default function PortfolioPage() {
                   {daysToMaturity(market.maturity)}
                   <span className="ml-2 text-2xl text-graphite">Days</span>
                 </p>
-                <p className="text-sm tabular-nums text-smoke">{maturityDate}</p>
+                <p className="text-sm tabular-nums text-amber">{maturityStatus(market.maturity)}</p>
+                <p className="text-sm tabular-nums text-smoke">{formatMaturityDate(market.maturity)}</p>
               </>
             ) : (
               <p className="text-sm text-ash">Not deployed yet</p>

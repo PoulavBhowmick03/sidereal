@@ -78,3 +78,26 @@ export function amountError(value: string, decimals: number, max?: bigint): stri
 export function daysToMaturity(maturitySec: number, nowSec = Math.floor(Date.now() / 1000)): number {
   return Math.max(0, Math.floor((maturitySec - nowSec) / 86_400));
 }
+
+/** Formats a Unix-second maturity as a compact date for market surfaces. */
+export function formatMaturityDate(maturitySec: number): string {
+  return new Date(maturitySec * 1000).toLocaleDateString("en-US", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+/** Human copy for the maturity state of an on-chain market. */
+export function maturityStatus(maturitySec: number, nowSec = Math.floor(Date.now() / 1000)): string {
+  if (maturitySec <= nowSec) return "Matured";
+  const days = daysToMaturity(maturitySec, nowSec);
+  if (days === 0) return "Matures today";
+  return `Matures after ${days} ${days === 1 ? "day" : "days"}`;
+}
+
+/** Compact display for Stellar contract or account addresses. */
+export function shortAddress(address: string, visible = 6): string {
+  if (address.length <= visible * 2 + 1) return address;
+  return `${address.slice(0, visible)}...${address.slice(-visible)}`;
+}

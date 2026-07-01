@@ -2,9 +2,15 @@
 
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { WAD } from "@sidereal/sdk";
-import { amountError, daysToMaturity, formatTokenAmount, parseTokenAmount } from "@/lib/format";
+import {
+  amountError,
+  formatMaturityDate,
+  formatTokenAmount,
+  maturityStatus,
+  parseTokenAmount,
+} from "@/lib/format";
 import { usePosition } from "@/lib/usePosition";
 import { useSidereal } from "@/lib/useSidereal";
 import { useMarket } from "@/lib/useMarket";
@@ -12,14 +18,23 @@ import { PositionCard } from "@/components/PositionCard";
 import { AmountField } from "@/components/AmountField";
 import { SubmitButton } from "@/components/SubmitButton";
 import { TxStatus } from "@/components/TxStatus";
+import { MaturityBadge } from "@/components/MaturityBadge";
+import { YieldSourceCard } from "@/components/YieldSourceCard";
+
+const MINT_MODES = [
+  { id: "deposit", label: "Deposit SY" },
+  { id: "split", label: "Deposit + split" },
+] as const;
 
 export default function MintPage() {
   const { cfg, client, address, phase, submit, submitSequence } = useSidereal();
 
   const [amount, setAmount] = useState("");
-  const [split, setSplit] = useState(true);
+  const [mode, setMode] = useState<(typeof MINT_MODES)[number]["id"]>("deposit");
+  const [underlyingBalance, setUnderlyingBalance] = useState<bigint | null>(null);
   const market = useMarket();
   const position = usePosition(address, phase.kind === "done" ? phase.hash : 0);
+  const split = mode === "split";
 
   // Preview the deposit and split using the contract's own math:
   //   SY minted on deposit  = amount * WAD / rate   (SY wrapper)
@@ -38,7 +53,29 @@ export default function MintPage() {
     }
   }, [amount, market, cfg.decimals]);
 
-  const amtError = amountError(amount, cfg.decimals);
+  useEffect(() => {
+    if (!address || market === null) {
+      setUnderlyingBalance(null);
+      return;
+    }
+
+    let cancelled = false;
+    setUnderlyingBalance(null);
+    client
+      .getTokenBalance(market.underlying, address)
+      .then((balance) => {
+        if (!cancelled) setUnderlyingBalance(balance);
+      })
+      .catch(() => {
+        if (!cancelled) setUnderlyingBalance(0n);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [address, client, market]);
+
+  const amtError = amountError(amount, cfg.decimals, underlyingBalance ?? undefined);
   const canSubmit = address !== null && preview !== null && !amtError && phase.kind !== "working";
 
   async function onSubmit() {
@@ -64,15 +101,6 @@ export default function MintPage() {
     ]);
   }
 
-  const maturityDate =
-    market !== null
-      ? new Date(market.maturity * 1000).toLocaleDateString("en-US", {
-          day: "2-digit",
-          month: "short",
-          year: "numeric",
-        })
-      : null;
-
   return (
     <div className="space-y-12">
       <header className="space-y-3">
@@ -80,6 +108,7 @@ export default function MintPage() {
         <p className="max-w-xl text-smoke">
           Deposit USDC to receive SY, and optionally split it into equal amounts of PT and YT.
         </p>
+        <MaturityBadge maturity={market?.maturity ?? null} />
       </header>
 
       <PositionCard position={position} decimals={cfg.decimals} />
@@ -94,21 +123,43 @@ export default function MintPage() {
               onChange={setAmount}
               decimals={cfg.decimals}
               error={amtError}
+              max={underlyingBalance ?? undefined}
             />
 
-            <label className="flex cursor-pointer items-center justify-between border-t border-white/10 pt-5">
-              <span className="text-sm text-paper">Split into PT + YT</span>
-              <span className="relative inline-flex">
-                <input
-                  type="checkbox"
-                  checked={split}
-                  onChange={(e) => setSplit(e.target.checked)}
-                  className="peer sr-only"
-                />
-                <span className="h-6 w-11 rounded-pill bg-white/15 transition peer-checked:bg-amber" />
-                <span className="absolute left-0.5 top-0.5 h-5 w-5 rounded-pill bg-paper transition peer-checked:translate-x-5 peer-checked:bg-ink" />
-              </span>
-            </label>
+            <p className="text-xs tabular-nums text-ash">
+              Wallet USDC balance:{" "}
+              {address
+                ? underlyingBalance === null
+                  ? "loading"
+                  : formatTokenAmount(underlyingBalance, cfg.decimals)
+                : "connect wallet"}
+            </p>
+
+            <div className="border-t border-white/10 pt-5">
+              <span className="label-data">Mint mode</span>
+              <div className="mt-3 grid grid-cols-2 gap-px border border-white/10">
+                {MINT_MODES.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => setMode(option.id)}
+                    aria-pressed={mode === option.id}
+                    className={`px-3 py-2.5 text-[13px] uppercase tracking-[0.08em] transition ${
+                      mode === option.id
+                        ? "bg-white/[0.04] text-amber"
+                        : "text-smoke hover:text-paper"
+                    }`}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <p className="mt-3 text-xs text-ash">
+                {split
+                  ? "Deposits USDC to SY, then splits the new SY into PT and YT with a second signature."
+                  : "Deposits USDC into SY only. You can split later from a separate action."}
+              </p>
+            </div>
           </div>
 
           {preview ? (
@@ -157,7 +208,7 @@ export default function MintPage() {
             disabled={!canSubmit}
             onClick={onSubmit}
             connectLabel="Connect wallet to mint"
-            idleLabel={split ? "Deposit, then split (2 signatures)" : "Deposit"}
+            idleLabel={split ? "Deposit, then split (2 signatures)" : "Deposit SY"}
           />
 
           <TxStatus phase={phase} context="sy" />
@@ -165,16 +216,16 @@ export default function MintPage() {
 
         {/* Protocol parameters: real maturity data plus the token legend. */}
         <aside className="space-y-8 lg:col-span-5">
+          <YieldSourceCard source={cfg.yieldSource} market={market} />
+
           <p className="label-data">Protocol parameters</p>
 
           <div className="card space-y-2 p-6">
             <p className="label-data">Maturity date</p>
-            {maturityDate !== null ? (
+            {market !== null ? (
               <>
-                <p className="text-xl tabular-nums text-paper">{maturityDate}</p>
-                <p className="text-sm tabular-nums text-amber">
-                  {daysToMaturity(market!.maturity)} days remaining
-                </p>
+                <p className="text-xl tabular-nums text-paper">{formatMaturityDate(market!.maturity)}</p>
+                <p className="text-sm tabular-nums text-amber">{maturityStatus(market!.maturity)}</p>
               </>
             ) : (
               <p className="text-sm text-ash">Not deployed yet</p>

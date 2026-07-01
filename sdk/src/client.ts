@@ -175,6 +175,13 @@ export class StellarYT {
     };
   }
 
+  /** Reads a SEP-41/SAC token balance for a holder. Used for wallet-visible assets. */
+  async getTokenBalance(tokenContract: string, holder: string): Promise<bigint> {
+    return this.simulateRead<bigint>(
+      new Contract(tokenContract).call("balance", new Address(holder).toScVal()),
+    );
+  }
+
   /**
    * Builds a claim transaction. The tokenizer settles the holder's accrued YT
    * yield and pays it in SY out of escrow. Reverts (Insolvent) if the rate has

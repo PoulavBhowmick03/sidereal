@@ -20,7 +20,8 @@
 #   DEPLOY_IDENTITY=sidereal-smoke bash scripts/prove-testnet-amm-routes.sh
 #
 # Optional:
-#   TRADE_AMOUNT=1000000 SLIPPAGE_BPS=500 REPORT_FILE=deployments/amm-routes-testnet.state.env \
+#   UNDERLYING_ASSET=USDC:<issuer> TRADE_AMOUNT=1000000 \
+#     SLIPPAGE_BPS=500 REPORT_FILE=deployments/amm-routes-testnet.state.env \
 #     bash scripts/prove-testnet-amm-routes.sh
 
 set -euo pipefail
@@ -32,18 +33,24 @@ NETWORK="${NETWORK:-testnet}"
 IDENTITY="${DEPLOY_IDENTITY:-sidereal-smoke}"
 WASM_DIR="${WASM_DIR:-target/wasm32v1-none/release}"
 REPORT_FILE="${REPORT_FILE:-deployments/amm-routes-testnet.state.env}"
+CIRCLE_TESTNET_USDC_ISSUER="${CIRCLE_TESTNET_USDC_ISSUER:-GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5}"
+DEFAULT_UNDERLYING_ASSET="USDC:$CIRCLE_TESTNET_USDC_ISSUER"
+UNDERLYING_ASSET="${UNDERLYING_ASSET:-$DEFAULT_UNDERLYING_ASSET}"
+YIELD_SOURCE="${YIELD_SOURCE:-mock}"
+BLEND_POOL="${BLEND_POOL:-CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF}"
+BLEND_USDC="${BLEND_USDC:-CAQCFVLOBK5GIULPNZRGATJJMIZL5BSP7X5YJVMGCPTUEPFM4AVSRCJU}"
 
 # 90 days by default, matching the intended product term and avoiding the
 # short-maturity TWAP overflow path that is only useful for lifecycle smoke.
 TERM_SECONDS="${TERM_SECONDS:-7776000}"
 MATURITY="${MATURITY:-$(( $(date -u +%s) + TERM_SECONDS ))}"
 
-# 7-decimal base units. Defaults: deposit 200, split 100, seed 80 PT / 80 SY,
-# trade 0.1 per route.
-DEPOSIT_AMOUNT="${DEPOSIT_AMOUNT:-2000000000}"
-SPLIT_AMOUNT="${SPLIT_AMOUNT:-1000000000}"
-LIQ_PT="${LIQ_PT:-800000000}"
-LIQ_SY="${LIQ_SY:-800000000}"
+# 7-decimal base units. Defaults fit Circle faucet funding: deposit 10 USDC,
+# split 5, seed 4 PT / 4 SY, trade 0.1 per route.
+DEPOSIT_AMOUNT="${DEPOSIT_AMOUNT:-100000000}"
+SPLIT_AMOUNT="${SPLIT_AMOUNT:-50000000}"
+LIQ_PT="${LIQ_PT:-40000000}"
+LIQ_SY="${LIQ_SY:-40000000}"
 TRADE_AMOUNT="${TRADE_AMOUNT:-1000000}"
 
 SCALAR_ROOT="${SCALAR_ROOT:-2000000000000000000}"
@@ -155,6 +162,48 @@ deploy_asset() {
   die "deploy asset $asset failed"
 }
 
+ensure_underlying_trustline() {
+  local asset="$1"
+  if [[ "$asset" != *:* ]]; then
+    return
+  fi
+  log "Ensuring admin trustline for $asset"
+  if stellar tx new change-trust \
+    --source-account "$IDENTITY" \
+    --line "$asset" \
+    --network "$NETWORK" >/dev/null 2>"$ERR_FILE"; then
+    return
+  fi
+  cat "$ERR_FILE" >&2
+  die "change-trust for $asset failed"
+}
+
+read_underlying_balance() {
+  stellar contract invoke \
+    --id "$UNDERLYING" \
+    --source "$IDENTITY" \
+    --network "$NETWORK" \
+    -- balance --id "$ADMIN" 2>"$ERR_FILE" | last_value
+}
+
+require_underlying_balance() {
+  local balance
+  if ! balance="$(read_underlying_balance)"; then
+    cat "$ERR_FILE" >&2
+    die "could not read admin underlying balance for $UNDERLYING"
+  fi
+  if ! [[ "$balance" =~ ^[0-9]+$ ]]; then
+    die "admin underlying balance was not an integer: '$balance'"
+  fi
+  if [[ "$balance" -lt "$DEPOSIT_AMOUNT" ]]; then
+    if [[ "$YIELD_SOURCE" == "blend" ]]; then
+      die "admin has $balance base units of Blend reserve $UNDERLYING, needs $DEPOSIT_AMOUNT. Fund $ADMIN with the Blend testnet USDC reserve asset, then rerun."
+    fi
+    die "admin has $balance base units of $UNDERLYING_ASSET, needs $DEPOSIT_AMOUNT. Fund $ADMIN at https://faucet.circle.com/ with Stellar testnet USDC, then rerun."
+  fi
+  ok "Admin underlying balance: $balance"
+}
+
 deploy_hash() {
   local wasm="$1" upload_out hash deploy_out id
   upload_out="$(retry_stellar "upload $wasm" contract upload --wasm "$WASM_DIR/$wasm.wasm" --source "$IDENTITY" --network "$NETWORK")"
@@ -198,13 +247,33 @@ if [[ "$SLIPPAGE_BPS" -lt 0 || "$SLIPPAGE_BPS" -ge "$BPS_DENOMINATOR" ]]; then
   die "SLIPPAGE_BPS must be between 0 and $((BPS_DENOMINATOR - 1))"
 fi
 
+case "$YIELD_SOURCE" in
+  mock|circle|blend) ;;
+  *) die "YIELD_SOURCE must be mock, circle, or blend, got '$YIELD_SOURCE'" ;;
+esac
+
 ADMIN="$(stellar keys address "$IDENTITY")"
 log "Identity: $IDENTITY = $ADMIN"
 log "Maturity: $MATURITY"
 
-UNDERLYING="$(deploy_asset "USDC:$ADMIN")"
+if [[ -n "${UNDERLYING:-}" ]]; then
+  log "Using provided underlying SAC: $UNDERLYING"
+elif [[ "$YIELD_SOURCE" == "blend" ]]; then
+  UNDERLYING="$BLEND_USDC"
+  log "Using Blend reserve asset as underlying: $UNDERLYING"
+else
+  ensure_underlying_trustline "$UNDERLYING_ASSET"
+  UNDERLYING="$(deploy_asset "$UNDERLYING_ASSET")"
+fi
 settle
+log "Yield source: $YIELD_SOURCE"
+if [[ "$YIELD_SOURCE" == "blend" ]]; then
+  log "Blend pool: $BLEND_POOL"
+else
+  log "Underlying asset: $UNDERLYING_ASSET"
+fi
 log "Underlying SAC: $UNDERLYING"
+require_underlying_balance
 
 log "Deploying contracts"
 SY="$(deploy_hash sidereal_sy_wrapper)"; log "  SY=$SY"
@@ -214,7 +283,11 @@ TOKENIZER="$(deploy_hash sidereal_tokenizer)"; log "  TOKENIZER=$TOKENIZER"
 AMM="$(deploy_hash sidereal_amm)"; log "  AMM=$AMM"
 
 log "Initializing contracts"
-invoke "$SY" initialize --admin "$ADMIN" --underlying "$UNDERLYING" >/dev/null
+if [[ "$YIELD_SOURCE" == "blend" ]]; then
+  invoke "$SY" initialize_blend --admin "$ADMIN" --underlying "$UNDERLYING" --pool "$BLEND_POOL" >/dev/null
+else
+  invoke "$SY" initialize --admin "$ADMIN" --underlying "$UNDERLYING" >/dev/null
+fi
 settle
 invoke "$PT" initialize --admin "$ADMIN" --tokenizer "$TOKENIZER" --sy_token "$SY" --maturity "$MATURITY" >/dev/null
 settle
@@ -238,7 +311,11 @@ settle
 log "Depositing, splitting, and seeding liquidity"
 minted="$(invoke "$SY" deposit --from "$ADMIN" --amount "$DEPOSIT_AMOUNT")"
 settle
-[[ "$minted" == "$DEPOSIT_AMOUNT" ]] || die "deposit minted $minted, expected $DEPOSIT_AMOUNT"
+if [[ "$YIELD_SOURCE" == "blend" ]]; then
+  require_positive_int "SY minted" "$minted"
+else
+  [[ "$minted" == "$DEPOSIT_AMOUNT" ]] || die "deposit minted $minted, expected $DEPOSIT_AMOUNT"
+fi
 invoke "$TOKENIZER" split --from "$ADMIN" --sy_amount "$SPLIT_AMOUNT" >/dev/null
 settle
 LP_OUT="$(invoke "$AMM" add_liquidity --from "$ADMIN" --pt_in "$LIQ_PT" --sy_in "$LIQ_SY")"
@@ -263,6 +340,9 @@ cat > "$REPORT_FILE" <<EOF
 # Timestamp: $(date -u +%Y-%m-%dT%H:%M:%SZ)
 DEPLOY_IDENTITY="$IDENTITY"
 ADMIN="$ADMIN"
+YIELD_SOURCE="$YIELD_SOURCE"
+BLEND_POOL="$BLEND_POOL"
+UNDERLYING_ASSET="$UNDERLYING_ASSET"
 UNDERLYING="$UNDERLYING"
 SY="$SY"
 PT="$PT"

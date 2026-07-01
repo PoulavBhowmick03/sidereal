@@ -4,7 +4,14 @@
 
 import { useEffect, useState } from "react";
 import type { Asset, Quote } from "@sidereal/sdk";
-import { amountError, bpsToPercent, formatTokenAmount, parseTokenAmount } from "@/lib/format";
+import {
+  amountError,
+  bpsToPercent,
+  formatMaturityDate,
+  formatTokenAmount,
+  maturityStatus,
+  parseTokenAmount,
+} from "@/lib/format";
 import { describeError } from "@/lib/errors";
 import { usePosition } from "@/lib/usePosition";
 import { useSidereal } from "@/lib/useSidereal";
@@ -13,6 +20,8 @@ import { PositionCard } from "@/components/PositionCard";
 import { AmountField } from "@/components/AmountField";
 import { SubmitButton } from "@/components/SubmitButton";
 import { TxStatus } from "@/components/TxStatus";
+import { MaturityBadge } from "@/components/MaturityBadge";
+import { YieldSourceCard } from "@/components/YieldSourceCard";
 
 // Only the four routes the single PT/SY pool exposes (YT via flash route).
 const DIRECTIONS = [
@@ -119,15 +128,6 @@ export default function TradePage() {
     );
   }
 
-  const maturityDate =
-    market !== null
-      ? new Date(market.maturity * 1000).toLocaleDateString("en-US", {
-          day: "2-digit",
-          month: "short",
-          year: "numeric",
-        })
-      : null;
-
   return (
     <div className="space-y-12">
       <header className="space-y-3">
@@ -137,6 +137,7 @@ export default function TradePage() {
           price impact, and the implied APY so you can see if you are buying at a premium or
           discount.
         </p>
+        <MaturityBadge maturity={market?.maturity ?? null} />
       </header>
 
       <PositionCard position={position} decimals={cfg.decimals} />
@@ -144,6 +145,8 @@ export default function TradePage() {
       <div className="grid gap-10 lg:grid-cols-12">
         {/* Market status rail: live, read-only signals from the AMM. */}
         <aside className="space-y-5 lg:col-span-4">
+          <YieldSourceCard source={cfg.yieldSource} market={market} />
+
           <div className="flex items-center justify-between">
             <p className="label-data">Market status</p>
             <span className="flex items-center gap-2 text-[13px] text-smoke">
@@ -159,7 +162,8 @@ export default function TradePage() {
               signal
             />
             <Stat label="Spot APY" value={market ? bpsToPercent(market.spotApyBps) : "n/a"} />
-            <Stat label="Maturity" value={maturityDate ?? "n/a"} />
+            <Stat label="Maturity" value={market ? maturityStatus(market.maturity) : "n/a"} signal />
+            <Stat label="Maturity date" value={market ? formatMaturityDate(market.maturity) : "n/a"} />
           </dl>
         </aside>
 

@@ -28,6 +28,8 @@ test("nav reaches mint, trade, and portfolio", async ({ page }) => {
   await nav.getByRole("link", { name: "Mint" }).click();
   await expect(page).toHaveURL(/\/mint$/, { timeout: 15_000 });
   await expect(page.getByRole("heading", { name: "Mint" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Deposit SY", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Deposit + split", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /connect wallet to mint/i })).toBeVisible();
 
   await nav.getByRole("link", { name: "Trade" }).click();

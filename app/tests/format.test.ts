@@ -5,8 +5,11 @@ import {
   bpsToPercent,
   formatTokenAmount,
   parseTokenAmount,
+  shortAddress,
   amountError,
   daysToMaturity,
+  formatMaturityDate,
+  maturityStatus,
 } from "../lib/format";
 
 describe("bpsToPercent", () => {
@@ -23,6 +26,18 @@ describe("bpsToPercent", () => {
 
   it("respects fractionDigits = 0", () => {
     expect(bpsToPercent(860n, 0)).toBe("8%");
+  });
+});
+
+describe("shortAddress", () => {
+  it("compacts long Stellar addresses", () => {
+    expect(shortAddress("CAQCFVLOBK5GIULPNZRGATJJMIZL5BSP7X5YJVMGCPTUEPFM4AVSRCJU")).toBe(
+      "CAQCFV...VSRCJU",
+    );
+  });
+
+  it("leaves short values untouched", () => {
+    expect(shortAddress("n/a")).toBe("n/a");
   });
 });
 
@@ -100,5 +115,19 @@ describe("daysToMaturity", () => {
     const now = 1_000_000_000;
     expect(daysToMaturity(now, now)).toBe(0);
     expect(daysToMaturity(now - 86_400, now)).toBe(0);
+  });
+});
+
+describe("maturity display helpers", () => {
+  it("formats maturity dates", () => {
+    expect(formatMaturityDate(Date.UTC(2026, 8, 25, 15, 16, 5) / 1000)).toBe("Sep 25, 2026");
+  });
+
+  it("describes active, same-day, and matured markets", () => {
+    const now = 1_000_000_000;
+    expect(maturityStatus(now + 10 * 86_400, now)).toBe("Matures after 10 days");
+    expect(maturityStatus(now + 86_400, now)).toBe("Matures after 1 day");
+    expect(maturityStatus(now + 3600, now)).toBe("Matures today");
+    expect(maturityStatus(now, now)).toBe("Matured");
   });
 });

@@ -4,6 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   appConfig,
   isDeployed,
+  TESTNET_BLEND_POOL,
+  TESTNET_BLEND_USDC,
   TESTNET_PASSPHRASE,
   TESTNET_RPC,
   TESTNET_SIMULATION_SOURCE,
@@ -56,6 +58,34 @@ describe("appConfig", () => {
     expect(cfg.simulationSourceAccount).toBe(TESTNET_SIMULATION_SOURCE);
     expect(cfg.marketId).toBe("blend-usdc-q3");
     expect(cfg.decimals).toBe(7);
+    expect(cfg.yieldSource.kind).toBe("mock");
     expect(isDeployed(cfg)).toBe(false);
+  });
+
+  it("reads Blend yield-source metadata from static environment references", () => {
+    vi.stubEnv("NEXT_PUBLIC_YIELD_SOURCE_KIND", "blend");
+    vi.stubEnv("NEXT_PUBLIC_YIELD_SOURCE_NAME", "Blend test market");
+    vi.stubEnv("NEXT_PUBLIC_YIELD_SOURCE_POOL_ADDRESS", TESTNET_BLEND_POOL);
+    vi.stubEnv("NEXT_PUBLIC_YIELD_SOURCE_RESERVE_ADDRESS", TESTNET_BLEND_USDC);
+    vi.stubEnv("NEXT_PUBLIC_YIELD_SOURCE_URL", "https://docs.blend.capital/");
+
+    const cfg = appConfig();
+
+    expect(cfg.yieldSource).toEqual({
+      kind: "blend",
+      name: "Blend test market",
+      poolAddress: TESTNET_BLEND_POOL,
+      reserveAddress: TESTNET_BLEND_USDC,
+      docsUrl: "https://docs.blend.capital/",
+    });
+  });
+
+  it("falls back to mock metadata for invalid yield-source kind values", () => {
+    vi.stubEnv("NEXT_PUBLIC_YIELD_SOURCE_KIND", "unknown");
+
+    const cfg = appConfig();
+
+    expect(cfg.yieldSource.kind).toBe("mock");
+    expect(cfg.yieldSource.name).toBe("Simulated testnet rate");
   });
 });
