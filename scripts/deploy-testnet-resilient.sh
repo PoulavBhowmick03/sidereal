@@ -303,7 +303,10 @@ AMM_WASM_HASH="$(wasm_hash "$WASM_DIR/sidereal_amm.wasm")"
 
 if ! stellar keys address "$IDENTITY" >/dev/null 2>&1; then
   log "Generating and funding deployer identity '$IDENTITY' on $NETWORK"
-  stellar keys generate --global "$IDENTITY" --network "$NETWORK" --fund
+  # CLI >= 23 removed --global (keys are stored globally by default); older
+  # CLIs need it. Try the old form first so both work.
+  stellar keys generate --global "$IDENTITY" --network "$NETWORK" --fund 2>/dev/null \
+    || stellar keys generate "$IDENTITY" --network "$NETWORK" --fund
 fi
 DEPLOYER_ADDRESS="$(stellar keys address "$IDENTITY")"
 save_state
