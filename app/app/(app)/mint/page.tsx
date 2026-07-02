@@ -29,6 +29,24 @@ const MINT_MODES = [
   { id: "split", label: "Deposit + split" },
 ] as const;
 
+function walletTokenBalanceError(error: unknown): string {
+  const text =
+    error instanceof Error
+      ? `${error.name} ${error.message} ${error.stack ?? ""}`
+      : typeof error === "string"
+        ? error
+        : JSON.stringify(error);
+  const normalized = text.toLowerCase();
+  if (
+    normalized.includes("trustline") ||
+    normalized.includes("contract, #13") ||
+    normalized.includes("contract #13")
+  ) {
+    return "trustline missing for Blend testnet USDC";
+  }
+  return "unable to read wallet USDC balance";
+}
+
 export default function MintPage() {
   const { cfg, client, address, phase, submit, submitSequence } = useSidereal();
 
@@ -75,13 +93,8 @@ export default function MintPage() {
       })
       .catch((error) => {
         if (cancelled) return;
-        const message = String(error);
         setUnderlyingBalance(0n);
-        setUnderlyingBalanceError(
-          message.includes("trustline entry is missing")
-            ? "trustline missing for Blend testnet USDC"
-            : "unable to read wallet USDC balance",
-        );
+        setUnderlyingBalanceError(walletTokenBalanceError(error));
       });
 
     return () => {
