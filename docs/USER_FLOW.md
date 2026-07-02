@@ -3,7 +3,8 @@
 This document describes the intended end-to-end user journey for the
 Blend-backed market, where the current app diverges from it, and the
 implementation plan to close the gaps. It follows on from the onboarding
-surfaces tracked in [REMAINING.md](./REMAINING.md) section 3b.
+surfaces tracked in [REMAINING.md](./REMAINING.md) section 3b. The shipped
+flow is written up as a stage-by-stage walkthrough in [FLOW.md](./FLOW.md).
 
 Live figures in this document come from `node scripts/live-blend-rates.mjs`
 run on 2026-07-03 against the deployed `blend-usdc-q3` market and the Blend v2
@@ -89,10 +90,12 @@ rate to display (gap 2) and a YT sale reverted (gap 3).
   `c42565e7cda144c7ded6f0215d6a76d638d186610b58ec371c785e37c6eb6096`,
   `e7f98aeafd64427a3904895e0b14821e9536d441401d5257b564dcc62c107f53`,
   `2e2eb0cd89ea18dcced39770b66ac1e71c0f2c1a49fb4de23ea5716698706ba2`.
-- Dependency: the deployer must hold the exact Blend testnet USDC reserve
-  asset (`USDC:GATALT...5V56`), the same constraint as the funded
-  walkthrough in [REMAINING.md](./REMAINING.md) section 3b. It is dispensed
-  by the Blend testnet app's faucet.
+- Dependency: the deployer and any browser wallet running the funded flow
+  must hold the exact Blend testnet USDC reserve asset
+  (`USDC:GATALT...5V56`), the same constraint as the funded walkthrough in
+  [REMAINING.md](./REMAINING.md) section 3b. The wallet must add this custom
+  asset trustline before Sidereal can deposit or tokenize. Circle faucet USDC
+  uses a different issuer and will not appear in this market.
 - Verified with `scripts/live-blend-rates.mjs`: `totalPt = 250000000`,
   `totalSy = 250000000`, `impliedApyBps = 1999`, and `twapWarmingUp: false`.
 
