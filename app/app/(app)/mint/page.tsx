@@ -29,7 +29,12 @@ const MINT_MODES = [
   { id: "split", label: "Deposit + split" },
 ] as const;
 
-function walletTokenBalanceError(error: unknown): string {
+const BLEND_USDC_TRUSTLINE_ERROR =
+  "trustline missing for Blend testnet USDC";
+
+function walletTokenBalanceError(error: unknown, isBlendMarket: boolean): string {
+  if (isBlendMarket) return BLEND_USDC_TRUSTLINE_ERROR;
+
   const text =
     error instanceof Error
       ? `${error.name} ${error.message} ${error.stack ?? ""}`
@@ -42,7 +47,7 @@ function walletTokenBalanceError(error: unknown): string {
     normalized.includes("contract, #13") ||
     normalized.includes("contract #13")
   ) {
-    return "trustline missing for Blend testnet USDC";
+    return BLEND_USDC_TRUSTLINE_ERROR;
   }
   return "unable to read wallet USDC balance";
 }
@@ -94,13 +99,13 @@ export default function MintPage() {
       .catch((error) => {
         if (cancelled) return;
         setUnderlyingBalance(0n);
-        setUnderlyingBalanceError(walletTokenBalanceError(error));
+        setUnderlyingBalanceError(walletTokenBalanceError(error, cfg.yieldSource.kind === "blend"));
       });
 
     return () => {
       cancelled = true;
     };
-  }, [address, client, market]);
+  }, [address, client, market, cfg.yieldSource.kind]);
 
   const amtError =
     underlyingBalanceError ?? amountError(amount, cfg.decimals, underlyingBalance ?? undefined);
