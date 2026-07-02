@@ -6,10 +6,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const TABS = [
-  { href: "/mint", label: "Mint" },
-  { href: "/trade", label: "Trade" },
-  { href: "/portfolio", label: "Portfolio" },
-  { href: "/demo", label: "Demo" },
+  { href: "/mint", label: "Mint", tour: "nav-mint" },
+  { href: "/trade", label: "Trade", tour: "nav-trade" },
+  { href: "/portfolio", label: "Portfolio", tour: "nav-portfolio" },
+  { href: "/demo", label: "Demo", tour: undefined },
 ];
 
 /** In-app navigation tabs. The active tab is the one live signal here, so it
@@ -25,6 +25,7 @@ export function AppTabs() {
             <Link
               href={tab.href}
               aria-current={active ? "page" : undefined}
+              data-tour={tab.tour}
               className={
                 active
                   ? "relative pb-1 text-[13px] uppercase tracking-[0.12em] text-amber after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-amber"

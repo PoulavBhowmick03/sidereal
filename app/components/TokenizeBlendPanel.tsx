@@ -149,7 +149,7 @@ export function TokenizeBlendPanel({
 
       <div className="border-t border-white/10 pt-5">
         <span className="label-data">Tokenization goal</span>
-        <div className="mt-3 grid grid-cols-2 gap-px border border-white/10">
+        <div className="mt-3 grid grid-cols-2 gap-px border border-white/10" data-tour="tokenize-goal">
           {TOKENIZE_MODES.map((option) => (
             <button
               key={option.id}
@@ -255,6 +255,7 @@ export function TokenizeBlendPanel({
             ? "Tokenize and lock fixed rate (4 signatures)"
             : "Tokenize full position (3 signatures)"
         }
+        dataTour="tokenize-submit"
       />
     </div>
   );

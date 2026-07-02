@@ -79,8 +79,9 @@ test("demo page guides the manual Blend walkthrough on a blend market", async ({
     "walkthrough renders only for Blend-backed markets",
   );
   await page.goto("/demo?manual=1");
+  const main = page.getByRole("main");
   await expect(
-    page.getByText("Manual walkthrough: tokenize a real Blend deposit"),
+    main.getByText("Manual walkthrough: tokenize a real Blend deposit"),
   ).toBeVisible();
   for (const label of [
     "Connect a wallet",
@@ -88,7 +89,7 @@ test("demo page guides the manual Blend walkthrough on a blend market", async ({
     "Supply USDC on Blend",
     "Tokenize on the mint page",
   ]) {
-    await expect(page.getByText(label, { exact: true })).toBeVisible();
+    await expect(main.getByText(label, { exact: true })).toBeVisible();
   }
   await expect(page.getByRole("link", { name: "Open Blend testnet" })).toHaveAttribute(
     "href",

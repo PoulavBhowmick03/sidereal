@@ -8,6 +8,8 @@ import { DeploymentBanner } from "@/components/DeploymentBanner";
 import { NetworkBanner } from "@/components/NetworkBanner";
 import { AppTabs } from "@/components/AppTabs";
 import { AppBackground } from "@/components/AppBackground";
+import { TourHelpButton } from "@/components/TourHelpButton";
+import { TourOverlay } from "@/components/TourOverlay";
 
 // Chrome for the working app: a dark, persistent top bar with the in-app tabs,
 // an always-on network indicator, wallet connection, the deployment/network
@@ -25,6 +27,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           <AppTabs />
           <div className="flex items-center gap-3">
             <NetworkPill />
+            <TourHelpButton />
             <WalletButton />
           </div>
         </nav>
@@ -53,6 +56,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         </div>
         </footer>
       </div>
+      <TourOverlay />
     </div>
   );
 }

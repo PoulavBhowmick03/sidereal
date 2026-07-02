@@ -86,3 +86,27 @@ test("mint Buy YT link opens the trade route in app navigation", async ({ page }
   await expect(page).toHaveURL(/\/trade#buy-yt$/, { timeout: 15_000 });
   await expect(page.getByRole("button", { name: "Buy YT" })).toHaveAttribute("aria-pressed", "true");
 });
+
+test("guided tour can be skipped and replayed", async ({ page }) => {
+  test.skip(
+    process.env.E2E_EXPECT_DEPLOYED !== "1",
+    "tour is disabled until public contract addresses are configured",
+  );
+
+  await page.goto("/trade");
+  await expect(page.getByRole("dialog", { name: "Guided tour" })).toContainText(
+    "Connect a wallet",
+  );
+  await expect(page.locator("[data-tour-halo]")).toBeVisible();
+
+  await page.getByRole("button", { name: "Skip" }).click();
+  await expect(page.getByRole("dialog", { name: "Guided tour" })).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByRole("dialog", { name: "Guided tour" })).toHaveCount(0);
+
+  await page.getByRole("button", { name: "Replay guided tour" }).click();
+  await expect(page.getByRole("dialog", { name: "Guided tour" })).toContainText(
+    "Connect a wallet",
+  );
+});

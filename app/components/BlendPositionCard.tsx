@@ -48,6 +48,7 @@ export function BlendPositionCard({
         </div>
         <Link
           href="/mint"
+          data-tour="blend-position-tokenize"
           className="inline-flex shrink-0 text-[13px] uppercase tracking-[0.1em] text-amber transition hover:text-paper"
         >
           Tokenize

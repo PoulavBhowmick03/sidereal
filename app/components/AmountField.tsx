@@ -16,6 +16,7 @@ export function AmountField({
   decimals,
   error,
   max,
+  dataTour,
 }: {
   label: string;
   value: string;
@@ -23,6 +24,7 @@ export function AmountField({
   decimals: number;
   error?: string | null;
   max?: bigint;
+  dataTour?: string;
 }) {
   return (
     <label className="block">
@@ -44,6 +46,7 @@ export function AmountField({
         onChange={(e) => onChange(e.target.value)}
         placeholder="0.0"
         className="field"
+        data-tour={dataTour}
       />
       {error ? <p className="mt-2 text-xs text-red-400">{error}</p> : null}
     </label>

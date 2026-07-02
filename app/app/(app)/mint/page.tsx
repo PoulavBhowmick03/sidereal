@@ -180,6 +180,7 @@ export default function MintPage() {
               decimals={cfg.decimals}
               error={amtError}
               max={underlyingBalance ?? undefined}
+              dataTour="mint-amount"
             />
 
             <p className="text-xs tabular-nums text-ash">
@@ -273,6 +274,7 @@ export default function MintPage() {
             onClick={onSubmit}
             connectLabel="Connect wallet to mint"
             idleLabel={split ? "Deposit, then split (2 signatures)" : "Deposit SY"}
+            dataTour="mint-submit"
           />
 
           <TxStatus phase={phase} context="sy" />

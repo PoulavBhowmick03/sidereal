@@ -16,6 +16,7 @@ export function SubmitButton({
   connectLabel,
   disabled,
   onClick,
+  dataTour,
 }: {
   phase: TxPhase;
   address: string | null;
@@ -23,13 +24,20 @@ export function SubmitButton({
   connectLabel: string;
   disabled: boolean;
   onClick: () => void;
+  dataTour?: string;
 }) {
   const working = address !== null && phase.kind === "working";
   const label =
     address === null ? connectLabel : working ? `${phase.step}...` : idleLabel;
 
   return (
-    <button type="button" disabled={disabled} onClick={onClick} className="btn-solid">
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className="btn-solid"
+      data-tour={dataTour}
+    >
       {working ? (
         <span
           aria-hidden
