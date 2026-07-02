@@ -62,6 +62,34 @@ test("demo page exposes the automated proof runner without starting it", async (
   await expect(page.getByText("No output yet.")).toBeVisible();
 });
 
+test("demo page guides the manual Blend walkthrough on a blend market", async ({ page }) => {
+  test.skip(
+    process.env.NEXT_PUBLIC_YIELD_SOURCE_KIND !== "blend",
+    "walkthrough renders only for Blend-backed markets",
+  );
+  await page.goto("/demo?manual=1");
+  await expect(
+    page.getByText("Manual walkthrough: tokenize a real Blend deposit"),
+  ).toBeVisible();
+  for (const label of [
+    "Connect a wallet",
+    "Get Circle testnet USDC",
+    "Supply USDC on Blend",
+    "Tokenize on the mint page",
+  ]) {
+    await expect(page.getByText(label, { exact: true })).toBeVisible();
+  }
+  await expect(page.getByRole("link", { name: "Open Circle faucet" })).toHaveAttribute(
+    "href",
+    "https://faucet.circle.com",
+  );
+  await expect(page.getByRole("link", { name: "Open Blend testnet" })).toHaveAttribute(
+    "href",
+    "https://testnet.blend.capital",
+  );
+  await expect(page.getByRole("link", { name: "Go to mint" })).toHaveAttribute("href", "/mint");
+});
+
 test("production public contract configuration reaches the browser", async ({ page }) => {
   test.skip(
     process.env.E2E_EXPECT_DEPLOYED !== "1",

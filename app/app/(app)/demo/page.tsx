@@ -3,6 +3,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { BlendWalkthrough } from "@/components/BlendWalkthrough";
 
 type DemoTaskId = "auth" | "amm-routes";
 type DemoStatus = "idle" | "running" | "passed" | "failed";
@@ -643,11 +644,14 @@ export default function DemoPage() {
             PT-&gt;SY, SY-&gt;YT, and YT-&gt;SY swaps, then records explorer links and final command output.
           </p>
           <p className="md:col-span-2">
-            It does not submit transactions from a browser wallet. Freighter, xBull, and Lobstr signing still need
-            a separate manual wallet pass.
+            It does not submit transactions from a browser wallet. That half is the manual
+            walkthrough below: connect a wallet, fund it, supply on Blend, and tokenize the
+            position through the mint page.
           </p>
         </div>
       </section>
+
+      <BlendWalkthrough />
 
       <section className="grid gap-6 lg:grid-cols-3">
         {STEPS.map((step, index) => {

@@ -160,7 +160,9 @@ via `initialize_blend`). On top of it:
   domain error 1217 `InvalidBTokenBurnAmount`, not a decode error.
 - ☐ **Funded walkthrough.** A wallet holding Circle testnet USDC (manual
   faucet step, https://faucet.circle.com) supplies to Blend, then runs the
-  tokenize flow end to end in the browser.
+  tokenize flow end to end in the browser. The /demo page now guides this as
+  a live self-verifying checklist (connect, faucet, supply on Blend, tokenize
+  on mint); it stays open until someone completes it with a funded wallet.
 
 ## 4. Known risks
 
