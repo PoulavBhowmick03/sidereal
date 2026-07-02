@@ -18,14 +18,42 @@ export function BlendPositionCard({
   position,
   rates,
   decimals,
+  variant = "full",
 }: {
   source: YieldSourceConfig;
   position: BlendPosition | null;
   rates: BlendRates | null;
   decimals: number;
+  variant?: "full" | "banner";
 }) {
   if (source.kind !== "blend" || position === null || position.underlyingValue <= 0n) {
     return null;
+  }
+
+  const variableRate = rates ? bpsToPercent(blendRateToBps(rates.supplyApr)) : "variable rate";
+  const fullVariableRate = rates ? variableRate : "a variable rate";
+
+  if (variant === "banner") {
+    return (
+      <div className="card flex flex-col gap-4 border-amber/20 p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="label-data">Blend position detected</p>
+          <p className="mt-1 text-sm leading-relaxed text-smoke">
+            <span className="tabular-nums text-paper">
+              {formatTokenAmount(position.underlyingValue, decimals)} USDC
+            </span>{" "}
+            supplied in {source.name}, earning{" "}
+            <span className="tabular-nums text-amber">{fullVariableRate}</span>.
+          </p>
+        </div>
+        <Link
+          href="/mint"
+          className="inline-flex shrink-0 text-[13px] uppercase tracking-[0.1em] text-amber transition hover:text-paper"
+        >
+          Tokenize
+        </Link>
+      </div>
+    );
   }
 
   return (
@@ -45,9 +73,7 @@ export function BlendPositionCard({
 
       <p className="text-sm leading-relaxed text-smoke">
         This deposit is earning{" "}
-        <span className="tabular-nums text-amber">
-          {rates ? bpsToPercent(blendRateToBps(rates.supplyApr)) : "a variable rate"}
-        </span>{" "}
+        <span className="tabular-nums text-amber">{fullVariableRate}</span>{" "}
         in Blend right now. Tokenize it to lock the fixed side with PT, or sell the
         variable side as YT.
       </p>

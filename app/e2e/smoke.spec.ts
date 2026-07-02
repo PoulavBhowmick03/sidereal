@@ -43,6 +43,17 @@ test("nav reaches mint, trade, and portfolio", async ({ page }) => {
 
 });
 
+test("mint page frames fixed and variable choices on a blend market", async ({ page }) => {
+  test.skip(
+    process.env.NEXT_PUBLIC_YIELD_SOURCE_KIND !== "blend",
+    "yield choice renders only for Blend-backed markets",
+  );
+  await page.goto("/mint");
+  await expect(page.getByText("Choose your yield exposure")).toBeVisible();
+  await expect(page.getByText("Lock a fixed rate with PT")).toBeVisible();
+  await expect(page.getByText("Stay variable or buy YT")).toBeVisible();
+});
+
 test("trade page exposes all four pool routes", async ({ page }) => {
   await page.goto("/trade");
   for (const label of ["Buy PT", "Sell PT", "Buy YT", "Sell YT"]) {

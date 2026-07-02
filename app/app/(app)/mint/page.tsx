@@ -22,6 +22,7 @@ import { TxStatus } from "@/components/TxStatus";
 import { MaturityBadge } from "@/components/MaturityBadge";
 import { YieldSourceCard } from "@/components/YieldSourceCard";
 import { TokenizeBlendPanel } from "@/components/TokenizeBlendPanel";
+import { YieldChoiceCard } from "@/components/YieldChoiceCard";
 import { useBlendPosition } from "@/lib/useBlendPosition";
 
 const MINT_MODES = [
@@ -146,6 +147,17 @@ export default function MintPage() {
 
       <PositionCard position={position} decimals={cfg.decimals} />
 
+      {cfg.yieldSource.kind === "blend" &&
+      (blendPosition === null || blendPosition.underlyingValue <= 0n) ? (
+        <YieldChoiceCard
+          market={market}
+          rates={blendRates}
+          decimals={cfg.decimals}
+          fixedHref="#mint-form"
+          fixedCtaLabel="Use mint form"
+        />
+      ) : null}
+
       <TokenizeBlendPanel
         cfg={cfg}
         client={client}
@@ -157,7 +169,7 @@ export default function MintPage() {
         submitSequence={submitSequence}
       />
 
-      <div className="grid gap-10 lg:grid-cols-12">
+      <div id="mint-form" className="grid gap-10 lg:grid-cols-12">
         {/* Deposit form */}
         <div className="space-y-6 lg:col-span-7">
           <div className="card space-y-6 p-8">

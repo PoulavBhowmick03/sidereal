@@ -17,7 +17,10 @@ import { usePosition } from "@/lib/usePosition";
 import { useSidereal } from "@/lib/useSidereal";
 import { useMarket } from "@/lib/useMarket";
 import { useBlendRates } from "@/lib/useBlendRates";
+import { useBlendPosition } from "@/lib/useBlendPosition";
+import { applySlippage, DEFAULT_SLIPPAGE_BPS, SLIPPAGE_OPTIONS } from "@/lib/slippage";
 import { PositionCard } from "@/components/PositionCard";
+import { BlendPositionCard } from "@/components/BlendPositionCard";
 import { AmountField } from "@/components/AmountField";
 import { SubmitButton } from "@/components/SubmitButton";
 import { TxStatus } from "@/components/TxStatus";
@@ -32,24 +35,11 @@ const DIRECTIONS = [
   { id: "sell-yt", label: "Sell YT", assetIn: "YT", assetOut: "SY" },
 ] as const satisfies ReadonlyArray<{ id: string; label: string; assetIn: Asset; assetOut: Asset }>;
 
-// Selectable slippage tolerance. 0.5% stays the default, matching the prior
-// fixed behavior; the chips only change the local min-received guard.
-const SLIPPAGE_OPTIONS = [
-  { bps: 10n, label: "0.1%" },
-  { bps: 50n, label: "0.5%" },
-  { bps: 100n, label: "1.0%" },
-] as const;
-const DEFAULT_SLIPPAGE_BPS = 50n;
-
 // Above this price impact a PT/SY swap is almost certainly draining the pool to
 // the point where the AMM rejects it (the implied rate would cross zero and the
 // contract reverts with ExchangeRateBelowOne). Block the submit and tell the
 // trader to size down rather than letting them sign a transaction that reverts.
 const MAX_PRICE_IMPACT_BPS = 2_000n; // 20%
-
-function applySlippage(amountOut: bigint, slippageBps: bigint): bigint {
-  return (amountOut * (10_000n - slippageBps)) / 10_000n;
-}
 
 export default function TradePage() {
   const { cfg, client, address, phase, submit } = useSidereal();
@@ -64,6 +54,18 @@ export default function TradePage() {
   const market = useMarket();
   const blendRates = useBlendRates();
   const position = usePosition(address, phase.kind === "done" ? phase.hash : 0);
+  const blendPosition = useBlendPosition(address, phase.kind === "done" ? phase.hash : 0);
+
+  useEffect(() => {
+    function applyHashRoute() {
+      if (window.location.hash === "#buy-yt") {
+        setDirectionId("buy-yt");
+      }
+    }
+    applyHashRoute();
+    window.addEventListener("hashchange", applyHashRoute);
+    return () => window.removeEventListener("hashchange", applyHashRoute);
+  }, []);
 
   const balanceIn = position
     ? direction.assetIn === "SY"
@@ -143,6 +145,13 @@ export default function TradePage() {
       </header>
 
       <PositionCard position={position} decimals={cfg.decimals} />
+      <BlendPositionCard
+        source={cfg.yieldSource}
+        position={blendPosition}
+        rates={blendRates}
+        decimals={cfg.decimals}
+        variant="banner"
+      />
 
       <div className="grid gap-10 lg:grid-cols-12">
         {/* Market status rail: live, read-only signals from the AMM. */}
@@ -178,6 +187,7 @@ export default function TradePage() {
                   key={d.id}
                   type="button"
                   onClick={() => setDirectionId(d.id)}
+                  aria-pressed={d.id === directionId}
                   className={`px-3 py-2.5 text-[13px] uppercase tracking-[0.08em] transition ${
                     d.id === directionId
                       ? "bg-white/[0.04] text-amber"

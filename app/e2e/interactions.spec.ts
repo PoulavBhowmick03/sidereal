@@ -69,3 +69,20 @@ test("trade warns that YT routes may not settle", async ({ page }) => {
   await page.getByRole("button", { name: "Buy YT" }).click();
   await expect(page.getByText(/flash-route through the pool/i)).toBeVisible();
 });
+
+test("trade hash route opens the buy YT route", async ({ page }) => {
+  await page.goto("/trade#buy-yt");
+  await expect(page.getByRole("button", { name: "Buy YT" })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByText(/flash-route through the pool/i)).toBeVisible();
+});
+
+test("mint Buy YT link opens the trade route in app navigation", async ({ page }) => {
+  test.skip(
+    process.env.NEXT_PUBLIC_YIELD_SOURCE_KIND !== "blend",
+    "yield choice renders only for Blend-backed markets",
+  );
+  await page.goto("/mint");
+  await page.getByRole("link", { name: "Buy YT" }).click();
+  await expect(page).toHaveURL(/\/trade#buy-yt$/, { timeout: 15_000 });
+  await expect(page.getByRole("button", { name: "Buy YT" })).toHaveAttribute("aria-pressed", "true");
+});
