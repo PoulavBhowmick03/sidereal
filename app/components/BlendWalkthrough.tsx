@@ -14,7 +14,6 @@ import { useBlendPosition } from "@/lib/useBlendPosition";
 import { useBlendRates } from "@/lib/useBlendRates";
 import { bpsToPercent, formatTokenAmount } from "@/lib/format";
 
-const CIRCLE_FAUCET_URL = "https://faucet.circle.com";
 const BLEND_TESTNET_APP_URL = "https://testnet.blend.capital";
 const REFRESH_MS = 15_000;
 
@@ -99,17 +98,17 @@ export function BlendWalkthrough() {
       action: address ? null : <WalletButton />,
     },
     {
-      title: "Get Circle testnet USDC",
+      title: "Get Blend testnet USDC",
       state: funded || supplied || tokenized ? "done" : "todo",
       detail:
-        "Request test USDC from Circle's faucet (choose Stellar testnet). This is the exact reserve asset the Blend pool and this market use.",
+        "Add the Blend testnet USDC trustline and fund that exact reserve asset. Circle faucet USDC uses a different issuer and will not appear in this market.",
       live:
         usdcBalance !== null
           ? `Wallet USDC: ${formatTokenAmount(usdcBalance, cfg.decimals)}`
-          : "Wallet USDC: n/a",
+          : `Expected: ${cfg.yieldSource.reserveAsset || cfg.yieldSource.reserveAddress}`,
       action: (
-        <a href={CIRCLE_FAUCET_URL} target="_blank" rel="noreferrer" className="inline-flex rounded-pill border border-white/30 px-4 py-2 text-[13px] uppercase tracking-[0.12em] text-paper transition hover:bg-paper hover:text-ink">
-          Open Circle faucet
+        <a href={BLEND_TESTNET_APP_URL} target="_blank" rel="noreferrer" className="inline-flex rounded-pill border border-white/30 px-4 py-2 text-[13px] uppercase tracking-[0.12em] text-paper transition hover:bg-paper hover:text-ink">
+          Open Blend asset
         </a>
       ),
     },

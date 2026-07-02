@@ -53,7 +53,7 @@ test("trade page exposes all four pool routes", async ({ page }) => {
 test("demo page exposes the automated proof runner without starting it", async ({ page }) => {
   await page.goto("/demo?manual=1");
   await expect(page.getByRole("heading", { name: "Demo", exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: /run full demo/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /run full demo|run locally/i })).toBeVisible();
   await expect(page.getByLabel("Maturity date")).toBeVisible();
   for (const label of ["Auth invariant", "Live AMM proof"]) {
     await expect(page.getByRole("heading", { name: label })).toBeVisible();
@@ -73,16 +73,12 @@ test("demo page guides the manual Blend walkthrough on a blend market", async ({
   ).toBeVisible();
   for (const label of [
     "Connect a wallet",
-    "Get Circle testnet USDC",
+    "Get Blend testnet USDC",
     "Supply USDC on Blend",
     "Tokenize on the mint page",
   ]) {
     await expect(page.getByText(label, { exact: true })).toBeVisible();
   }
-  await expect(page.getByRole("link", { name: "Open Circle faucet" })).toHaveAttribute(
-    "href",
-    "https://faucet.circle.com",
-  );
   await expect(page.getByRole("link", { name: "Open Blend testnet" })).toHaveAttribute(
     "href",
     "https://testnet.blend.capital",

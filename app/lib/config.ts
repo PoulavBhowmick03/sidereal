@@ -16,6 +16,8 @@ export const TESTNET_BLEND_POOL =
   "CCEBVDYM32YNYCVNRXQKDFFPISJJCV557CDZEIRBEE4NCV4KHPQ44HGF";
 export const TESTNET_BLEND_USDC =
   "CAQCFVLOBK5GIULPNZRGATJJMIZL5BSP7X5YJVMGCPTUEPFM4AVSRCJU";
+export const TESTNET_BLEND_USDC_ASSET =
+  "USDC:GATALTGTWIOT6BUDBCZM3Q4OQ4BO2COLOAZ7IYSKPLC2PMSOPPGF5V56";
 
 function publicEnv(value: string | undefined, fallback = ""): string {
   return value === undefined || value === "" ? fallback : value;
@@ -40,6 +42,7 @@ export interface YieldSourceConfig {
   name: string;
   poolAddress: string;
   reserveAddress: string;
+  reserveAsset: string;
   docsUrl: string;
 }
 
@@ -82,6 +85,10 @@ export function appConfig(): AppConfig {
       reserveAddress: publicEnv(
         process.env.NEXT_PUBLIC_YIELD_SOURCE_RESERVE_ADDRESS,
         yieldKind === "blend" ? TESTNET_BLEND_USDC : "",
+      ),
+      reserveAsset: publicEnv(
+        process.env.NEXT_PUBLIC_YIELD_SOURCE_RESERVE_ASSET,
+        yieldKind === "blend" ? TESTNET_BLEND_USDC_ASSET : "",
       ),
       docsUrl: publicEnv(
         process.env.NEXT_PUBLIC_YIELD_SOURCE_URL,

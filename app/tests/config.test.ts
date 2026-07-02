@@ -6,6 +6,7 @@ import {
   isDeployed,
   TESTNET_BLEND_POOL,
   TESTNET_BLEND_USDC,
+  TESTNET_BLEND_USDC_ASSET,
   TESTNET_PASSPHRASE,
   TESTNET_RPC,
   TESTNET_SIMULATION_SOURCE,
@@ -26,6 +27,7 @@ const yieldSourceEnvNames = [
   "NEXT_PUBLIC_YIELD_SOURCE_NAME",
   "NEXT_PUBLIC_YIELD_SOURCE_POOL_ADDRESS",
   "NEXT_PUBLIC_YIELD_SOURCE_RESERVE_ADDRESS",
+  "NEXT_PUBLIC_YIELD_SOURCE_RESERVE_ASSET",
   "NEXT_PUBLIC_YIELD_SOURCE_URL",
 ];
 
@@ -85,6 +87,7 @@ describe("appConfig", () => {
       NEXT_PUBLIC_YIELD_SOURCE_NAME: "Blend test market",
       NEXT_PUBLIC_YIELD_SOURCE_POOL_ADDRESS: TESTNET_BLEND_POOL,
       NEXT_PUBLIC_YIELD_SOURCE_RESERVE_ADDRESS: TESTNET_BLEND_USDC,
+      NEXT_PUBLIC_YIELD_SOURCE_RESERVE_ASSET: TESTNET_BLEND_USDC_ASSET,
       NEXT_PUBLIC_YIELD_SOURCE_URL: "https://docs.blend.capital/",
     });
 
@@ -95,6 +98,7 @@ describe("appConfig", () => {
       name: "Blend test market",
       poolAddress: TESTNET_BLEND_POOL,
       reserveAddress: TESTNET_BLEND_USDC,
+      reserveAsset: TESTNET_BLEND_USDC_ASSET,
       docsUrl: "https://docs.blend.capital/",
     });
   });

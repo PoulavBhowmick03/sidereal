@@ -35,6 +35,7 @@ export default function MintPage() {
   const [amount, setAmount] = useState("");
   const [mode, setMode] = useState<(typeof MINT_MODES)[number]["id"]>("deposit");
   const [underlyingBalance, setUnderlyingBalance] = useState<bigint | null>(null);
+  const [underlyingBalanceError, setUnderlyingBalanceError] = useState<string | null>(null);
   const market = useMarket();
   const blendRates = useBlendRates();
   const position = usePosition(address, phase.kind === "done" ? phase.hash : 0);
@@ -66,13 +67,21 @@ export default function MintPage() {
 
     let cancelled = false;
     setUnderlyingBalance(null);
+    setUnderlyingBalanceError(null);
     client
       .getTokenBalance(market.underlying, address)
       .then((balance) => {
         if (!cancelled) setUnderlyingBalance(balance);
       })
-      .catch(() => {
-        if (!cancelled) setUnderlyingBalance(0n);
+      .catch((error) => {
+        if (cancelled) return;
+        const message = String(error);
+        setUnderlyingBalance(0n);
+        setUnderlyingBalanceError(
+          message.includes("trustline entry is missing")
+            ? "trustline missing for Blend testnet USDC"
+            : "unable to read wallet USDC balance",
+        );
       });
 
     return () => {
@@ -80,7 +89,8 @@ export default function MintPage() {
     };
   }, [address, client, market]);
 
-  const amtError = amountError(amount, cfg.decimals, underlyingBalance ?? undefined);
+  const amtError =
+    underlyingBalanceError ?? amountError(amount, cfg.decimals, underlyingBalance ?? undefined);
   const canSubmit = address !== null && preview !== null && !amtError && phase.kind !== "working";
 
   async function onSubmit() {
@@ -143,13 +153,21 @@ export default function MintPage() {
             />
 
             <p className="text-xs tabular-nums text-ash">
-              Wallet USDC balance:{" "}
+              {cfg.yieldSource.kind === "blend" ? "Wallet Blend USDC balance" : "Wallet USDC balance"}
+              :{" "}
               {address
                 ? underlyingBalance === null
                   ? "loading"
-                  : formatTokenAmount(underlyingBalance, cfg.decimals)
+                  : underlyingBalanceError ?? formatTokenAmount(underlyingBalance, cfg.decimals)
                 : "connect wallet"}
             </p>
+            {cfg.yieldSource.kind === "blend" ? (
+              <p className="text-xs leading-relaxed text-ash">
+                Expected asset: {cfg.yieldSource.reserveAsset || "Blend testnet USDC"} via{" "}
+                {cfg.yieldSource.reserveAddress}. Circle faucet USDC on another issuer will not
+                appear here.
+              </p>
+            ) : null}
 
             <div className="border-t border-white/10 pt-5">
               <span className="label-data">Mint mode</span>
