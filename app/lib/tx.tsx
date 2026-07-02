@@ -9,7 +9,7 @@ export type TxPhase =
   | { kind: "idle" }
   | { kind: "working"; step: string }
   | { kind: "done"; hash: string }
-  | { kind: "error"; error: unknown };
+  | { kind: "error"; error: unknown; step?: string };
 
 export interface TxSteps {
   build: () => Promise<TransactionEnvelope>;
@@ -52,10 +52,12 @@ export function useTxFlow() {
    * host-function op, so deposit + split must be two signatures.
    */
   const runSequence = useCallback(async (steps: TxSequenceStep[]) => {
+    let failedStep: string | undefined;
     try {
       let hash = "";
       const total = steps.length;
       for (const [i, step] of steps.entries()) {
+        failedStep = step.label;
         const tag = total > 1 ? `${step.label} (${i + 1}/${total})` : step.label;
         setPhase({ kind: "working", step: `${tag}: building` });
         const env = await step.build();
@@ -66,7 +68,7 @@ export function useTxFlow() {
       }
       setPhase({ kind: "done", hash });
     } catch (err) {
-      setPhase({ kind: "error", error: err });
+      setPhase({ kind: "error", error: err, step: failedStep });
     }
   }, []);
 
