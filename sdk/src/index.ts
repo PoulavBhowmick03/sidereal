@@ -41,6 +41,7 @@ export type {
   SwapArgs,
   Quote,
   Position,
+  LpPosition,
   MintArgs,
   SplitArgs,
   RedeemArgs,

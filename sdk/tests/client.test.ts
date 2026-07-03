@@ -147,6 +147,8 @@ describe("getMarket", () => {
       underlying: "USDC",
       reserve_pt: 500n,
       reserve_sy: 700n,
+      total_lp: 1_000n,
+      config: { fee_bps: 10n },
     };
     const m = await newClient().getMarket("mkt");
     expect(m.impliedApyBps).toBe(860n);
@@ -155,6 +157,8 @@ describe("getMarket", () => {
     expect(m.underlying).toBe("USDC");
     expect(m.totalPt).toBe(500n);
     expect(m.totalSy).toBe(700n);
+    expect(m.totalLp).toBe(1_000n);
+    expect(m.feeBps).toBe(10n);
     expect(m.maturity).toBe(2_000_000_000);
   });
 
@@ -181,12 +185,14 @@ describe("getMarket", () => {
       underlying: "USDC",
       reserve_pt: 500n,
       reserve_sy: 700n,
+      total_lp: 1_000n,
+      config: { fee_bps: 10n },
     };
 
     await newClient().getMarket("mkt");
 
     expect(state().accountRequests).not.toContain(contracts.market);
-    expect(state().accountRequests).toHaveLength(8);
+    expect(state().accountRequests).toHaveLength(10);
     expect(state().accountRequests.every((account) => account === simulationSourceAccount)).toBe(
       true,
     );
@@ -252,6 +258,59 @@ describe("getPosition", () => {
     const p = await newClient().getPosition("G1", "mkt");
     expect(p.claimableYield).toBe(0n);
     expect(state().calls.some((c) => c.method === "preview_claim_yield")).toBe(false);
+  });
+});
+
+describe("getLpPosition", () => {
+  it("reads LP balance and derives pro-rata pool value", async () => {
+    state().returns = {
+      exchange_rate: 1_000_000_000_000_000_000n,
+      twap_apy: 860n,
+      spot_apy: 875n,
+      twap_warming_up: false,
+      maturity: 2_000_000_000n,
+      underlying: "USDC",
+      reserve_pt: 1_001n,
+      reserve_sy: 2_003n,
+      total_lp: 400n,
+      config: { fee_bps: 10n },
+      lp_balance: 123n,
+    };
+
+    const p = await newClient().getLpPosition("G1", "mkt");
+
+    expect(p).toMatchObject({
+      holder: "G1",
+      marketId: "mkt",
+      lpBalance: 123n,
+      totalLp: 400n,
+      shareBps: 3_075n,
+      ptValue: 307n,
+      syValue: 615n,
+    });
+    expect(state().calls.some((c) => c.method === "lp_balance")).toBe(true);
+  });
+
+  it("returns zero share and value for an unseeded pool", async () => {
+    state().returns = {
+      exchange_rate: 1_000_000_000_000_000_000n,
+      twap_apy: 0n,
+      spot_apy: 0n,
+      twap_warming_up: false,
+      maturity: 2_000_000_000n,
+      underlying: "USDC",
+      reserve_pt: 0n,
+      reserve_sy: 0n,
+      total_lp: 0n,
+      config: { fee_bps: 10n },
+      lp_balance: 0n,
+    };
+
+    const p = await newClient().getLpPosition("G1", "mkt");
+
+    expect(p.shareBps).toBe(0n);
+    expect(p.ptValue).toBe(0n);
+    expect(p.syValue).toBe(0n);
   });
 });
 

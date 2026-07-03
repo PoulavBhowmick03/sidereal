@@ -14,6 +14,7 @@ import type {
   AddLiquidityArgs,
   BlendWithdrawArgs,
   ContractAddresses,
+  LpPosition,
   MarketState,
   MintArgs,
   SplitArgs,
@@ -86,17 +87,29 @@ export class StellarYT {
     // Accessors pinned from codex-1's bus reply (feat/amm): twap_apy() is the
     // internal TWAP, spot_apy() the single-block view, reserve_pt/reserve_sy the
     // pool balances. APY reads return zero at/after maturity.
-    const [exchangeRate, twapApyBps, spotApyBps, twapWarmingUp, maturity, underlying, totalPt, totalSy] =
-      await Promise.all([
-        this.simulateRead<bigint>(sy.call("exchange_rate")),
-        this.simulateRead<bigint>(market.call("twap_apy")),
-        this.simulateRead<bigint>(market.call("spot_apy")),
-        this.simulateRead<boolean>(market.call("twap_warming_up")),
-        this.simulateRead<bigint>(market.call("maturity")),
-        this.simulateRead<string>(sy.call("underlying")),
-        this.simulateRead<bigint>(market.call("reserve_pt")),
-        this.simulateRead<bigint>(market.call("reserve_sy")),
-      ]);
+    const [
+      exchangeRate,
+      twapApyBps,
+      spotApyBps,
+      twapWarmingUp,
+      maturity,
+      underlying,
+      totalPt,
+      totalSy,
+      totalLp,
+      config,
+    ] = await Promise.all([
+      this.simulateRead<bigint>(sy.call("exchange_rate")),
+      this.simulateRead<bigint>(market.call("twap_apy")),
+      this.simulateRead<bigint>(market.call("spot_apy")),
+      this.simulateRead<boolean>(market.call("twap_warming_up")),
+      this.simulateRead<bigint>(market.call("maturity")),
+      this.simulateRead<string>(sy.call("underlying")),
+      this.simulateRead<bigint>(market.call("reserve_pt")),
+      this.simulateRead<bigint>(market.call("reserve_sy")),
+      this.simulateRead<bigint>(market.call("total_lp")),
+      this.simulateRead<{ fee_bps: bigint | number }>(market.call("config")),
+    ]);
 
     const maturitySec = Number(maturity);
     const nowSec = Math.floor(Date.now() / 1000);
@@ -112,6 +125,8 @@ export class StellarYT {
       secondsToMaturity: secondsToMaturity(maturitySec, nowSec),
       totalPt,
       totalSy,
+      totalLp,
+      feeBps: BigInt(config.fee_bps),
     };
   }
 
@@ -185,6 +200,36 @@ export class StellarYT {
       ytBalance,
       claimableYield,
       lpBalance,
+    };
+  }
+
+  /**
+   * Reads a holder's LP balance plus the pro-rata PT/SY claim represented by
+   * that LP. Payout math matches remove_liquidity: floor against current pool
+   * reserves, zero when the pool has no LP supply.
+   */
+  async getLpPosition(holder: string, marketId: string): Promise<LpPosition> {
+    const market = new Contract(this.contracts.market);
+    const holderScVal = new Address(holder).toScVal();
+
+    const [marketState, lpBalance] = await Promise.all([
+      this.getMarket(marketId),
+      this.simulateRead<bigint>(market.call("lp_balance", holderScVal)),
+    ]);
+
+    const totalLp = marketState.totalLp;
+    const shareBps = totalLp > 0n ? (lpBalance * BPS_DENOMINATOR) / totalLp : 0n;
+    const ptValue = totalLp > 0n ? (lpBalance * marketState.totalPt) / totalLp : 0n;
+    const syValue = totalLp > 0n ? (lpBalance * marketState.totalSy) / totalLp : 0n;
+
+    return {
+      holder,
+      marketId,
+      lpBalance,
+      totalLp,
+      shareBps,
+      ptValue,
+      syValue,
     };
   }
 

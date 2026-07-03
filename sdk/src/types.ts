@@ -65,6 +65,10 @@ export interface MarketState {
   totalPt: bigint;
   /** Total SY reserves in the pool. */
   totalSy: bigint;
+  /** Total LP token supply accounted by the AMM. */
+  totalLp: bigint;
+  /** AMM fee in basis points. */
+  feeBps: bigint;
 }
 
 export interface SwapArgs {
@@ -103,6 +107,21 @@ export interface Position {
   claimableYield: bigint;
   /** LP tokens held by this holder in the AMM, in base units. */
   lpBalance: bigint;
+}
+
+export interface LpPosition {
+  holder: string;
+  marketId: string;
+  /** LP tokens held by this holder in the AMM, in base units. */
+  lpBalance: bigint;
+  /** Total LP token supply accounted by the AMM. */
+  totalLp: bigint;
+  /** Holder share of the pool, in basis points. */
+  shareBps: bigint;
+  /** Pro-rata PT claim if this holder removes all LP now, rounded down. */
+  ptValue: bigint;
+  /** Pro-rata SY claim if this holder removes all LP now, rounded down. */
+  syValue: bigint;
 }
 
 export interface MintArgs {
