@@ -4,6 +4,7 @@
 
 import { useEffect, useRef } from "react";
 import Image from "next/image";
+import { Grain } from "@/components/Grain";
 
 // Marketing hero background. The "mercury flow" render now carries three layers
 // of motion so it is alive even at rest: a continuous CSS drift, a continuous
@@ -12,11 +13,6 @@ import Image from "next/image";
 // scroll parallax sits on top for depth. The liquid/glass motion runs always;
 // only the scroll parallax respects prefers-reduced-motion. Atmospheric imagery
 // like this is for the marketing hero ONLY, never behind an app screen.
-// Film grain tile: tiny grayscale fractal noise, tiled and blended over the
-// hero at low opacity so the darkroom render reads as photographed, not flat.
-const GRAIN =
-  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)'/%3E%3C/svg%3E\")";
-
 // The displacement rests at 34 and surges toward 62 with pointer velocity, so
 // moving the mouse literally stirs the liquid metal.
 const DISPLACE_REST = 34;
@@ -137,10 +133,7 @@ export function HeroBackground() {
 
       {/* Film grain over everything: the cinematic-darkroom texture. Static
           tile, so it costs one paint and nothing per frame. */}
-      <div
-        className="absolute inset-0 opacity-[0.05] mix-blend-overlay"
-        style={{ backgroundImage: GRAIN }}
-      />
+      <Grain className="absolute inset-0" />
     </div>
   );
 }

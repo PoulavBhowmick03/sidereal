@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Wordmark } from "@/components/Logo";
+import { RollingLink } from "@/components/RollingLink";
 
 const LINKS = [
   { href: "#protocol", label: "Protocol" },
@@ -40,9 +41,13 @@ export function MarketingNav() {
         <div className="flex items-center gap-8">
           <div className="hidden items-center gap-8 sm:flex">
             {LINKS.map((l) => (
-              <a key={l.label} href={l.href} className="label-data transition hover:text-paper">
+              <RollingLink
+                key={l.label}
+                href={l.href}
+                className="label-data transition hover:text-paper"
+              >
                 {l.label}
-              </a>
+              </RollingLink>
             ))}
           </div>
           <Link
@@ -78,13 +83,13 @@ export function MarketingNav() {
           <ul className="flex flex-col gap-4">
             {LINKS.map((l) => (
               <li key={l.label}>
-                <a
+                <RollingLink
                   href={l.href}
                   onClick={() => setOpen(false)}
                   className="label-data transition hover:text-paper"
                 >
                   {l.label}
-                </a>
+                </RollingLink>
               </li>
             ))}
           </ul>

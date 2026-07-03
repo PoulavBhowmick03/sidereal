@@ -9,6 +9,11 @@ import { InvariantEquation } from "@/components/InvariantEquation";
 import { CountUp } from "@/components/CountUp";
 import { StepDiagram } from "@/components/StepDiagrams";
 import { PinnedSteps } from "@/components/PinnedSteps";
+import { AudienceCards } from "@/components/AudienceCards";
+import { GuaranteesStrip } from "@/components/GuaranteesStrip";
+import { Spotlight } from "@/components/Spotlight";
+import { TickerBand } from "@/components/TickerBand";
+import { WordReveal } from "@/components/WordReveal";
 // The three token legs, defined in the protocol's own terms. No invented
 // financial figures (AGENTS section 7): the stats band states protocol facts,
 // not market numbers, so the page reads honestly before a market is deployed.
@@ -68,8 +73,8 @@ export default function LandingPage() {
     <>
       {/* Hero: clean ink editorial frame, no atmospheric render. The headline
           carries the section; the metallic background lives on the app screens. */}
-      <section className="relative flex min-h-screen flex-col justify-center overflow-hidden">
-                <HeroBackground />
+      <section className="relative flex min-h-screen flex-col justify-center overflow-hidden bg-transparent">
+        <HeroBackground />
         <Parallax speed={0.12} className="relative mx-auto w-full max-w-[1280px] px-6 sm:px-16">
           <h1 className="hero-shimmer max-w-4xl text-5xl font-light leading-[1.02] tracking-tight sm:text-7xl lg:text-8xl">
             Split Stellar yield into principal and yield.
@@ -153,17 +158,24 @@ export default function LandingPage() {
         </div>
       </section>
 
+      <TickerBand />
+      <AudienceCards />
+      <GuaranteesStrip />
+
       {/* Protocol overview: facts as numerals in an enclosed panel, not invented
           market metrics. */}
-      <section className="border-t border-white/10 bg-ink">
+      <section className="relative bg-transparent">
+        <div className="hairline" />
         <div className="mx-auto max-w-[1280px] px-6 py-24 sm:px-16">
-          <Reveal className="flex items-center justify-between">
-            <h2 className="text-3xl font-light tracking-tight">Protocol overview</h2>
+          <div className="flex items-center justify-between">
+            <h2 className="text-3xl font-light tracking-tight">
+              <WordReveal>Protocol overview</WordReveal>
+            </h2>
             <p className="glow-signal label-data text-amber">Live · Testnet</p>
-          </Reveal>
+          </div>
           <div className="mt-12 grid grid-cols-2 border border-white/10 lg:grid-cols-4">
             {FACTS.map((fact, i) => (
-              <div
+              <Spotlight
                 key={fact.label}
                 className={`p-8 ${i < FACTS.length - 1 ? "border-b border-white/10 lg:border-b-0 lg:border-r" : ""} ${
                   i < 2 ? "border-b lg:border-b-0" : ""
@@ -178,7 +190,7 @@ export default function LandingPage() {
                 </p>
                 <p className="mt-4 label-data">{fact.label}</p>
                 <p className="mt-1 text-sm text-pewter">{fact.note}</p>
-              </div>
+              </Spotlight>
             ))}
           </div>
         </div>

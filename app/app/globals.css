@@ -353,22 +353,162 @@ body {
   box-shadow: 0 0 6px 1px rgba(255, 172, 46, 0.6);
 }
 
+/* Fixed marketing atmosphere. The mobile render keeps only the base gradient;
+   large-screen layouts receive the two slow transform-only washes. */
+.atmosphere-nebula {
+  position: absolute;
+  height: 72rem;
+  width: 72rem;
+  border-radius: 50%;
+  will-change: transform;
+}
+.atmosphere-nebula-white {
+  left: -28rem;
+  top: 18%;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.03), transparent 68%);
+  animation: atmosphere-drift-white 48s ease-in-out infinite;
+}
+.atmosphere-nebula-blue {
+  bottom: -28rem;
+  right: -24rem;
+  background: radial-gradient(circle, rgba(120, 140, 180, 0.05), transparent 68%);
+  animation: atmosphere-drift-blue 57s ease-in-out infinite;
+}
+@keyframes atmosphere-drift-white {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(12vw, -5vh, 0) scale(1.08);
+  }
+}
+@keyframes atmosphere-drift-blue {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1.06);
+  }
+  50% {
+    transform: translate3d(-10vw, -8vh, 0) scale(0.96);
+  }
+}
+
+/* Full-bleed divider that fades into the atmospheric canvas at both edges. */
+.hairline {
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.25),
+    transparent
+  );
+}
+
+/* Keep the fixed atmosphere above the reveal footer while page content is in
+   view, then clip it at the main boundary so the existing footer can emerge. */
+.marketing-main {
+  clip-path: inset(0);
+}
+
+/* Fine-pointer card light. The radial is absent, rather than merely hidden,
+   on touch layouts so mobile gets no pointer-only paint work. */
+.spotlight {
+  position: relative;
+}
+@media (hover: hover) and (pointer: fine) {
+  .spotlight::before {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(
+      200px circle at var(--mx, 50%) var(--my, 50%),
+      rgba(255, 255, 255, 0.05),
+      transparent
+    );
+    content: "";
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 250ms ease;
+  }
+  .spotlight:hover::before {
+    opacity: 1;
+  }
+}
+
+/* Fixed-height protocol ticker. Both sequences have identical widths, so
+   translating the two-copy track by half loops without a visible seam. */
+.ticker-track {
+  animation: ticker-loop 40s linear infinite;
+}
+@keyframes ticker-loop {
+  to {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+/* Two-line rolling label. The second copy is absolutely positioned so the
+   track remains exactly one line tall and -100% moves by one label height. */
+.roll {
+  overflow: hidden;
+}
+.roll-label {
+  position: relative;
+  display: block;
+  white-space: nowrap;
+  transition: transform 250ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.roll-label-copy {
+  position: absolute;
+  left: 0;
+  top: 100%;
+}
+@media (hover: hover) and (pointer: fine) {
+  .roll:hover .roll-label {
+    transform: translateY(-100%);
+  }
+}
+
+/* New-section kickers wipe in as a single data label. The complete text is
+   still the server-rendered default; clients opt into the clipped start. */
+.kicker-wipe {
+  width: fit-content;
+  clip-path: inset(0 0 0 0);
+  transition: clip-path 600ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.kicker-wipe[data-hidden="true"] {
+  clip-path: inset(0 100% 0 0);
+}
+
+.guarantees-ready .diag-pop {
+  animation: diag-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hero-shimmer,
   .diagram-anim *,
   .page-enter > * > *,
   .lv-new,
   .lv-flash,
-  .skeleton {
+  .skeleton,
+  .atmosphere-nebula,
+  .ticker-track,
+  .guarantees-ready .diag-pop {
     animation: none !important;
+  }
+  .roll-label,
+  .kicker-wipe,
+  .spotlight::before {
+    transition: none !important;
+  }
+  .spotlight::before {
+    display: none;
   }
   /* Pinning + scroll morph is exactly the motion this preference declines:
      serve the stacked editorial bands on every viewport instead. */
   .steps-pinned {
-    display: none;
+    display: none !important;
   }
   .steps-stacked {
-    display: block;
+    display: block !important;
   }
   /* Without the exit animation, stale characters would stack on the new
      ones: drop them entirely so values simply swap. */

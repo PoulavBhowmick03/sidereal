@@ -46,7 +46,7 @@ export function PinnedSteps({ steps }: { steps: PinnedStep[] }) {
     <div ref={wrapRef} className="pinned-steps relative h-[260vh]" data-phase={phase}>
       <div
         className={`sticky top-0 flex h-screen items-center overflow-hidden transition-colors duration-700 ${
-          phase === 2 ? "bg-carbon" : "bg-ink"
+          phase === 2 ? "bg-carbon" : "bg-transparent"
         }`}
       >
         <div className="mx-auto grid w-full max-w-[1280px] items-center gap-10 px-6 sm:px-16 lg:grid-cols-2">
