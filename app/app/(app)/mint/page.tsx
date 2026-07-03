@@ -26,6 +26,7 @@ import { PositionCard } from "@/components/PositionCard";
 import { AmountField } from "@/components/AmountField";
 import { SubmitButton } from "@/components/SubmitButton";
 import { TxStatus } from "@/components/TxStatus";
+import { ExplorerTxLink } from "@/components/ExplorerTxLink";
 import { MaturityBadge } from "@/components/MaturityBadge";
 import { YieldSourceCard } from "@/components/YieldSourceCard";
 import { TokenizeBlendPanel } from "@/components/TokenizeBlendPanel";
@@ -333,8 +334,7 @@ export default function MintPage() {
                 ) : null}
                 {faucetPhase.kind === "done" ? (
                   <p className="text-sm font-medium text-paper">
-                    Test USDC granted. Tx{" "}
-                    <span className="font-mono text-smoke">{faucetPhase.hash.slice(0, 10)}...</span>
+                    Test USDC granted. Tx <ExplorerTxLink hash={faucetPhase.hash} />
                   </p>
                 ) : null}
                 {faucetPhase.kind === "error" ? (
