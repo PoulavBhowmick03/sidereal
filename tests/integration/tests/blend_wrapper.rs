@@ -33,6 +33,9 @@ struct MockConfig {
 enum DataKey {
     Config,
     Supply(Address),
+    /// Reserve index the pool reports for the underlying, 0 unless a test
+    /// simulates a pool reconfiguration.
+    ReserveIndex,
 }
 
 #[contract]
@@ -54,6 +57,12 @@ impl MockBlendPool {
         let mut config: MockConfig = env.storage().instance().get(&DataKey::Config).unwrap();
         config.b_rate = b_rate;
         env.storage().instance().set(&DataKey::Config, &config);
+    }
+
+    /// Simulates the pool moving the underlying to a different reserve index,
+    /// as a reconfiguration over the market's life could.
+    pub fn set_reserve_index(env: Env, index: u32) {
+        env.storage().instance().set(&DataKey::ReserveIndex, &index);
     }
 
     pub fn get_reserve_list(env: Env) -> Vec<Address> {
@@ -136,13 +145,18 @@ impl MockBlendPool {
 }
 
 fn reserve(env: &Env, config: MockConfig) -> Reserve {
+    let index: u32 = env
+        .storage()
+        .instance()
+        .get(&DataKey::ReserveIndex)
+        .unwrap_or(0);
     Reserve {
         asset: config.underlying,
         config: ReserveConfig {
             c_factor: 0,
             decimals: 7,
             enabled: true,
-            index: 0,
+            index,
             l_factor: 0,
             max_util: 0,
             r_base: 0,
@@ -282,4 +296,35 @@ fn blend_supply_rate_growth_yield_claim_and_withdraw_round_trip() {
         .get(0)
         .unwrap_or(0)
         < expected_b_tokens);
+}
+
+/// If the pool is reconfigured so the underlying no longer sits at the reserve
+/// index recorded at init, the wrapper must refuse to value the position
+/// (InvalidBlendReserve, #10) rather than silently price the wrong reserve.
+#[test]
+#[should_panic(expected = "Error(Contract, #10)")]
+fn exchange_rate_traps_when_the_reserve_index_moves() {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1);
+
+    let admin = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let underlying = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let pool = env.register(MockBlendPool, ());
+    let sy = env.register(SyWrapper, ());
+
+    let pool_client = MockBlendPoolClient::new(&env, &pool);
+    pool_client.initialize(&underlying);
+    let sy_client = SyWrapperClient::new(&env, &sy);
+    sy_client.initialize_blend(&admin, &underlying, &pool);
+
+    token::StellarAssetClient::new(&env, &underlying).mint(&alice, &(100 * UNIT));
+    sy_client.deposit(&alice, &(100 * UNIT));
+    assert_eq!(sy_client.exchange_rate(), WAD);
+
+    pool_client.set_reserve_index(&1);
+    sy_client.exchange_rate();
 }

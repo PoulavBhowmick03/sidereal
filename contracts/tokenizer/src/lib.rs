@@ -55,6 +55,8 @@ pub enum Error {
     Matured = 6,
     MathOverflow = 7,
     LiveMarket = 8,
+    /// Retired: no entrypoint gates on escrow coverage anymore (shortfalls are
+    /// priced pro-rata at redemption instead). Kept so code 9 stays reserved.
     Insolvent = 9,
 }
 
@@ -309,7 +311,16 @@ impl Tokenizer {
             push_token(&env, &config.sy_token, &holder, owed);
         }
 
-        check_solvency(&env, &config)?;
+        // No solvency gate here either. With a Blend-derived rate the escrow has
+        // zero coverage slack at mint (split floors the face), and a redeem can
+        // tick the rate down by a sub-stroop rounding notch because Blend's
+        // bToken burn rounds in the pool's favor. Gating claims on coverage
+        // turned that dust regression into a frozen market: every claim reverted
+        // Insolvent, even ones that owed nothing. Regression safety lives in the
+        // YT settle math, which pays zero when the rate has not risen past the
+        // holder's checkpoint, and in the pro-rata caps on `recombine` and
+        // `redeem_at_maturity`, which price a genuine shortfall instead of
+        // blocking it.
         Ok(owed)
     }
 
@@ -416,29 +427,6 @@ fn effective_rate(env: &Env, config: &Config) -> i128 {
     let rate = current_rate(env, &config.sy_token);
     env.storage().instance().set(&DataKey::MaturityRate, &rate);
     rate
-}
-
-/// The escrow-coverage invariant, checked after every state-mutating entrypoint:
-///
-///   escrow_sy * rate / WAD  >=  pt_supply
-///
-/// The escrow, valued at the current rate, must cover all PT principal at face.
-/// YT yield coverage holds by construction: the escrow asset value above PT
-/// principal is exactly the total outstanding YT yield (split establishes
-/// equality, and claim/redeem/recombine each reduce both sides by equal amounts,
-/// rounding in the escrow's favor). Total YT yield is not enumerable on-chain,
-/// so we assert the computable PT half; the YT half follows from the algebra.
-/// A violation means the escrow can no longer cover principal (a rate regression
-/// past solvency), which redemption handles by capping payouts pro-rata.
-fn check_solvency(env: &Env, config: &Config) -> Result<(), Error> {
-    let rate = effective_rate(env, config);
-    let escrow_shares = token_balance(env, &config.sy_token, &env.current_contract_address());
-    let escrow_asset = mul_div_floor(escrow_shares, rate, WAD)?;
-    let pt_supply = pt_total_supply(env, &config.pt_token);
-    if escrow_asset < pt_supply {
-        return Err(Error::Insolvent);
-    }
-    Ok(())
 }
 
 /// Pulls `amount` of `token_id` from `from` into the tokenizer (holder-authorized).

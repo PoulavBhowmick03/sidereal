@@ -315,6 +315,25 @@
         }
       ]
     ],
+    [
+      [
+        "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+        {
+          "function": {
+            "contract_fn": {
+              "contract_address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAMDR4",
+              "function_name": "claim_yield",
+              "args": [
+                {
+                  "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM"
+                }
+              ]
+            }
+          },
+          "sub_invocations": []
+        }
+      ]
+    ],
     []
   ],
   "ledger": {
@@ -527,7 +546,7 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "1000000000"
+                "i128": "909090910"
               }
             }
           },
@@ -554,7 +573,7 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "0"
+                "i128": "90909090"
               }
             }
           },
@@ -581,7 +600,7 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "1000000000"
+                "i128": "909090910"
               }
             }
           },
@@ -608,7 +627,7 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "0"
+                "i128": "90909090"
               }
             }
           },
@@ -834,7 +853,7 @@
               },
               "durability": "persistent",
               "val": {
-                "i128": "90909090"
+                "i128": "0"
               }
             }
           },
@@ -1118,6 +1137,26 @@
               "key": {
                 "ledger_key_nonce": {
                   "nonce": "1194852393571756375"
+                }
+              },
+              "durability": "temporary",
+              "val": "void"
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 6311999
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
+              "key": {
+                "ledger_key_nonce": {
+                  "nonce": "3126073502131104533"
                 }
               },
               "durability": "temporary",

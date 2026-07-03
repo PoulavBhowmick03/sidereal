@@ -10,8 +10,9 @@
 //!   - Yield is conserved across transfers (no loss, no double count).
 //!   - The escrow covers outstanding PT face plus unclaimed YT yield at every
 //!     state transition, including a 10k-step random property test.
-//!   - Insolvency: PT redemption is capped pro-rata on a rate regression; YT is
-//!     subordinated (claims revert rather than breach PT coverage).
+//!   - Insolvency: PT redemption is capped pro-rata on a rate regression; YT
+//!     claims never freeze (the settle math pays zero on a dip, and banked
+//!     yield stays payable).
 //!   - The maturity rate is frozen, so post-maturity rate moves do not change
 //!     redemption.
 //!
@@ -370,8 +371,8 @@ fn redemption_is_capped_when_rate_regresses() {
 /// collateral-neutral operations no longer revert. A new depositor can always
 /// split (mint never blocks on coverage, like `PendleYieldToken._mintPY`), and
 /// recombine prices the shortfall as a pro-rata haircut instead of bricking with
-/// Insolvent (#9). Only `claim` still guards, since paying YT would spend PT
-/// principal. This is exactly the state the frontend hit before the fix.
+/// Insolvent (#9). Claims do not guard either; see the claim regression tests
+/// below. This is exactly the state the frontend hit before the fix.
 #[test]
 fn split_and_recombine_survive_a_rate_regression() {
     let m = deploy();
@@ -410,9 +411,43 @@ fn split_and_recombine_survive_a_rate_regression() {
     );
 }
 
+/// The incident class Fix 1 was meant to end, on the claim path. With a
+/// Blend-derived rate, split at rate exactly 1.00 leaves the escrow with zero
+/// coverage slack, and a later redeem can tick the rate down by a sub-stroop
+/// rounding notch (Blend's bToken burn rounds in the pool's favor). The old
+/// post-claim solvency gate turned that dust into Insolvent (#9) on every
+/// claim, even ones that owed nothing. Claims must instead succeed and pay
+/// zero: the YT settle math holds the checkpoint on a dip.
 #[test]
-#[should_panic(expected = "Error(Contract, #9)")]
-fn yt_claim_reverts_when_it_would_breach_pt_coverage() {
+fn claim_yield_survives_a_sub_stroop_rate_regression() {
+    let m = deploy();
+    let alice = m.fund(100 * UNIT);
+    m.deposit(&alice, 100 * UNIT);
+    m.split(&alice, 100 * UNIT);
+    // Zero slack: escrow 100 shares at rate exactly 1.00 backs exactly 100 PT.
+
+    // The smallest representable regression; the Blend rounding notch at demo
+    // scale (WAD minus 1e8) hits the same way, any dip below 1.00 did it.
+    m.set_rate(WAD - 1);
+
+    let previewed = TokenizerClient::new(&m.env, &m.tokenizer).preview_claim_yield(&alice);
+    assert_eq!(previewed, 0, "preview must report zero, not trap");
+
+    let claimed = m.claim(&alice); // previously panicked with Error(Contract, #9)
+    assert_eq!(claimed, 0, "no yield accrued, so the claim pays zero");
+    assert_eq!(m.sy_balance(&alice), 0);
+    assert_eq!(
+        m.pt_supply(),
+        100 * UNIT,
+        "the claim must not touch principal"
+    );
+}
+
+// Updated: this test used to assert the claim reverted Insolvent (#9); that gate
+// is gone (Fix 1 completed), so banked yield now pays out and the PT shortfall
+// is priced pro-rata at redemption instead.
+#[test]
+fn yt_claim_pays_banked_yield_even_when_pt_is_under_covered() {
     let m = deploy();
     let alice = m.fund(100 * UNIT);
     let bob = m.account();
@@ -426,11 +461,13 @@ fn yt_claim_reverts_when_it_would_breach_pt_coverage() {
     let rate_0_90: i128 = 900_000_000_000_000_000;
     m.set_rate(rate_0_90);
 
-    // Escrow (100 shares) is now worth 90 < 100 of PT principal. Paying Alice's
-    // banked yield would push coverage further underwater, so the claim reverts
-    // with Insolvent (#9): YT is floored at zero while PT is under-covered, and
-    // Alice keeps her banked ledger for when the rate recovers.
-    m.claim(&alice);
+    // Escrow (100 shares) is now worth 90 < 100 of PT principal. Alice's banked
+    // yield is still owed and still payable: claims never freeze on coverage.
+    // The remaining escrow shortfall lands on PT redemption, which caps payouts
+    // pro-rata (covered by redemption_is_capped_when_rate_regresses).
+    let claimed = m.claim(&alice); // previously panicked with Error(Contract, #9)
+    assert!(claimed > 0, "banked yield must pay out under a shortfall");
+    assert_eq!(m.sy_balance(&alice), claimed);
 }
 
 #[test]

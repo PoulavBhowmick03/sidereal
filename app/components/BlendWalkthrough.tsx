@@ -101,15 +101,15 @@ export function BlendWalkthrough() {
       title: "Get Blend testnet USDC",
       state: funded || supplied || tokenized ? "done" : "todo",
       detail:
-        "Add the Blend testnet USDC trustline and fund that exact reserve asset. Circle faucet USDC uses a different issuer and will not appear in this market.",
+        "Use Get test USDC on the mint page: one wallet signature adds the Blend testnet USDC trustline and funds that exact reserve asset. Circle faucet USDC uses a different issuer and will not appear in this market.",
       live:
         usdcBalance !== null
           ? `Wallet USDC: ${formatTokenAmount(usdcBalance, cfg.decimals)}`
           : `Expected: ${cfg.yieldSource.reserveAsset || cfg.yieldSource.reserveAddress}`,
       action: (
-        <a href={BLEND_TESTNET_APP_URL} target="_blank" rel="noreferrer" className="inline-flex rounded-pill border border-white/30 px-4 py-2 text-[13px] uppercase tracking-[0.12em] text-paper transition hover:bg-paper hover:text-ink">
-          Open Blend asset
-        </a>
+        <Link href="/mint" className="inline-flex rounded-pill border border-white/30 px-4 py-2 text-[13px] uppercase tracking-[0.12em] text-paper transition hover:bg-paper hover:text-ink">
+          Get test USDC
+        </Link>
       ),
     },
     {

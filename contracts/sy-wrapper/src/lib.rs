@@ -608,6 +608,13 @@ fn blend_assets_under_management(env: &Env, config: &Config) -> i128 {
     let positions = pool_client.get_positions(&env.current_contract_address());
     let b_tokens = positions.supply.get(config.reserve_index).unwrap_or(0);
     let reserve = pool_client.get_reserve(&config.underlying);
+    // The pool can be reconfigured over the market's life. If the underlying's
+    // reserve no longer sits at the index we recorded at init, the position read
+    // above is for a different reserve, so refuse to value it rather than price
+    // the wrong asset.
+    if reserve.config.index != config.reserve_index {
+        panic_with_error!(env, Error::InvalidBlendReserve);
+    }
     match assets_from_b_tokens(b_tokens, reserve.data.b_rate) {
         Some(value) => value,
         None => panic_with_error!(env, Error::MathOverflow),

@@ -177,6 +177,27 @@ via `initialize_blend`). On top of it:
   still be confirmed on testnet.
 - Exchange rate is an admin-set testnet knob, not a real oracle (internal TWAP
   only by design).
+- YT/PT seniority under a genuine rate regression. The tokenizer no longer gates
+  `claim_yield` on escrow coverage (removing the gate that used to freeze every
+  claim on a sub-stroop Blend rounding dip). The tradeoff, surfaced by the
+  2026-07-03 dual audit: if the market goes genuinely under-covered (a Blend
+  slash, not rounding dust), already-banked YT yield is paid uncapped while PT is
+  capped pro-rata at redemption, so banked YT is effectively senior to PT under a
+  shortfall. Accepted for testnet; needs a multi-holder insolvency regression
+  test and a mainnet decision on subordination before real value is at stake.
+- The SY wrapper's Blend reserve-index guard fails closed: if Blend moves the
+  underlying off the index recorded at `initialize_blend`, every exchange-rate
+  read panics `InvalidBlendReserve`, which also blocks redeem. This prevents
+  mispricing but has no admin migration path, so a legitimate Blend reindex would
+  brick the market. Acceptable on testnet; add a recovery path before mainnet.
+- LP `add_liquidity`/`remove_liquidity` take no min-out bound, so the PT/SY ratio
+  can move between the UI preview and signing. Swaps already carry min-out; the
+  LP entrypoints should gain `min_lp_out` / `min_pt_out` / `min_sy_out`.
+- The YT flash route (`swap_sy_for_yt` / `swap_yt_for_sy`) sizes the tokenizer
+  split/recombine in SY shares but the tokenizer mints/burns face
+  (`amount * rate / WAD`), so it only prices correctly at exchange rate 1.0. This
+  is masked today because the live rate is ~1.0 and the flash route is Tier 2 and
+  out of the demo, but it must be fixed before the YT route ships.
 
 ## 5. Non-goals (for this sprint)
 

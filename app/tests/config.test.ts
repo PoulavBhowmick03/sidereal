@@ -3,6 +3,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   appConfig,
+  DEFAULT_BLEND_FAUCET_URL,
+  DEFAULT_FRIENDBOT_URL,
   isDeployed,
   TESTNET_BLEND_POOL,
   TESTNET_BLEND_USDC,
@@ -46,6 +48,8 @@ describe("appConfig", () => {
     for (const [name, value] of Object.entries(contractEnv)) {
       vi.stubEnv(name, value);
     }
+    vi.stubEnv("NEXT_PUBLIC_BLEND_FAUCET_URL", "https://faucet.example/getAssets");
+    vi.stubEnv("NEXT_PUBLIC_FRIENDBOT_URL", "https://friendbot.example");
 
     const cfg = appConfig();
 
@@ -56,6 +60,8 @@ describe("appConfig", () => {
       tokenizer: "C_TOKENIZER",
       market: "C_MARKET",
     });
+    expect(cfg.blendFaucetUrl).toBe("https://faucet.example/getAssets");
+    expect(cfg.friendbotUrl).toBe("https://friendbot.example");
     expect(isDeployed(cfg)).toBe(true);
   });
 
@@ -63,6 +69,8 @@ describe("appConfig", () => {
     vi.stubEnv("NEXT_PUBLIC_SOROBAN_RPC_URL", "");
     vi.stubEnv("NEXT_PUBLIC_NETWORK_PASSPHRASE", "");
     vi.stubEnv("NEXT_PUBLIC_SIMULATION_SOURCE_ADDRESS", "");
+    vi.stubEnv("NEXT_PUBLIC_BLEND_FAUCET_URL", "");
+    vi.stubEnv("NEXT_PUBLIC_FRIENDBOT_URL", "");
     vi.stubEnv("NEXT_PUBLIC_MARKET_ID", "");
     vi.stubEnv("NEXT_PUBLIC_TOKEN_DECIMALS", "");
     stubYieldSourceEnv();
@@ -75,6 +83,8 @@ describe("appConfig", () => {
     expect(cfg.rpcUrl).toBe(TESTNET_RPC);
     expect(cfg.networkPassphrase).toBe(TESTNET_PASSPHRASE);
     expect(cfg.simulationSourceAccount).toBe(TESTNET_SIMULATION_SOURCE);
+    expect(cfg.blendFaucetUrl).toBe(DEFAULT_BLEND_FAUCET_URL);
+    expect(cfg.friendbotUrl).toBe(DEFAULT_FRIENDBOT_URL);
     expect(cfg.marketId).toBe("blend-usdc-q3");
     expect(cfg.decimals).toBe(7);
     expect(cfg.yieldSource.kind).toBe("mock");

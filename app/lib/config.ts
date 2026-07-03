@@ -10,6 +10,11 @@ import type { ContractAddresses } from "@sidereal/sdk";
 
 export const TESTNET_PASSPHRASE = "Test SDF Network ; September 2015";
 export const TESTNET_RPC = "https://soroban-testnet.stellar.org";
+// Same-origin proxy (app/app/api/faucet/route.ts). The Blend faucet only
+// allows the blend.capital origin via CORS, so the browser cannot call it
+// directly; the proxy relays the request server-side.
+export const DEFAULT_BLEND_FAUCET_URL = "/api/faucet";
+export const DEFAULT_FRIENDBOT_URL = "https://friendbot.stellar.org";
 export const TESTNET_SIMULATION_SOURCE =
   "GBGHELMOABS7WCYOMJTWQRGQ6VZYLYXXMLE7JJAHJ6I4WW7FMJSDERN3";
 export const TESTNET_BLEND_POOL =
@@ -28,6 +33,10 @@ export interface AppConfig {
   networkPassphrase: string;
   /** Public funded G-account used only to source unconnected read simulations. */
   simulationSourceAccount: string;
+  /** Blend testnet faucet endpoint (same-origin proxy by default). */
+  blendFaucetUrl: string;
+  /** Public Stellar testnet account-funding endpoint. */
+  friendbotUrl: string;
   marketId: string;
   /** Base-unit decimals for SY/PT/YT (Stellar USDC is 7). Display only. */
   decimals: number;
@@ -66,6 +75,11 @@ export function appConfig(): AppConfig {
       process.env.NEXT_PUBLIC_SIMULATION_SOURCE_ADDRESS,
       TESTNET_SIMULATION_SOURCE,
     ),
+    blendFaucetUrl: publicEnv(
+      process.env.NEXT_PUBLIC_BLEND_FAUCET_URL,
+      DEFAULT_BLEND_FAUCET_URL,
+    ),
+    friendbotUrl: publicEnv(process.env.NEXT_PUBLIC_FRIENDBOT_URL, DEFAULT_FRIENDBOT_URL),
     marketId: publicEnv(process.env.NEXT_PUBLIC_MARKET_ID, "blend-usdc-q3"),
     decimals: Number(publicEnv(process.env.NEXT_PUBLIC_TOKEN_DECIMALS, "7")),
     yieldSource: {

@@ -11,8 +11,15 @@ import {
   maturityStatus,
   parseTokenAmount,
 } from "@/lib/format";
+import {
+  fetchBlendFaucetTransaction,
+  fundWithFriendbot,
+  submitClassicTransaction,
+} from "@/lib/blendFaucet";
+import { TESTNET_PASSPHRASE } from "@/lib/config";
 import { usePosition } from "@/lib/usePosition";
 import { useSidereal } from "@/lib/useSidereal";
+import { useWallet } from "@/lib/wallet";
 import { useMarket } from "@/lib/useMarket";
 import { useBlendRates } from "@/lib/useBlendRates";
 import { PositionCard } from "@/components/PositionCard";
@@ -32,6 +39,15 @@ const MINT_MODES = [
 
 const BLEND_USDC_TRUSTLINE_ERROR =
   "trustline missing for Blend testnet USDC";
+
+type FaucetPhase =
+  | { kind: "idle" }
+  | { kind: "working"; step: string }
+  | { kind: "done"; hash: string }
+  | { kind: "error"; message: string };
+
+const wait = (milliseconds: number) =>
+  new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
 function walletTokenBalanceError(error: unknown, isBlendMarket: boolean): string {
   if (isBlendMarket) return BLEND_USDC_TRUSTLINE_ERROR;
@@ -55,16 +71,23 @@ function walletTokenBalanceError(error: unknown, isBlendMarket: boolean): string
 
 export default function MintPage() {
   const { cfg, client, address, phase, submit, submitSequence } = useSidereal();
+  const { signTransaction } = useWallet();
 
   const [amount, setAmount] = useState("");
   const [mode, setMode] = useState<(typeof MINT_MODES)[number]["id"]>("deposit");
   const [underlyingBalance, setUnderlyingBalance] = useState<bigint | null>(null);
   const [underlyingBalanceError, setUnderlyingBalanceError] = useState<string | null>(null);
+  const [faucetPhase, setFaucetPhase] = useState<FaucetPhase>({ kind: "idle" });
+  const [faucetRefresh, setFaucetRefresh] = useState(0);
   const market = useMarket();
   const blendRates = useBlendRates();
-  const position = usePosition(address, phase.kind === "done" ? phase.hash : 0);
-  const blendPosition = useBlendPosition(address, phase.kind === "done" ? phase.hash : 0);
+  // The faucet lands outside the tx-flow phase, so fold its refresh counter
+  // into the same key that already retriggers reads after a confirmed tx.
+  const refreshKey = `${phase.kind === "done" ? phase.hash : 0}:${faucetRefresh}`;
+  const position = usePosition(address, refreshKey);
+  const blendPosition = useBlendPosition(address, refreshKey);
   const split = mode === "split";
+  const isTestnet = cfg.networkPassphrase === TESTNET_PASSPHRASE;
 
   // Preview the deposit and split using the contract's own math:
   //   SY minted on deposit  = amount * WAD / rate   (SY wrapper)
@@ -82,6 +105,11 @@ export default function MintPage() {
       return null;
     }
   }, [amount, market, cfg.decimals]);
+
+  // A different wallet starts its own faucet story; drop the previous one's.
+  useEffect(() => {
+    setFaucetPhase({ kind: "idle" });
+  }, [address]);
 
   useEffect(() => {
     if (!address || market === null) {
@@ -106,11 +134,69 @@ export default function MintPage() {
     return () => {
       cancelled = true;
     };
-  }, [address, client, market, cfg.yieldSource.kind]);
+  }, [address, client, market, cfg.yieldSource.kind, faucetRefresh]);
 
   const amtError =
     underlyingBalanceError ?? amountError(amount, cfg.decimals, underlyingBalance ?? undefined);
   const canSubmit = address !== null && preview !== null && !amtError && phase.kind !== "working";
+  // The faucet dispenses the exact Blend testnet reserve asset, so it only
+  // helps a Blend market on testnet, and only while the wallet is missing the
+  // trustline or holds zero of the underlying.
+  const showFaucet =
+    isTestnet &&
+    cfg.yieldSource.kind === "blend" &&
+    address !== null &&
+    market !== null &&
+    (underlyingBalanceError === BLEND_USDC_TRUSTLINE_ERROR ||
+      (underlyingBalanceError === null && underlyingBalance === 0n));
+
+  async function onGetTestUsdc() {
+    if (!address || !isTestnet || market === null) return;
+    try {
+      setFaucetPhase({ kind: "working", step: "Requesting faucet transaction" });
+      let faucet = await fetchBlendFaucetTransaction(cfg.blendFaucetUrl, address);
+      if (faucet.kind === "account_not_found") {
+        // The G-account has never been funded, so the faucet cannot build a
+        // transaction from it. Friendbot creates it, then the faucet retries.
+        setFaucetPhase({ kind: "working", step: "Funding testnet account" });
+        await fundWithFriendbot(cfg.friendbotUrl, address);
+        setFaucetPhase({ kind: "working", step: "Retrying faucet" });
+        for (let attempt = 0; attempt < 5 && faucet.kind === "account_not_found"; attempt += 1) {
+          await wait(1_000);
+          faucet = await fetchBlendFaucetTransaction(cfg.blendFaucetUrl, address);
+        }
+      }
+      if (faucet.kind !== "transaction") {
+        throw new Error(
+          "The funded account is not visible to the Blend faucet yet. Try again shortly.",
+        );
+      }
+
+      // The faucet returns a classic transaction sourced from the user's own
+      // account: the wallet reviews and signs it, then Horizon submits it.
+      setFaucetPhase({ kind: "working", step: "Awaiting signature" });
+      const signedXdr = await signTransaction(faucet.xdr);
+      setFaucetPhase({ kind: "working", step: "Submitting faucet transaction" });
+      const hash = await submitClassicTransaction(signedXdr);
+
+      // Horizon confirms inclusion, but the Soroban RPC that serves balance
+      // reads can lag a ledger; poll briefly so the form unlocks on success.
+      setFaucetPhase({ kind: "working", step: "Refreshing USDC balance" });
+      const deadline = Date.now() + 20_000;
+      let granted = 0n;
+      while (granted === 0n && Date.now() < deadline) {
+        await wait(1_000);
+        granted = await client.getTokenBalance(market.underlying, address).catch(() => 0n);
+      }
+      setFaucetRefresh((key) => key + 1);
+      setFaucetPhase({ kind: "done", hash });
+    } catch (error) {
+      setFaucetPhase({
+        kind: "error",
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
 
   async function onSubmit() {
     if (!address || preview === null) return;
@@ -226,6 +312,35 @@ export default function MintPage() {
                 {cfg.yieldSource.reserveAddress}. Circle faucet USDC on another issuer will not
                 appear here.
               </p>
+            ) : null}
+
+            {showFaucet || faucetPhase.kind !== "idle" ? (
+              <div className="space-y-3 border-t border-white/10 pt-5">
+                <span className="label-data">Need test USDC?</span>
+                <p className="text-xs leading-relaxed text-ash">
+                  The Blend faucet prepares a transaction that adds the trustline and funds
+                  this exact reserve asset. Your wallet reviews and signs it.
+                </p>
+                {showFaucet ? (
+                  <button
+                    type="button"
+                    className="btn-solid"
+                    disabled={faucetPhase.kind === "working"}
+                    onClick={() => void onGetTestUsdc()}
+                  >
+                    {faucetPhase.kind === "working" ? `${faucetPhase.step}...` : "Get test USDC"}
+                  </button>
+                ) : null}
+                {faucetPhase.kind === "done" ? (
+                  <p className="text-sm font-medium text-paper">
+                    Test USDC granted. Tx{" "}
+                    <span className="font-mono text-smoke">{faucetPhase.hash.slice(0, 10)}...</span>
+                  </p>
+                ) : null}
+                {faucetPhase.kind === "error" ? (
+                  <p className="text-sm text-red-400">{faucetPhase.message}</p>
+                ) : null}
+              </div>
             ) : null}
 
             <div className="border-t border-white/10 pt-5">

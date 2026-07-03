@@ -332,8 +332,11 @@ export class StellarYT {
 
   /**
    * Builds a claim transaction. The tokenizer settles the holder's accrued YT
-   * yield and pays it in SY out of escrow. Reverts (Insolvent) if the rate has
-   * regressed below PT coverage, which leaves the holder's banked yield intact.
+   * yield and pays it in SY out of escrow. It does not gate on escrow coverage:
+   * the YT settle math pays zero when the rate has not risen past the holder's
+   * checkpoint, and a genuine shortfall is priced pro-rata at redemption rather
+   * than blocking the claim, so a claim no longer reverts under a rate
+   * regression.
    */
   async buildClaimYield(args: ClaimArgs): Promise<TransactionEnvelope> {
     const op = new Contract(this.contracts.tokenizer).call(
