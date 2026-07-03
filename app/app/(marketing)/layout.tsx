@@ -7,6 +7,7 @@ import { FooterBrand } from "@/components/FooterBrand";
 import { Atmosphere } from "@/components/Atmosphere";
 import { Grain } from "@/components/Grain";
 import { RollingLink } from "@/components/RollingLink";
+import { SmoothScroll } from "@/components/SmoothScroll";
 
 // Marketing chrome for the "cinematic darkroom" landing: a fixed atmospheric
 // canvas, a quiet top bar that inverts on scroll, and the existing reveal
@@ -14,6 +15,7 @@ import { RollingLink } from "@/components/RollingLink";
 export default function MarketingLayout({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-screen flex-col text-paper">
+      <SmoothScroll />
       <MarketingNav />
 
       <main className="marketing-main relative z-10 flex flex-1 flex-col overflow-clip bg-transparent">

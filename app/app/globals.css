@@ -18,18 +18,35 @@ body {
   background: rgba(255, 255, 255, 0.16);
 }
 
-/* Thin, light scrollbar to match the darkroom theme. */
+/* Darkroom scrollbar: a hairline paper thumb floating on an invisible track,
+   inset from the edge, brightening under the pointer. Firefox gets the
+   closest native equivalent via scrollbar-color. */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.18) transparent;
+  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
 }
 *::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: 12px;
+  height: 12px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
 }
 *::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
+  /* The transparent border + background-clip insets a 4px-wide thumb inside
+     the 12px gutter, so it reads as a floating filament, not a bar. */
+  background: rgba(255, 255, 255, 0.22);
+  background-clip: padding-box;
+  border: 4px solid transparent;
   border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.45);
+  background-clip: padding-box;
+  border: 3px solid transparent;
+}
+*::-webkit-scrollbar-corner {
+  background: transparent;
 }
 
 @layer components {
