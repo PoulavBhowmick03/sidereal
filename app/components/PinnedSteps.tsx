@@ -43,7 +43,7 @@ export function PinnedSteps({ steps }: { steps: PinnedStep[] }) {
   }, []);
 
   return (
-    <div ref={wrapRef} className="pinned-steps relative h-[260vh]" data-phase={phase}>
+    <div ref={wrapRef} className="pinned-steps relative h-[240vh]" data-phase={phase}>
       <div
         className={`sticky top-0 flex h-screen items-center overflow-hidden transition-colors duration-700 ${
           phase === 2 ? "bg-carbon" : "bg-transparent"

@@ -365,14 +365,29 @@ body {
 .atmosphere-nebula-white {
   left: -28rem;
   top: 18%;
-  background: radial-gradient(circle, rgba(255, 255, 255, 0.03), transparent 68%);
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.055), transparent 68%);
   animation: atmosphere-drift-white 48s ease-in-out infinite;
 }
 .atmosphere-nebula-blue {
   bottom: -28rem;
   right: -24rem;
-  background: radial-gradient(circle, rgba(120, 140, 180, 0.05), transparent 68%);
+  background: radial-gradient(circle, rgba(120, 140, 180, 0.08), transparent 68%);
   animation: atmosphere-drift-blue 57s ease-in-out infinite;
+}
+
+/* The star-chart ring system turns once every four minutes: alive if you
+   stare, still if you glance. Transform-only, one composited layer. */
+.chart-rings {
+  animation: chart-spin 240s linear infinite;
+  will-change: transform;
+}
+@keyframes chart-spin {
+  from {
+    transform: translate(-50%, -50%) rotate(0deg);
+  }
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
 }
 @keyframes atmosphere-drift-white {
   0%,
@@ -435,7 +450,12 @@ body {
 }
 
 /* Fixed-height protocol ticker. Both sequences have identical widths, so
-   translating the two-copy track by half loops without a visible seam. */
+   translating the two-copy track by half loops without a visible seam. The
+   mask dissolves entries at both edges instead of hard-clipping them. */
+.ticker-mask {
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent);
+}
 .ticker-track {
   animation: ticker-loop 40s linear infinite;
 }
@@ -467,6 +487,20 @@ body {
   }
 }
 
+/* Audience cards: a whisper of fill so they read as objects, and a slow lift
+   with a brighter fill on fine-pointer hover. */
+@media (hover: hover) and (pointer: fine) {
+  .audience-card {
+    transition:
+      transform 450ms cubic-bezier(0.22, 1, 0.36, 1),
+      background-color 450ms ease;
+  }
+  .audience-card:hover {
+    transform: translateY(-6px);
+    background-color: rgba(255, 255, 255, 0.04);
+  }
+}
+
 /* New-section kickers wipe in as a single data label. The complete text is
    still the server-rendered default; clients opt into the clipped start. */
 .kicker-wipe {
@@ -478,10 +512,6 @@ body {
   clip-path: inset(0 100% 0 0);
 }
 
-.guarantees-ready .diag-pop {
-  animation: diag-pop 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .hero-shimmer,
   .diagram-anim *,
@@ -491,11 +521,12 @@ body {
   .skeleton,
   .atmosphere-nebula,
   .ticker-track,
-  .guarantees-ready .diag-pop {
+  .chart-rings {
     animation: none !important;
   }
   .roll-label,
   .kicker-wipe,
+  .audience-card,
   .spotlight::before {
     transition: none !important;
   }
