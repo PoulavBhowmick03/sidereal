@@ -122,9 +122,9 @@ export default function LandingPage() {
               <div>
                 <StepNumeral>{step.n}</StepNumeral>
                 <Reveal>
-                  <h2 className="mt-6 text-3xl font-light tracking-tight sm:text-4xl">{step.title}</h2>
-                  <p className="mt-2 label-data">{step.kicker}</p>
-                  <p className="mt-6 max-w-md leading-relaxed text-smoke">{step.body}</p>
+                  <h2 className="mt-6 text-4xl font-light tracking-tight sm:text-5xl">{step.title}</h2>
+                  <p className="mt-3 label-data">{step.kicker}</p>
+                  <p className="mt-6 max-w-xl text-lg leading-relaxed text-smoke">{step.body}</p>
                 </Reveal>
               </div>
               <div className="flex justify-center lg:justify-end">

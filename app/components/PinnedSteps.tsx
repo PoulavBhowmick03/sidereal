@@ -49,8 +49,10 @@ export function PinnedSteps({ steps }: { steps: PinnedStep[] }) {
           phase === 2 ? "bg-carbon" : "bg-transparent"
         }`}
       >
-        <div className="mx-auto grid w-full max-w-[1280px] items-center gap-10 px-6 sm:px-16 lg:grid-cols-2">
-          {/* Copy: all three blocks stacked, the active one visible. */}
+        <div className="mx-auto grid w-full max-w-[1440px] items-center gap-10 px-6 sm:px-16 lg:grid-cols-2">
+          {/* Copy: all three blocks stacked, the active one visible. The step
+              owns a full pinned viewport, so everything is set at display
+              scale: the numeral as a watermark behind a display-size title. */}
           <div className="relative">
             {steps.map((step, i) => {
               const active = phase === i + 1;
@@ -62,32 +64,36 @@ export function PinnedSteps({ steps }: { steps: PinnedStep[] }) {
                     i > 0 ? "absolute inset-0" : ""
                   } ${active ? "opacity-100 translate-y-0" : "pointer-events-none opacity-0 translate-y-4"}`}
                 >
-                  <span className="block text-8xl font-light leading-none text-white/20 sm:text-9xl">
+                  <span className="block text-9xl font-light leading-none text-white/15 lg:text-[13rem]">
                     {step.n}
                   </span>
-                  <h2 className="mt-6 text-3xl font-light tracking-tight sm:text-4xl">{step.title}</h2>
-                  <p className="mt-2 label-data">{step.kicker}</p>
-                  <p className="mt-6 max-w-md leading-relaxed text-smoke">{step.body}</p>
+                  <h2 className="mt-6 text-5xl font-light tracking-tight lg:-mt-10 lg:text-7xl">
+                    {step.title}
+                  </h2>
+                  <p className="mt-4 label-data">{step.kicker}</p>
+                  <p className="mt-8 max-w-xl text-lg leading-relaxed text-smoke lg:text-xl">
+                    {step.body}
+                  </p>
                 </div>
               );
             })}
 
             {/* Phase rail: which of the three moments is pinned. */}
-            <div className="mt-10 flex items-center gap-2">
+            <div className="mt-12 flex items-center gap-2">
               {steps.map((step, i) => (
                 <span
                   key={step.n}
                   className={`h-px transition-all duration-500 ${
-                    phase === i + 1 ? "w-10 bg-paper" : "w-5 bg-white/25"
+                    phase === i + 1 ? "w-14 bg-paper" : "w-6 bg-white/25"
                   }`}
                 />
               ))}
             </div>
           </div>
 
-          {/* The morphing scene. */}
+          {/* The morphing scene, scaled to hold its half of the viewport. */}
           <div className="flex justify-center lg:justify-end">
-            <svg viewBox="0 0 320 240" className="h-64 w-[22rem]" aria-hidden="true">
+            <svg viewBox="0 0 320 240" className="h-72 w-[24rem] lg:h-[30rem] lg:w-[40rem]" aria-hidden="true">
               {/* Flow line, grown from the center. */}
               <rect x="30" y="119.5" width="260" height="1" fill="#6D6D6D" className="ps-el ps-line" />
               {/* Deposit ring: shrinks left into the split's SY circle. */}
