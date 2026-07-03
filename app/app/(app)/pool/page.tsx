@@ -15,7 +15,7 @@ import {
 import { previewAddLiquidity, previewRemoveLiquidity } from "@/lib/lpPreview";
 import { useBlendRates } from "@/lib/useBlendRates";
 import { useLpPosition } from "@/lib/useLpPosition";
-import { useMarket } from "@/lib/useMarket";
+import { useMarketStatus } from "@/lib/useMarket";
 import { usePosition } from "@/lib/usePosition";
 import { useSidereal } from "@/lib/useSidereal";
 import { AmountField } from "@/components/AmountField";
@@ -24,6 +24,7 @@ import { PositionCard } from "@/components/PositionCard";
 import { SubmitButton } from "@/components/SubmitButton";
 import { TxStatus } from "@/components/TxStatus";
 import { YieldSourceCard } from "@/components/YieldSourceCard";
+import { LiveValue } from "@/components/LiveValue";
 
 const idlePhase = { kind: "idle" } as const;
 
@@ -35,7 +36,7 @@ export default function PoolPage() {
   const [activeAction, setActiveAction] = useState<"add" | "remove" | null>(null);
 
   const refreshKey = phase.kind === "done" ? phase.hash : 0;
-  const market = useMarket(refreshKey);
+  const { market, loading: marketLoading } = useMarketStatus(refreshKey);
   const blendRates = useBlendRates();
   const position = usePosition(address, refreshKey);
   const lpPosition = useLpPosition(address, refreshKey);
@@ -256,17 +257,39 @@ export default function PoolPage() {
 
           <p className="label-data">Pool status</p>
           <dl className="card space-y-px p-6">
-            <Stat label="PT reserves" value={market ? formatTokenAmount(market.totalPt, cfg.decimals) : "n/a"} />
-            <Stat label="SY reserves" value={market ? formatTokenAmount(market.totalSy, cfg.decimals) : "n/a"} />
-            <Stat label="Total LP" value={market ? formatTokenAmount(market.totalLp, cfg.decimals) : "n/a"} />
-            <Stat label="Fee" value={market ? bpsToPercent(market.feeBps) : "n/a"} />
+            <Stat
+              label="PT reserves"
+              value={market ? formatTokenAmount(market.totalPt, cfg.decimals) : "n/a"}
+              loading={marketLoading}
+            />
+            <Stat
+              label="SY reserves"
+              value={market ? formatTokenAmount(market.totalSy, cfg.decimals) : "n/a"}
+              loading={marketLoading}
+            />
+            <Stat
+              label="Total LP"
+              value={market ? formatTokenAmount(market.totalLp, cfg.decimals) : "n/a"}
+              loading={marketLoading}
+            />
+            <Stat label="Fee" value={market ? bpsToPercent(market.feeBps) : "n/a"} loading={marketLoading} />
             <Stat
               label="Implied APY"
               value={market ? bpsToPercent(market.impliedApyBps) : "n/a"}
+              loading={marketLoading}
               signal
             />
-            <Stat label="Maturity" value={market ? maturityStatus(market.maturity) : "n/a"} signal />
-            <Stat label="Maturity date" value={market ? formatMaturityDate(market.maturity) : "n/a"} />
+            <Stat
+              label="Maturity"
+              value={market ? maturityStatus(market.maturity) : "n/a"}
+              loading={marketLoading}
+              signal
+            />
+            <Stat
+              label="Maturity date"
+              value={market ? formatMaturityDate(market.maturity) : "n/a"}
+              loading={marketLoading}
+            />
           </dl>
 
           <p className="label-data">Your LP position</p>
@@ -308,11 +331,23 @@ function PreviewRow({
   );
 }
 
-function Stat({ label, value, signal }: { label: string; value: string; signal?: boolean }) {
+function Stat({
+  label,
+  value,
+  signal,
+  loading,
+}: {
+  label: string;
+  value: string;
+  signal?: boolean;
+  loading?: boolean;
+}) {
   return (
     <div className="flex items-center justify-between gap-4 border-t border-white/10 py-3 first:border-t-0 first:pt-0">
       <dt className="label-data">{label}</dt>
-      <dd className={`text-sm tabular-nums ${signal ? "text-amber" : "text-paper"}`}>{value}</dd>
+      <dd className={`text-sm tabular-nums ${signal ? "text-amber" : "text-paper"}`}>
+        <LiveValue value={value} loading={loading} className="w-14" />
+      </dd>
     </div>
   );
 }

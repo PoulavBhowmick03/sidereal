@@ -4,6 +4,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useSlideRect } from "@/lib/useSlideRect";
 
 const TABS = [
   { href: "/mint", label: "Mint", tour: "nav-mint" },
@@ -14,11 +15,19 @@ const TABS = [
 ];
 
 /** In-app navigation tabs. The active tab is the one live signal here, so it
- *  carries the single accent: amber label over an amber underline tick. */
+ *  carries the single accent plus the sanctioned signal bloom. The amber
+ *  underline is a single measured element that slides between tabs on route
+ *  change; before measurement (server render, no-JS) the active tab keeps a
+ *  static underline so nothing is missing. */
 export function AppTabs() {
   const pathname = usePathname();
+  const { containerRef, rect } = useSlideRect<HTMLUListElement>('[aria-current="page"]', pathname);
+
   return (
-    <ul className="flex flex-1 flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:gap-x-10">
+    <ul
+      ref={containerRef}
+      className="relative flex flex-1 flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:gap-x-10"
+    >
       {TABS.map((tab) => {
         const active = pathname === tab.href;
         return (
@@ -29,7 +38,11 @@ export function AppTabs() {
               data-tour={tab.tour}
               className={
                 active
-                  ? "relative pb-1 text-[13px] uppercase tracking-[0.12em] text-amber after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-amber"
+                  ? `glow-signal relative pb-1 text-[13px] uppercase tracking-[0.12em] text-amber ${
+                      rect
+                        ? ""
+                        : "after:absolute after:inset-x-0 after:bottom-0 after:h-px after:bg-amber after:shadow-[0_0_8px_rgba(255,172,46,0.55)]"
+                    }`
                   : "pb-1 text-[13px] uppercase tracking-[0.12em] text-smoke transition hover:text-paper"
               }
             >
@@ -38,6 +51,13 @@ export function AppTabs() {
           </li>
         );
       })}
+      {rect ? (
+        <span
+          aria-hidden
+          className="absolute h-px bg-amber shadow-[0_0_8px_rgba(255,172,46,0.55)] transition-all duration-300 ease-out motion-reduce:transition-none"
+          style={{ left: rect.left, top: rect.top + rect.height - 1, width: rect.width }}
+        />
+      ) : null}
     </ul>
   );
 }

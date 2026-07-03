@@ -4,6 +4,7 @@
 
 import type { Position } from "@sidereal/sdk";
 import { formatTokenAmount } from "../lib/format";
+import { LiveValue } from "./LiveValue";
 
 function Cell({ label, value, signal }: { label: string; value: string; signal?: boolean }) {
   return (
@@ -12,7 +13,7 @@ function Cell({ label, value, signal }: { label: string; value: string; signal?:
       <dd
         className={`mt-3 text-3xl font-light tabular-nums ${signal ? "text-amber" : "text-paper"}`}
       >
-        {value}
+        <LiveValue value={value} />
       </dd>
     </div>
   );

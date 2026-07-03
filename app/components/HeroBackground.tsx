@@ -12,8 +12,19 @@ import Image from "next/image";
 // scroll parallax sits on top for depth. The liquid/glass motion runs always;
 // only the scroll parallax respects prefers-reduced-motion. Atmospheric imagery
 // like this is for the marketing hero ONLY, never behind an app screen.
+// Film grain tile: tiny grayscale fractal noise, tiled and blended over the
+// hero at low opacity so the darkroom render reads as photographed, not flat.
+const GRAIN =
+  "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='240' height='240' filter='url(%23n)'/%3E%3C/svg%3E\")";
+
+// The displacement rests at 34 and surges toward 62 with pointer velocity, so
+// moving the mouse literally stirs the liquid metal.
+const DISPLACE_REST = 34;
+const DISPLACE_MAX = 62;
+
 export function HeroBackground() {
   const ref = useRef<HTMLDivElement>(null);
+  const dispRef = useRef<SVGFEDisplacementMapElement>(null);
 
   useEffect(() => {
     const el = ref.current;
@@ -32,6 +43,44 @@ export function HeroBackground() {
     onScroll();
     return () => {
       window.removeEventListener("scroll", onScroll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
+
+  // Pointer-reactive turbulence: pointer speed raises the displacement scale
+  // target, an rAF loop eases the current value toward it and decays back to
+  // rest. Desktop pointers only, and skipped under prefers-reduced-motion.
+  useEffect(() => {
+    const disp = dispRef.current;
+    if (!disp) return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    if (!window.matchMedia("(hover: hover) and (pointer: fine)").matches) return;
+
+    let target = DISPLACE_REST;
+    let current = DISPLACE_REST;
+    let raf = 0;
+
+    const settle = () =>
+      Math.abs(current - DISPLACE_REST) < 0.3 && Math.abs(target - DISPLACE_REST) < 0.3;
+    const loop = () => {
+      target = DISPLACE_REST + (target - DISPLACE_REST) * 0.94;
+      current += (target - current) * 0.08;
+      disp.setAttribute("scale", current.toFixed(2));
+      if (settle()) {
+        disp.setAttribute("scale", String(DISPLACE_REST));
+        raf = 0;
+      } else {
+        raf = requestAnimationFrame(loop);
+      }
+    };
+    const onMove = (e: PointerEvent) => {
+      const speed = Math.hypot(e.movementX, e.movementY);
+      target = Math.min(DISPLACE_MAX, target + speed * 0.2);
+      if (!raf) raf = requestAnimationFrame(loop);
+    };
+    window.addEventListener("pointermove", onMove, { passive: true });
+    return () => {
+      window.removeEventListener("pointermove", onMove);
       if (raf) cancelAnimationFrame(raf);
     };
   }, []);
@@ -58,9 +107,10 @@ export function HeroBackground() {
               />
             </feTurbulence>
             <feDisplacementMap
+              ref={dispRef}
               in="SourceGraphic"
               in2="noise"
-              scale="34"
+              scale={DISPLACE_REST}
               xChannelSelector="R"
               yChannelSelector="G"
             />
@@ -84,6 +134,13 @@ export function HeroBackground() {
           black, so the wash is light: dark enough to seat the headline, sheer
           enough that the chrome streaks read through the middle. */}
       <div className="absolute inset-0 bg-gradient-to-b from-ink/65 via-ink/20 to-ink" />
+
+      {/* Film grain over everything: the cinematic-darkroom texture. Static
+          tile, so it costs one paint and nothing per frame. */}
+      <div
+        className="absolute inset-0 opacity-[0.05] mix-blend-overlay"
+        style={{ backgroundImage: GRAIN }}
+      />
     </div>
   );
 }

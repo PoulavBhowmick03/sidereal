@@ -3,6 +3,12 @@
 import Link from "next/link";
 import { StepNumeral } from "@/components/StepNumeral";
 import { HeroBackground } from "@/components/HeroBackground";
+import { Parallax } from "@/components/Parallax";
+import { Reveal } from "@/components/Reveal";
+import { InvariantEquation } from "@/components/InvariantEquation";
+import { CountUp } from "@/components/CountUp";
+import { StepDiagram } from "@/components/StepDiagrams";
+import { PinnedSteps } from "@/components/PinnedSteps";
 // The three token legs, defined in the protocol's own terms. No invented
 // financial figures (AGENTS section 7): the stats band states protocol facts,
 // not market numbers, so the page reads honestly before a market is deployed.
@@ -57,39 +63,6 @@ const FACTS = [
   { value: "1:1", label: "PT at maturity", note: "Redeems to par", signal: false },
 ];
 
-// Monochrome diagrams for each step. Amber is reserved for live/active signals,
-// so these stay paper/ash only (no decorative accent), per the single-accent rule.
-function StepDiagram({ n }: { n: string }) {
-  if (n === "01") {
-    return (
-      <svg viewBox="0 0 240 240" className="h-48 w-48" aria-hidden="true">
-        <circle cx="120" cy="120" r="92" fill="none" stroke="#6D6D6D" strokeWidth="1" />
-        <circle cx="120" cy="120" r="46" fill="#FFFFFF" />
-      </svg>
-    );
-  }
-  if (n === "02") {
-    return (
-      <svg viewBox="0 0 320 160" className="h-40 w-72" aria-hidden="true">
-        <line x1="60" y1="80" x2="260" y2="80" stroke="#6D6D6D" strokeWidth="1" />
-        <circle cx="60" cy="80" r="34" fill="none" stroke="#6D6D6D" strokeWidth="1" />
-        <circle cx="160" cy="80" r="28" fill="#FFFFFF" />
-        <circle cx="260" cy="80" r="34" fill="none" stroke="#9A9A9A" strokeWidth="1" />
-        <circle cx="260" cy="80" r="5" fill="#9A9A9A" />
-      </svg>
-    );
-  }
-  return (
-    <svg viewBox="0 0 320 120" className="h-32 w-72" aria-hidden="true">
-      <line x1="30" y1="60" x2="290" y2="60" stroke="#6D6D6D" strokeWidth="1" />
-      <circle cx="30" cy="60" r="6" fill="#FFFFFF" />
-      <circle cx="290" cy="60" r="6" fill="#9A9A9A" />
-      <text x="30" y="92" fill="#6D6D6D" fontSize="13" textAnchor="middle">PT fixed</text>
-      <text x="290" y="92" fill="#6D6D6D" fontSize="13" textAnchor="middle">YT variable</text>
-    </svg>
-  );
-}
-
 export default function LandingPage() {
   return (
     <>
@@ -97,8 +70,8 @@ export default function LandingPage() {
           carries the section; the metallic background lives on the app screens. */}
       <section className="relative flex min-h-screen flex-col justify-center overflow-hidden">
                 <HeroBackground />
-        <div className="relative mx-auto w-full max-w-[1280px] px-6 sm:px-16">
-          <h1 className="max-w-4xl text-5xl font-light leading-[1.02] tracking-tight sm:text-7xl lg:text-8xl">
+        <Parallax speed={0.12} className="relative mx-auto w-full max-w-[1280px] px-6 sm:px-16">
+          <h1 className="hero-shimmer max-w-4xl text-5xl font-light leading-[1.02] tracking-tight sm:text-7xl lg:text-8xl">
             Split Stellar yield into principal and yield.
           </h1>
           <p className="mt-8 max-w-xl text-lg leading-relaxed text-smoke">
@@ -115,17 +88,20 @@ export default function LandingPage() {
               Blend USDC · 3-month maturity
             </span>
           </div>
-        </div>
-        <div className="absolute bottom-8 left-6 flex items-center gap-3 sm:left-16">
+        </Parallax>
+        <Parallax
+          fadeDistance={280}
+          className="absolute bottom-8 left-6 flex items-center gap-3 sm:left-16"
+        >
           <span className="label-data">Scroll</span>
           <span className="h-px w-10 bg-ash" />
-        </div>
+        </Parallax>
       </section>
 
       {/* Invariant band: the equation, on a paper-white block, with token legs. */}
       <section id="protocol" className="bg-paper text-ink">
         <div className="mx-auto max-w-[1280px] px-6 py-24 sm:px-16 sm:py-32">
-          <p className="text-center text-4xl font-light tracking-tight sm:text-6xl">PT + YT = SY</p>
+          <InvariantEquation />
           <div className="mt-20 grid border-t border-black/15 sm:grid-cols-3">
             {LEGS.map((leg, i) => (
               <div
@@ -134,19 +110,26 @@ export default function LandingPage() {
                   i < LEGS.length - 1 ? "sm:border-r sm:border-black/15" : ""
                 } ${i === 0 ? "sm:pl-0" : ""}`}
               >
-                <h3 className="text-2xl font-light tracking-tight sm:text-3xl">
-                  {leg.name} <span className="text-graphite">({leg.tag})</span>
-                </h3>
-                <p className="mt-4 max-w-sm leading-relaxed text-graphite">{leg.body}</p>
+                <Reveal delay={i * 130}>
+                  <h3 className="text-2xl font-light tracking-tight sm:text-3xl">
+                    {leg.name} <span className="text-graphite">({leg.tag})</span>
+                  </h3>
+                  <p className="mt-4 max-w-sm leading-relaxed text-graphite">{leg.body}</p>
+                </Reveal>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* How it works: editorial 01/02/03 steps in alternating bands, each with
-          a monochrome diagram, oversized numerals, and the kicker label. */}
+      {/* How it works. Desktop: the band pins and one scene morphs through the
+          three moments in place (PinnedSteps). Mobile and reduced motion: the
+          editorial stacked bands, each with its own animated diagram. */}
       <section id="how-it-works">
+        <div className="steps-pinned hidden lg:block">
+          <PinnedSteps steps={STEPS.map(({ n, title, kicker, body }) => ({ n, title, kicker, body }))} />
+        </div>
+        <div className="steps-stacked lg:hidden">
         {STEPS.map((step) => (
           <div
             key={step.n}
@@ -155,9 +138,11 @@ export default function LandingPage() {
             <div className="mx-auto grid max-w-[1280px] items-center gap-10 px-6 py-24 sm:px-16 lg:grid-cols-2">
               <div>
                 <StepNumeral>{step.n}</StepNumeral>
-                <h2 className="mt-6 text-3xl font-light tracking-tight sm:text-4xl">{step.title}</h2>
-                <p className="mt-2 label-data">{step.kicker}</p>
-                <p className="mt-6 max-w-md leading-relaxed text-smoke">{step.body}</p>
+                <Reveal>
+                  <h2 className="mt-6 text-3xl font-light tracking-tight sm:text-4xl">{step.title}</h2>
+                  <p className="mt-2 label-data">{step.kicker}</p>
+                  <p className="mt-6 max-w-md leading-relaxed text-smoke">{step.body}</p>
+                </Reveal>
               </div>
               <div className="flex justify-center lg:justify-end">
                 <StepDiagram n={step.n} />
@@ -165,16 +150,17 @@ export default function LandingPage() {
             </div>
           </div>
         ))}
+        </div>
       </section>
 
       {/* Protocol overview: facts as numerals in an enclosed panel, not invented
           market metrics. */}
       <section className="border-t border-white/10 bg-ink">
         <div className="mx-auto max-w-[1280px] px-6 py-24 sm:px-16">
-          <div className="flex items-center justify-between">
+          <Reveal className="flex items-center justify-between">
             <h2 className="text-3xl font-light tracking-tight">Protocol overview</h2>
-            <p className="label-data text-amber">Live · Testnet</p>
-          </div>
+            <p className="glow-signal label-data text-amber">Live · Testnet</p>
+          </Reveal>
           <div className="mt-12 grid grid-cols-2 border border-white/10 lg:grid-cols-4">
             {FACTS.map((fact, i) => (
               <div
@@ -188,7 +174,7 @@ export default function LandingPage() {
                     fact.signal ? "text-amber" : "text-paper"
                   }`}
                 >
-                  {fact.value}
+                  <CountUp value={fact.value} />
                 </p>
                 <p className="mt-4 label-data">{fact.label}</p>
                 <p className="mt-1 text-sm text-pewter">{fact.note}</p>

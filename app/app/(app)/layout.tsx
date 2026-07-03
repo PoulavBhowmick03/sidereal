@@ -8,6 +8,7 @@ import { DeploymentBanner } from "@/components/DeploymentBanner";
 import { NetworkBanner } from "@/components/NetworkBanner";
 import { AppTabs } from "@/components/AppTabs";
 import { AppBackground } from "@/components/AppBackground";
+import { PageTransition } from "@/components/PageTransition";
 import { TourHelpButton } from "@/components/TourHelpButton";
 import { TourOverlay } from "@/components/TourOverlay";
 
@@ -35,7 +36,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
       <div className="relative z-10 flex flex-1 flex-col">
         <DeploymentBanner />
         <NetworkBanner />
-        <main className="mx-auto w-full max-w-[1280px] flex-1 px-6 py-12 sm:py-16">{children}</main>
+        <main className="mx-auto w-full max-w-[1280px] flex-1 px-6 py-12 sm:py-16">
+          <PageTransition>{children}</PageTransition>
+        </main>
         <footer className="border-t border-white/10">
         <div className="mx-auto flex max-w-[1280px] flex-col items-start justify-between gap-3 px-6 py-8 sm:flex-row sm:items-center">
           <p className="label-data">© 2026 Sidereal Protocol</p>

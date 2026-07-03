@@ -3,6 +3,7 @@
 import { blendRateToBps, type BlendRates, type MarketState } from "@sidereal/sdk";
 import type { YieldSourceConfig } from "@/lib/config";
 import { bpsToPercent, formatTokenAmount, shortAddress } from "@/lib/format";
+import { LiveValue } from "@/components/LiveValue";
 
 function sourceStatus(source: YieldSourceConfig): { label: string; body: string; tone: "live" | "idle" } {
   if (source.kind === "blend") {
@@ -78,13 +79,21 @@ export function YieldSourceCard({
             <div className="flex justify-between gap-4">
               <dt className="label-data">Supply APR (variable)</dt>
               <dd className="tabular-nums text-amber">
-                {rates ? bpsToPercent(blendRateToBps(rates.supplyApr)) : "loading"}
+                <LiveValue
+                  value={rates ? bpsToPercent(blendRateToBps(rates.supplyApr)) : ""}
+                  loading={!rates}
+                  className="w-12"
+                />
               </dd>
             </div>
             <div className="flex justify-between gap-4">
               <dt className="label-data">Pool utilization</dt>
               <dd className="tabular-nums text-paper">
-                {rates ? bpsToPercent(blendRateToBps(rates.utilization)) : "loading"}
+                <LiveValue
+                  value={rates ? bpsToPercent(blendRateToBps(rates.utilization)) : ""}
+                  loading={!rates}
+                  className="w-12"
+                />
               </dd>
             </div>
             <div className="flex justify-between gap-4">

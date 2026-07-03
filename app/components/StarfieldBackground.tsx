@@ -4,6 +4,14 @@
 // star layers for depth, a faint concentric star-chart grid, and a soft nebula
 // glow. Everything is dimmed so the giant wordmark stays dominant. Recreated in
 // CSS/SVG rather than shipping the reference render.
+//
+// The layers read the --reveal variable RevealFooter publishes (0 hidden, 1
+// revealed) and drift upward at different speeds as the footer is uncovered:
+// near stars travel furthest, far stars less, the chart grid least. With the
+// default of 1 (no-JS, reduced motion) every layer sits at its settled spot.
+const layerDrift = (px: number) => ({
+  transform: `translate3d(0, calc((1 - var(--reveal, 1)) * ${px}px), 0)`,
+});
 const STARS_NEAR = [
   "radial-gradient(1.4px 1.4px at 30px 40px, #fff, transparent)",
   "radial-gradient(1px 1px at 90px 130px, rgba(255,255,255,0.7), transparent)",
@@ -33,16 +41,29 @@ export function StarfieldBackground() {
       {/* Two tiled star layers. */}
       <div
         className="absolute inset-0 opacity-80"
-        style={{ backgroundImage: STARS_NEAR, backgroundRepeat: "repeat", backgroundSize: "240px 240px" }}
+        style={{
+          backgroundImage: STARS_NEAR,
+          backgroundRepeat: "repeat",
+          backgroundSize: "240px 240px",
+          ...layerDrift(72),
+        }}
       />
       <div
         className="absolute inset-0 opacity-60"
-        style={{ backgroundImage: STARS_FAR, backgroundRepeat: "repeat", backgroundSize: "440px 440px" }}
+        style={{
+          backgroundImage: STARS_FAR,
+          backgroundRepeat: "repeat",
+          backgroundSize: "440px 440px",
+          ...layerDrift(30),
+        }}
       />
 
-      {/* Faint concentric star-chart grid, anchored left like the reference. */}
+      {/* Faint concentric star-chart grid, anchored left like the reference.
+          Its vertical centering lives in the same transform as the drift,
+          since an inline transform would override the utility class. */}
       <svg
-        className="absolute left-[10%] top-1/2 h-[160%] w-auto -translate-y-1/2 text-white/[0.06]"
+        style={{ transform: "translate3d(0, calc(-50% + (1 - var(--reveal, 1)) * 14px), 0)" }}
+        className="absolute left-[10%] top-1/2 h-[160%] w-auto text-white/[0.06]"
         viewBox="0 0 600 600"
         fill="none"
         stroke="currentColor"

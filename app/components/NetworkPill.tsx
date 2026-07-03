@@ -6,8 +6,8 @@ import { useMemo } from "react";
 import { appConfig, TESTNET_PASSPHRASE } from "../lib/config";
 
 // Always-on network indicator in the app header, derived from the configured
-// network passphrase (truthful, not decorative). Stays monochrome: the "live"
-// cue is a slow pulse on a paper-white dot, not a second accent color.
+// network passphrase (truthful, not decorative). The dot is a live signal, so
+// it carries the accent plus the sanctioned signal bloom (glow-as-signal).
 export function NetworkPill() {
   const label = useMemo(
     () => (appConfig().networkPassphrase === TESTNET_PASSPHRASE ? "Testnet" : "Network"),
@@ -16,7 +16,7 @@ export function NetworkPill() {
 
   return (
     <span className="hidden items-center gap-2 rounded-pill border border-white/20 px-3 py-1.5 text-[13px] uppercase tracking-[0.12em] text-smoke sm:inline-flex">
-      <span className="h-1.5 w-1.5 animate-pulse rounded-pill bg-paper" />
+      <span className="glow-signal-dot h-1.5 w-1.5 animate-pulse rounded-pill bg-amber" />
       {label}
     </span>
   );

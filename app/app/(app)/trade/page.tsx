@@ -15,12 +15,14 @@ import {
 import { describeError } from "@/lib/errors";
 import { usePosition } from "@/lib/usePosition";
 import { useSidereal } from "@/lib/useSidereal";
-import { useMarket } from "@/lib/useMarket";
+import { useMarketStatus } from "@/lib/useMarket";
 import { useBlendRates } from "@/lib/useBlendRates";
 import { useBlendPosition } from "@/lib/useBlendPosition";
 import { applySlippage, DEFAULT_SLIPPAGE_BPS, SLIPPAGE_OPTIONS } from "@/lib/slippage";
+import { useSlideRect } from "@/lib/useSlideRect";
 import { PositionCard } from "@/components/PositionCard";
 import { BlendPositionCard } from "@/components/BlendPositionCard";
+import { LiveValue } from "@/components/LiveValue";
 import { AmountField } from "@/components/AmountField";
 import { SubmitButton } from "@/components/SubmitButton";
 import { TxStatus } from "@/components/TxStatus";
@@ -51,7 +53,11 @@ export default function TradePage() {
   const [slippageBps, setSlippageBps] = useState<bigint>(DEFAULT_SLIPPAGE_BPS);
 
   const direction = DIRECTIONS.find((d) => d.id === directionId) ?? DIRECTIONS[0];
-  const market = useMarket();
+  const { containerRef: directionsRef, rect: directionRect } = useSlideRect<HTMLDivElement>(
+    '[aria-pressed="true"]',
+    directionId,
+  );
+  const { market, loading: marketLoading } = useMarketStatus();
   const blendRates = useBlendRates();
   const position = usePosition(address, phase.kind === "done" ? phase.hash : 0);
   const blendPosition = useBlendPosition(address, phase.kind === "done" ? phase.hash : 0);
@@ -106,6 +112,9 @@ export default function TradePage() {
   }, [amount, address, direction.assetIn, direction.assetOut, cfg, client]);
 
   const amtError = amountError(amount, cfg.decimals, position ? balanceIn : undefined);
+  // A quote is in flight between the debounce firing and the RPC answering.
+  const quoting =
+    amount !== "" && address !== null && quote === null && quoteError === null && !amtError;
   const priceImpactGuardApplies = direction.assetIn !== "YT" && direction.assetOut !== "YT";
   const priceImpactTooHigh =
     priceImpactGuardApplies && quote !== null && quote.priceImpactBps > MAX_PRICE_IMPACT_BPS;
@@ -161,36 +170,72 @@ export default function TradePage() {
           <div className="flex items-center justify-between">
             <p className="label-data">Market status</p>
             <span className="flex items-center gap-2 text-[13px] text-smoke">
-              <span className="h-1.5 w-1.5 animate-pulse rounded-pill bg-paper" />
+              <span className="glow-signal-dot h-1.5 w-1.5 animate-pulse rounded-pill bg-amber" />
               Live feed
             </span>
           </div>
           <dl className="space-y-px">
-            <Stat label="Reserves (SY)" value={market ? formatTokenAmount(market.totalSy, cfg.decimals) : "n/a"} />
+            <Stat
+              label="Reserves (SY)"
+              value={market ? formatTokenAmount(market.totalSy, cfg.decimals) : "n/a"}
+              loading={marketLoading}
+            />
             <Stat
               label="Implied APY (TWAP)"
               value={market ? bpsToPercent(market.impliedApyBps) : "n/a"}
+              loading={marketLoading}
               signal
             />
-            <Stat label="Spot APY" value={market ? bpsToPercent(market.spotApyBps) : "n/a"} />
-            <Stat label="Maturity" value={market ? maturityStatus(market.maturity) : "n/a"} signal />
-            <Stat label="Maturity date" value={market ? formatMaturityDate(market.maturity) : "n/a"} />
+            <Stat
+              label="Spot APY"
+              value={market ? bpsToPercent(market.spotApyBps) : "n/a"}
+              loading={marketLoading}
+            />
+            <Stat
+              label="Maturity"
+              value={market ? maturityStatus(market.maturity) : "n/a"}
+              loading={marketLoading}
+              signal
+            />
+            <Stat
+              label="Maturity date"
+              value={market ? formatMaturityDate(market.maturity) : "n/a"}
+              loading={marketLoading}
+            />
           </dl>
         </aside>
 
         {/* Swap form */}
         <div className="space-y-6 lg:col-span-8">
           <div className="card space-y-6 p-8">
-            <div className="grid grid-cols-2 gap-px border border-white/10 sm:grid-cols-4">
+            {/* Route toggle: one measured highlight slides behind the active
+                direction; before measurement the active button keeps a static
+                fill so server render and no-JS look identical. */}
+            <div
+              ref={directionsRef}
+              className="relative grid grid-cols-2 gap-px border border-white/10 sm:grid-cols-4"
+            >
+              {directionRect ? (
+                <span
+                  aria-hidden
+                  className="absolute bg-white/[0.04] transition-all duration-300 ease-out motion-reduce:transition-none"
+                  style={{
+                    left: directionRect.left,
+                    top: directionRect.top,
+                    width: directionRect.width,
+                    height: directionRect.height,
+                  }}
+                />
+              ) : null}
               {DIRECTIONS.map((d) => (
                 <button
                   key={d.id}
                   type="button"
                   onClick={() => setDirectionId(d.id)}
                   aria-pressed={d.id === directionId}
-                  className={`px-3 py-2.5 text-[13px] uppercase tracking-[0.08em] transition ${
+                  className={`relative px-3 py-2.5 text-[13px] uppercase tracking-[0.08em] transition ${
                     d.id === directionId
-                      ? "bg-white/[0.04] text-amber"
+                      ? `text-amber ${directionRect ? "" : "bg-white/[0.04]"}`
                       : "text-smoke hover:text-paper"
                   }`}
                 >
@@ -215,11 +260,15 @@ export default function TradePage() {
               max={balanceIn}
             />
 
-            {/* Direction arrow + read-only expected-out, mirroring the swap card. */}
+            {/* Direction arrow + read-only expected-out, mirroring the swap card.
+                The arrow spins while a quote is in flight: the debounce window
+                is the app's one honest "working" moment. */}
             <div className="flex items-center justify-center">
               <span
                 aria-hidden
-                className="flex h-8 w-8 items-center justify-center border border-white/15 text-smoke"
+                className={`flex h-8 w-8 items-center justify-center border border-white/15 text-smoke ${
+                  quoting ? "animate-spin motion-reduce:animate-none" : ""
+                }`}
               >
                 ↓
               </span>
@@ -227,7 +276,10 @@ export default function TradePage() {
             <div className="border-t border-white/10 pt-5">
               <span className="label-data">Expected out ({direction.assetOut})</span>
               <p className="mt-2 text-3xl font-light tabular-nums text-paper">
-                {quote ? formatTokenAmount(quote.amountOut, cfg.decimals) : "0.0"}
+                <LiveValue
+                  value={quote ? formatTokenAmount(quote.amountOut, cfg.decimals) : "0.0"}
+                  loading={quoting}
+                />
               </p>
             </div>
 
@@ -259,22 +311,30 @@ export default function TradePage() {
             <dl className="panel-subtle space-y-2 p-5 text-sm">
               <div className="flex justify-between">
                 <dt className="text-ash">Expected out ({direction.assetOut})</dt>
-                <dd className="tabular-nums text-paper">{formatTokenAmount(quote.amountOut, cfg.decimals)}</dd>
+                <dd className="tabular-nums text-paper">
+                  <LiveValue value={formatTokenAmount(quote.amountOut, cfg.decimals)} />
+                </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-ash">Price impact</dt>
-                <dd className="tabular-nums text-paper">{bpsToPercent(quote.priceImpactBps)}</dd>
+                <dd className="tabular-nums text-paper">
+                  <LiveValue value={bpsToPercent(quote.priceImpactBps)} />
+                </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-ash">Implied APY (TWAP)</dt>
-                <dd className="tabular-nums text-amber">{bpsToPercent(quote.impliedApyBps)}</dd>
+                <dd className="tabular-nums text-amber">
+                  <LiveValue value={bpsToPercent(quote.impliedApyBps)} />
+                </dd>
               </div>
               <div className="flex justify-between">
                 <dt className="text-ash">
                   Min received ({SLIPPAGE_OPTIONS.find((o) => o.bps === slippageBps)?.label} slippage)
                 </dt>
                 <dd className="tabular-nums text-paper">
-                  {formatTokenAmount(applySlippage(quote.amountOut, slippageBps), cfg.decimals)}
+                  <LiveValue
+                    value={formatTokenAmount(applySlippage(quote.amountOut, slippageBps), cfg.decimals)}
+                  />
                 </dd>
               </div>
             </dl>
@@ -305,11 +365,23 @@ export default function TradePage() {
   );
 }
 
-function Stat({ label, value, signal }: { label: string; value: string; signal?: boolean }) {
+function Stat({
+  label,
+  value,
+  signal,
+  loading,
+}: {
+  label: string;
+  value: string;
+  signal?: boolean;
+  loading?: boolean;
+}) {
   return (
     <div className="flex items-center justify-between border-t border-white/10 py-3">
       <dt className="label-data">{label}</dt>
-      <dd className={`text-sm tabular-nums ${signal ? "text-amber" : "text-paper"}`}>{value}</dd>
+      <dd className={`text-sm tabular-nums ${signal ? "text-amber" : "text-paper"}`}>
+        <LiveValue value={value} loading={loading} className="w-14" />
+      </dd>
     </div>
   );
 }

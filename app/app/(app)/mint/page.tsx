@@ -301,11 +301,15 @@ export default function MintPage() {
             <p className="text-xs tabular-nums text-ash">
               {cfg.yieldSource.kind === "blend" ? "Wallet Blend USDC balance" : "Wallet USDC balance"}
               :{" "}
-              {address
-                ? underlyingBalance === null
-                  ? "loading"
-                  : underlyingBalanceError ?? formatTokenAmount(underlyingBalance, cfg.decimals)
-                : "connect wallet"}
+              {address ? (
+                underlyingBalance === null ? (
+                  <span aria-hidden className="skeleton w-12" />
+                ) : (
+                  underlyingBalanceError ?? formatTokenAmount(underlyingBalance, cfg.decimals)
+                )
+              ) : (
+                "connect wallet"
+              )}
             </p>
             {cfg.yieldSource.kind === "blend" ? (
               <p className="text-xs leading-relaxed text-ash">
