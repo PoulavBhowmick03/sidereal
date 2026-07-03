@@ -15,10 +15,12 @@ export {
   blendPositionFor,
   blendRates,
   blendRateToBps,
+  blendReserveTokenIndex,
   blendSupplyApr,
   blendUtilization,
   decodeBlendPositions,
   decodeBlendReserve,
+  decodeBlendReserveEmission,
   encodeBlendRequest,
 } from "./blend.js";
 export type {
@@ -28,6 +30,9 @@ export type {
   BlendReserve,
   BlendReserveConfig,
   BlendReserveData,
+  BlendReserveEmission,
+  BlendReserveEmissionScan,
+  BlendReserveEmissionSlot,
 } from "./blend.js";
 export { marketMethodFor, quoteMethodFor, priceImpactBps, secondsToMaturity } from "./routes.js";
 export type { MarketMethod, QuoteMethod } from "./routes.js";

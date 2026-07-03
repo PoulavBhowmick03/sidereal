@@ -34,13 +34,18 @@ import { ContractError, parseContractErrorCode } from "./errors.js";
 import {
   BLEND_REQUEST_WITHDRAW,
   BLEND_REQUEST_WITHDRAW_COLLATERAL,
+  BLEND_RESERVE_TOKEN_LIABILITY,
+  BLEND_RESERVE_TOKEN_SUPPLY,
+  blendReserveTokenIndex,
   blendPositionFor,
   blendRates,
   encodeBlendRequest,
   decodeBlendPositions,
   decodeBlendReserve,
+  decodeBlendReserveEmission,
   type BlendPosition,
   type BlendRates,
+  type BlendReserveEmissionScan,
 } from "./blend.js";
 
 type Operation = ReturnType<Contract["call"]>;
@@ -255,6 +260,55 @@ export class StellarYT {
       this.simulateRead<{ bstop_rate: number }>(poolContract.call("get_config")),
     ]);
     return blendRates(decodeBlendReserve(reserveRaw), BigInt(poolConfig.bstop_rate));
+  }
+
+  /**
+   * Reads reserve-token emission slots for a Blend reserve. The pool identifies
+   * liabilities as `reserve_index * 2` and supply/collateral bTokens as
+   * `reserve_index * 2 + 1`. Use this to verify whether a wrapper supplier can
+   * earn BLND before building reward-passthrough contracts.
+   */
+  async getBlendReserveEmissionScan(
+    pool: string,
+    asset: string,
+    slotCount = 8,
+  ): Promise<BlendReserveEmissionScan> {
+    const poolContract = new Contract(pool);
+    const reserveRaw = await this.simulateRead<Parameters<typeof decodeBlendReserve>[0]>(
+      poolContract.call("get_reserve", new Address(asset).toScVal()),
+    );
+    const reserve = decodeBlendReserve(reserveRaw);
+    const liabilityTokenIndex = blendReserveTokenIndex(
+      reserve.config.index,
+      BLEND_RESERVE_TOKEN_LIABILITY,
+    );
+    const supplyTokenIndex = blendReserveTokenIndex(
+      reserve.config.index,
+      BLEND_RESERVE_TOKEN_SUPPLY,
+    );
+    const effectiveSlotCount = Math.max(slotCount, supplyTokenIndex + 1);
+    const slots = await Promise.all(
+      Array.from({ length: effectiveSlotCount }, async (_unused, reserveTokenIndex) => ({
+        reserveTokenIndex,
+        emission: decodeBlendReserveEmission(
+          await this.simulateRead<Parameters<typeof decodeBlendReserveEmission>[0]>(
+            poolContract.call(
+              "get_reserve_emissions",
+              nativeToScVal(reserveTokenIndex, { type: "u32" }),
+            ),
+          ),
+        ),
+      })),
+    );
+
+    return {
+      reserve,
+      liabilityTokenIndex,
+      supplyTokenIndex,
+      liability: slots[liabilityTokenIndex]?.emission ?? null,
+      supply: slots[supplyTokenIndex]?.emission ?? null,
+      slots,
+    };
   }
 
   /**

@@ -15,10 +15,12 @@ import {
   blendPositionFor,
   blendRates,
   blendRateToBps,
+  blendReserveTokenIndex,
   blendSupplyApr,
   blendUtilization,
   decodeBlendPositions,
   decodeBlendReserve,
+  decodeBlendReserveEmission,
   type BlendReserve,
 } from "../src/blend.js";
 
@@ -154,6 +156,30 @@ describe("decodeBlendReserve", () => {
     expect(decoded.config.rThree).toBe(10_000_000n);
     expect(decoded.data.bRate).toBe(1_055_792_546_636n);
     expect(decoded.data.irMod).toBe(1_000_000n);
+  });
+});
+
+describe("Blend reserve emissions", () => {
+  it("computes liability and supply reserve token ids", () => {
+    expect(blendReserveTokenIndex(3, 0)).toBe(6);
+    expect(blendReserveTokenIndex(3, 1)).toBe(7);
+  });
+
+  it("decodes null and active reserve emissions", () => {
+    expect(decodeBlendReserveEmission(null)).toBeNull();
+    expect(
+      decodeBlendReserveEmission({
+        expiration: 1_783_301_379n,
+        eps: 2_271_682_720_701n,
+        index: 99n,
+        last_time: 1_782_700_000n,
+      }),
+    ).toEqual({
+      expiration: 1_783_301_379n,
+      eps: 2_271_682_720_701n,
+      index: 99n,
+      lastTime: 1_782_700_000n,
+    });
   });
 });
 

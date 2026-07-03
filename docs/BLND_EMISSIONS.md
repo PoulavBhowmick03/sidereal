@@ -36,6 +36,13 @@ exclusion, and the blocker resolves to the design below, to be implemented
 when a target pool (mainnet, or a self-administered test pool) emits to
 suppliers.
 
+Recheck command:
+
+```sh
+pnpm --filter @sidereal/sdk build
+node scripts/check-blnd-emissions.mjs
+```
+
 ## 2. MVP action (documentation only)
 
 ☑ Record the verdict here.
@@ -44,6 +51,8 @@ suppliers.
 ☑ Note the exclusion in [BLEND_INTEGRATION.md](./BLEND_INTEGRATION.md):
   SY yield on this market is interest only, because the pool emits no
   supply-side BLND for USDC.
+☑ Add `scripts/check-blnd-emissions.mjs` plus SDK emission decoders so the
+  verdict can be re-run against the configured pool.
 
 ## 3. Design for when emissions exist
 

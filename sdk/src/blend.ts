@@ -41,6 +41,13 @@ export const BLEND_REQUEST_WITHDRAW = 1;
 export const BLEND_REQUEST_SUPPLY_COLLATERAL = 2;
 export const BLEND_REQUEST_WITHDRAW_COLLATERAL = 3;
 
+export const BLEND_RESERVE_TOKEN_LIABILITY = 0;
+export const BLEND_RESERVE_TOKEN_SUPPLY = 1;
+
+export function blendReserveTokenIndex(reserveIndex: number, resType: 0 | 1): number {
+  return reserveIndex * 2 + resType;
+}
+
 /** Reserve configuration, decoded from `pool.get_reserve(asset).config`. */
 export interface BlendReserveConfig {
   /** Reserve index in the pool's reserve list. */
@@ -79,6 +86,32 @@ export interface BlendReserve {
   asset: string;
   config: BlendReserveConfig;
   data: BlendReserveData;
+}
+
+/** Blend `ReserveEmissionData`, decoded from `pool.get_reserve_emissions(id)`. */
+export interface BlendReserveEmission {
+  /** Unix seconds when this emission stream expires. */
+  expiration: bigint;
+  /** BLND emitted per second for this reserve token id. */
+  eps: bigint;
+  /** Cumulative BLND-per-token index. */
+  index: bigint;
+  /** Unix seconds of the last emission index update. */
+  lastTime: bigint;
+}
+
+export interface BlendReserveEmissionSlot {
+  reserveTokenIndex: number;
+  emission: BlendReserveEmission | null;
+}
+
+export interface BlendReserveEmissionScan {
+  reserve: BlendReserve;
+  liabilityTokenIndex: number;
+  supplyTokenIndex: number;
+  liability: BlendReserveEmission | null;
+  supply: BlendReserveEmission | null;
+  slots: BlendReserveEmissionSlot[];
 }
 
 /** Live rate snapshot of one Blend reserve, all 7-decimal fixed point. */
@@ -329,5 +362,26 @@ export function decodeBlendReserve(raw: {
       irMod: BigInt(raw.data.ir_mod),
       lastTime: BigInt(raw.data.last_time),
     },
+  };
+}
+
+/** Decodes `Option<ReserveEmissionData>` from `pool.get_reserve_emissions`. */
+export function decodeBlendReserveEmission(
+  raw:
+    | null
+    | undefined
+    | {
+        expiration: bigint | number;
+        eps: bigint | number;
+        index: bigint | number;
+        last_time: bigint | number;
+      },
+): BlendReserveEmission | null {
+  if (raw == null) return null;
+  return {
+    expiration: BigInt(raw.expiration),
+    eps: BigInt(raw.eps),
+    index: BigInt(raw.index),
+    lastTime: BigInt(raw.last_time),
   };
 }

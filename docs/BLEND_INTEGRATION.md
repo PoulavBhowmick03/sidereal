@@ -49,7 +49,8 @@ Note on emissions: SY yield on this market is interest only. Checked
 (`get_reserve_emissions`, reserve token index 7) is null; only the borrow
 side emits. The wrapper therefore accrues no BLND to pass through here. The
 passthrough design for pools that do emit to suppliers is in
-[BLND_EMISSIONS.md](./BLND_EMISSIONS.md).
+[BLND_EMISSIONS.md](./BLND_EMISSIONS.md). Recheck with
+`node scripts/check-blnd-emissions.mjs` after rebuilding the SDK.
 
 ## 4. Interface mapping (verified against blend-contracts-v2 `main`)
 

@@ -79,7 +79,8 @@ vi.mock("@stellar/stellar-sdk", () => {
       const op = tx.ops[0]!;
       state.calls.push({ method: op.method, args: op.args });
       if (state.simulationError) return { error: state.simulationError };
-      return { result: { retval: state.returns[op.method] } };
+      const value = state.returns[op.method];
+      return { result: { retval: Array.isArray(value) ? value.shift() : value } };
     }
     async prepareTransaction(tx: { ops: Array<{ method: string; args: unknown[] }> }) {
       for (const op of tx.ops) state.calls.push({ method: op.method, args: op.args });
@@ -311,6 +312,54 @@ describe("getLpPosition", () => {
     expect(p.shareBps).toBe(0n);
     expect(p.ptValue).toBe(0n);
     expect(p.syValue).toBe(0n);
+  });
+});
+
+describe("getBlendReserveEmissionScan", () => {
+  it("scans reserve emissions and identifies liability and supply slots", async () => {
+    state().returns = {
+      get_reserve: {
+        asset: "USDC",
+        config: {
+          index: 3,
+          decimals: 7,
+          util: 7_000_000,
+          max_util: 9_500_000,
+          r_base: 5_000,
+          r_one: 300_000,
+          r_two: 1_000_000,
+          r_three: 10_000_000,
+        },
+        data: {
+          b_rate: 1_000_000_000_000n,
+          b_supply: 0n,
+          d_rate: 1_000_000_000_000n,
+          d_supply: 0n,
+          ir_mod: 1_000_000n,
+          last_time: 0n,
+        },
+      },
+      get_reserve_emissions: [
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        { expiration: 9n, eps: 7n, index: 5n, last_time: 3n },
+        null,
+      ],
+    };
+
+    const scan = await newClient().getBlendReserveEmissionScan("POOL", "USDC", 8);
+
+    expect(scan.reserve.config.index).toBe(3);
+    expect(scan.liabilityTokenIndex).toBe(6);
+    expect(scan.supplyTokenIndex).toBe(7);
+    expect(scan.liability).toMatchObject({ eps: 7n, expiration: 9n });
+    expect(scan.supply).toBeNull();
+    expect(scan.slots).toHaveLength(8);
+    expect(state().calls.filter((c) => c.method === "get_reserve_emissions")).toHaveLength(8);
   });
 });
 
