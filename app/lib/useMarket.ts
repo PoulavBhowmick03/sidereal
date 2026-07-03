@@ -11,7 +11,7 @@ import { getMarketSafe } from "./sdk";
  * is not deployed, or on an RPC error, so pages can render a placeholder rather
  * than crash. Mirrors usePosition's cancellation pattern.
  */
-export function useMarket(): MarketState | null {
+export function useMarket(refreshKey: unknown = 0): MarketState | null {
   const [market, setMarket] = useState<MarketState | null>(null);
 
   useEffect(() => {
@@ -22,7 +22,7 @@ export function useMarket(): MarketState | null {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [refreshKey]);
 
   return market;
 }

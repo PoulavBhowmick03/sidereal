@@ -15,7 +15,7 @@ test("landing page renders the protocol pitch and a launch CTA", async ({ page }
   await expect(page.getByRole("link", { name: /launch app/i }).first()).toBeVisible();
 });
 
-test("nav reaches mint, trade, and portfolio", async ({ page }) => {
+test("nav reaches mint, trade, pool, and portfolio", async ({ page }) => {
   // The in-app tabs live in the app shell, not on the marketing landing. Enter
   // the app first via Launch App, then exercise the header tabs.
   await page.goto("/");
@@ -31,11 +31,18 @@ test("nav reaches mint, trade, and portfolio", async ({ page }) => {
   await expect(page.getByRole("button", { name: "Deposit SY", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Deposit + split", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: /connect wallet to mint/i })).toBeVisible();
+  await expect(page.getByText("Blocker 3: Funded manual run")).toBeVisible();
 
   await nav.getByRole("link", { name: "Trade" }).click();
   await expect(page).toHaveURL(/\/trade$/, { timeout: 15_000 });
   await expect(page.getByRole("heading", { name: "Trade" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Buy PT" })).toBeVisible();
+
+  await nav.getByRole("link", { name: "Pool" }).click();
+  await expect(page).toHaveURL(/\/pool$/, { timeout: 15_000 });
+  await expect(page.getByRole("heading", { name: "Pool", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Add liquidity" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Remove liquidity" })).toBeVisible();
 
   await nav.getByRole("link", { name: "Portfolio" }).click();
   await expect(page).toHaveURL(/\/portfolio$/, { timeout: 15_000 });
@@ -59,6 +66,17 @@ test("trade page exposes all four pool routes", async ({ page }) => {
   for (const label of ["Buy PT", "Sell PT", "Buy YT", "Sell YT"]) {
     await expect(page.getByRole("button", { name: label })).toBeVisible();
   }
+});
+
+test("pool page exposes liquidity actions and live stats shell", async ({ page }) => {
+  await page.goto("/pool");
+  await expect(page.getByRole("heading", { name: "Pool", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Add liquidity" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Remove liquidity" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /connect wallet to add liquidity/i })).toBeVisible();
+  await expect(page.getByRole("button", { name: /connect wallet to remove liquidity/i })).toBeVisible();
+  await expect(page.getByText("Pool status")).toBeVisible();
+  await expect(page.getByText("Your LP position")).toBeVisible();
 });
 
 test("demo page exposes the automated proof runner without starting it", async ({ page }) => {

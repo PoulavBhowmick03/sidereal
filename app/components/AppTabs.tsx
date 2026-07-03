@@ -8,6 +8,7 @@ import { usePathname } from "next/navigation";
 const TABS = [
   { href: "/mint", label: "Mint", tour: "nav-mint" },
   { href: "/trade", label: "Trade", tour: "nav-trade" },
+  { href: "/pool", label: "Pool", tour: undefined },
   { href: "/portfolio", label: "Portfolio", tour: "nav-portfolio" },
   { href: "/demo", label: "Demo", tour: undefined },
 ];
