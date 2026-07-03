@@ -513,7 +513,6 @@ impl Market for AmmMarket {
 
         let config = read_config_or_panic(env);
         let mut state = read_state_or_panic(env);
-        require_live(env, &config);
         require_seeded(env, &state);
 
         let holder_lp = read_lp_balance(env, from.clone());
@@ -1652,6 +1651,105 @@ mod test {
             sy_balance(&fixture, &fixture.admin),
             admin_sy_before - 1_000
         );
+    }
+
+    #[test]
+    fn remove_liquidity_after_maturity_returns_pro_rata_assets() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        let admin_pt_before = pt_balance(&fixture, &fixture.admin);
+        let admin_sy_before = sy_balance(&fixture, &fixture.admin);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &10_000, &10_000);
+
+        fixture.env.ledger().set_timestamp(MATURITY);
+        let (pt_out, sy_out) = fixture.client.remove_liquidity(&fixture.admin, &9_000);
+        let state = fixture.client.state();
+
+        assert_eq!((pt_out, sy_out), (9_000, 9_000));
+        assert_eq!(state.total_pt, 1_000);
+        assert_eq!(state.total_sy, 1_000);
+        assert_eq!(state.total_lp, 1_000);
+        assert_eq!(fixture.client.lp_balance(&fixture.admin), 0);
+        assert_eq!(pool_pt_balance(&fixture), 1_000);
+        assert_eq!(pool_sy_balance(&fixture), 1_000);
+        assert_eq!(
+            pt_balance(&fixture, &fixture.admin),
+            admin_pt_before - 1_000
+        );
+        assert_eq!(
+            sy_balance(&fixture, &fixture.admin),
+            admin_sy_before - 1_000
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #10)")]
+    fn add_liquidity_rejects_after_maturity() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &10_000, &10_000);
+
+        fixture.env.ledger().set_timestamp(MATURITY);
+        fixture.client.add_liquidity(&fixture.admin, &1_000, &1_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #10)")]
+    fn swap_pt_for_sy_rejects_after_maturity() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &20_000, &20_000);
+        mint_pt(&fixture, &fixture.admin, 1_000);
+
+        fixture.env.ledger().set_timestamp(MATURITY);
+        fixture.client.swap_pt_for_sy(&fixture.admin, &1_000, &1);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #10)")]
+    fn swap_sy_for_pt_rejects_after_maturity() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &20_000, &20_000);
+        mint_sy(&fixture, &fixture.admin, 1_000);
+
+        fixture.env.ledger().set_timestamp(MATURITY);
+        fixture.client.swap_sy_for_pt(&fixture.admin, &1_000, &1);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #10)")]
+    fn swap_sy_for_yt_rejects_after_maturity() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &20_000, &20_000);
+        mint_sy(&fixture, &fixture.admin, 1_000);
+
+        fixture.env.ledger().set_timestamp(MATURITY);
+        fixture.client.swap_sy_for_yt(&fixture.admin, &1_000, &1);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #10)")]
+    fn swap_yt_for_sy_rejects_after_maturity() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &20_000, &20_000);
+
+        fixture.env.ledger().set_timestamp(MATURITY);
+        fixture.client.swap_yt_for_sy(&fixture.admin, &1_000, &1);
     }
 
     #[test]
