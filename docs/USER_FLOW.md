@@ -192,7 +192,9 @@ remaining verification item is the funded browser-wallet four-signature run.
 
 ## 9. Remaining work (from the 2026-07-03 audit)
 
-In priority order:
+In priority order. The two emission and liquidity items were added on
+2026-07-03 after comparing sidereal against Pendle's core yield-splitting
+mechanic; together with the funded manual run they are the MVP blockers.
 
 - ☑ **Seed the AMM** (section 4). The deployed market now has 25 PT and 25 SY
   of AMM liquidity and publishes a nonzero implied APY.
@@ -210,10 +212,30 @@ In priority order:
 - ☑ **Copy fixes.** The yield choice card now targets the mint form in-place,
   the banner fallback reads "a variable rate", and the YT-sale recovery copy
   points users back to Trade with clearer wording.
+- ☑ **BLND emission passthrough (MVP fidelity gap, added 2026-07-03,
+  resolved as a documented exclusion).** Pendle's SY standard forwards the
+  underlying protocol's incentive tokens to the yield side alongside
+  interest. Checked on 2026-07-03: the live pool emits BLND to USDC
+  borrowers but its supply-side emission slot is null, so the SY wrapper (a
+  supplier) accrues nothing to pass through on this market and a claim path
+  could not be exercised here. SY yield on this market is interest only.
+  The verdict, the passthrough design for pools that do emit to suppliers,
+  and the testability route are in [BLND_EMISSIONS.md](./BLND_EMISSIONS.md).
+- ◐ **LP page (MVP self-sufficiency gap, added 2026-07-03).** The fixed
+  rate exists only because the AMM has depth. The app now has a `/pool`
+  page for adding proportional PT/SY liquidity and removing LP for pro-rata
+  PT/SY, plus SDK LP position reads and preview tests. It still needs the
+  post-maturity AMM wasm redeployed, reseeded, and verified with a funded
+  wallet before this blocker is closed. The implementation plan and status
+  are in [LP_PAGE.md](./LP_PAGE.md).
 - ☐ **Funded manual run.** Walk the four-signature lock-fixed-rate flow end
-  to end with a faucet-funded wallet via the demo walkthrough, after
-  seeding. This remains open because the automated checks do not sign with a
-  browser wallet.
+  to end with a funded browser wallet via the demo walkthrough, after the
+  pool page redeploy and seeding. Prepare a testnet Freighter or xBull
+  wallet with the Blend testnet USDC trustline
+  (`USDC:GATALTGTWIOT6BUDBCZM3Q4OQ4BO2COLOAZ7IYSKPLC2PMSOPPGF5V56`), fund
+  it from the `sidereal-smoke` reserve balance, supply on Blend, tokenize on
+  `/mint`, confirm PT held plus SY proceeds, then record transaction hashes
+  here and in [REMAINING.md](./REMAINING.md) section 3b.
 - ☑ **Commit.** The work lands as separate local commits by concern.
 
 ## 10. Known number-quality caveat

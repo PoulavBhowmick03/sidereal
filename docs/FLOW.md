@@ -101,6 +101,12 @@ Exposure changes happen on `/trade`, which quotes all four routes of the
 PT/SY pool (YT trades flash-route through it) with price impact, implied
 APY, and a slippage guard before signing.
 
+Liquidity management happens on `/pool`. A holder with PT and SY from minting
+can add proportional liquidity to deepen the AMM and receive LP accounting;
+removing LP returns the holder's pro-rata PT and SY claim. Add closes at
+maturity, while removal stays open so an expired LP position can unwind into
+the same assets it represents.
+
 ## Stage 5: exit at maturity
 
 When the market matures, the portfolio page flips to redemption mode: PT
@@ -124,7 +130,7 @@ Two honest caveats about the numbers:
   Blend testnet reserve rate (its interest modifier sits at its floor). On
   a live market that spread would be arbitraged; on testnet it simply makes
   the fixed side look generous.
-- The last unverified piece is a funded browser-wallet run of the
-  four-signature flow, tracked with the rest of the remaining work in
-  [USER_FLOW.md](./USER_FLOW.md) section 9. Everything up to that point is
-  covered by unit tests and the live e2e suites.
+- The last unverified pieces are the post-LP-page redeploy and a funded
+  browser-wallet run of the four-signature flow, tracked with the rest of
+  the remaining work in [USER_FLOW.md](./USER_FLOW.md) section 9. Everything
+  up to that point is covered by unit tests and the live e2e suites.

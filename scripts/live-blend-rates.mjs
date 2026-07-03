@@ -49,3 +49,4 @@ console.log("supply APR :", (Number(blendRateToBps(rates.supplyApr)) / 100).toFi
 console.log("\n== SY wrapper / AMM market ==");
 console.log(json(market));
 console.log("1 SY =", (Number(market.exchangeRate) / 1e18).toFixed(12), "underlying");
+console.log("total LP:", market.totalLp.toString());

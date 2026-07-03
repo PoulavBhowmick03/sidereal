@@ -44,6 +44,13 @@ vault, so it is not the first target.
 Note: to use Blend, the SY wrapper's `underlying` must be Blend's USDC reserve
 asset, not our own throwaway test-USDC SAC.
 
+Note on emissions: SY yield on this market is interest only. Checked
+2026-07-03, the pool's supply-side BLND emission slot for USDC
+(`get_reserve_emissions`, reserve token index 7) is null; only the borrow
+side emits. The wrapper therefore accrues no BLND to pass through here. The
+passthrough design for pools that do emit to suppliers is in
+[BLND_EMISSIONS.md](./BLND_EMISSIONS.md).
+
 ## 4. Interface mapping (verified against blend-contracts-v2 `main`)
 
 Blend routes everything through one pool entrypoint:

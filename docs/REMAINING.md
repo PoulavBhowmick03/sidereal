@@ -158,11 +158,14 @@ via `initialize_blend`). On top of it:
   actually arrives). Withdraw encoding verified against the live pool: an
   empty-position withdraw simulation reaches the pool and fails with its
   domain error 1217 `InvalidBTokenBurnAmount`, not a decode error.
-- ☐ **Funded walkthrough.** A wallet holding Circle testnet USDC (manual
-  faucet step, https://faucet.circle.com) supplies to Blend, then runs the
-  tokenize flow end to end in the browser. The /demo page now guides this as
-  a live self-verifying checklist (connect, faucet, supply on Blend, tokenize
-  on mint); it stays open until someone completes it with a funded wallet.
+- ☐ **Funded walkthrough.** A testnet browser wallet with the Blend reserve
+  USDC trustline
+  (`USDC:GATALTGTWIOT6BUDBCZM3Q4OQ4BO2COLOAZ7IYSKPLC2PMSOPPGF5V56`) receives
+  reserve USDC from the `sidereal-smoke` identity, supplies to Blend, then
+  runs the tokenize flow end to end in the browser. The /demo page guides
+  this as a live self-verifying checklist (connect, fund, supply on Blend,
+  tokenize on mint); it stays open until someone completes it with a funded
+  wallet and records the transaction hashes here.
 
 ## 4. Known risks
 
