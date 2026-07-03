@@ -17,7 +17,8 @@ export function RollingLink({
     <Link href={href} className={`roll ${className}`} onClick={onClick}>
       <span className="roll-label">
         {children}
-        <span aria-hidden className="roll-label-copy">
+        {/* select-none keeps the visual duplicate out of copied text. */}
+        <span aria-hidden className="roll-label-copy select-none">
           {children}
         </span>
       </span>

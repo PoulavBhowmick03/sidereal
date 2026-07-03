@@ -4,7 +4,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-export type PinnedStep = { n: string; title: string; kicker: string; body: string };
+export type PinnedStep = { n: string; title: string; kicker: string; body: React.ReactNode };
 
 /** Desktop "how it works": the band pins to the viewport for ~2.6 screens of
  *  scroll and one monochrome SVG scene morphs through the three protocol

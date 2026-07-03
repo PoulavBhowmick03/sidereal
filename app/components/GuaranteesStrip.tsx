@@ -4,6 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { KickerWipe } from "@/components/KickerWipe";
+import { Term } from "@/components/Term";
 import { WordReveal } from "@/components/WordReveal";
 import { prefersReducedMotion, useInView } from "@/lib/useInView";
 
@@ -11,22 +12,27 @@ const GUARANTEES = [
   {
     index: "01",
     title: "Internal TWAP only",
-    body: "No external oracle enters the AMM pricing path.",
+    body: <>No external oracle enters the AMM pricing path.</>,
   },
   {
     index: "02",
     title: "Recombination enforced",
-    body: "One PT plus one YT always recombines into one SY through the tokenizer.",
+    body: (
+      <>
+        One <Term>PT</Term> plus one <Term>YT</Term> always recombines into one <Term>SY</Term>{" "}
+        through the tokenizer.
+      </>
+    ),
   },
   {
     index: "03",
     title: "Client-side signing",
-    body: "Every transaction is reviewed and signed by the user before submission.",
+    body: <>Every transaction is reviewed and signed by the user before submission.</>,
   },
   {
     index: "04",
     title: "Open source",
-    body: "The protocol is published under the Apache-2.0 license.",
+    body: <>The protocol is published under the Apache-2.0 license.</>,
   },
 ];
 
@@ -76,7 +82,7 @@ function GuaranteeRow({
       </span>
       <div>
         <h3
-          className={`text-xl font-light tracking-tight transition-colors duration-700 sm:text-2xl ${
+          className={`text-2xl font-light tracking-tight transition-colors duration-700 sm:text-3xl ${
             lit ? "text-paper" : "text-smoke"
           }`}
         >
@@ -102,8 +108,8 @@ export function GuaranteesStrip() {
     <section className="relative bg-transparent">
       <div className="mx-auto max-w-[1280px] px-6 py-20 sm:px-16 sm:py-24">
         <KickerWipe className="label-data">Design / Guarantees</KickerWipe>
-        <h2 className="mt-5 max-w-2xl text-4xl font-light tracking-tight sm:text-5xl">
-          <WordReveal>Built into the protocol</WordReveal>
+        <h2 className="mt-5 max-w-3xl text-5xl font-light tracking-tight sm:text-6xl lg:text-7xl">
+          <WordReveal brightWords={[3]}>Built into the protocol</WordReveal>
         </h2>
 
         <div ref={ref} className="relative mt-14 pl-8 sm:pl-14">

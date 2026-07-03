@@ -13,29 +13,46 @@ import { AudienceCards } from "@/components/AudienceCards";
 import { GuaranteesStrip } from "@/components/GuaranteesStrip";
 import { Spotlight } from "@/components/Spotlight";
 import { TickerBand } from "@/components/TickerBand";
+import { Term } from "@/components/Term";
 import { WordReveal } from "@/components/WordReveal";
 // The token legs live in InvariantBand, defined in the protocol's own terms.
 // No invented financial figures anywhere on this page (AGENTS section 7).
+// Token names in the copy carry the mono Term voice so they read as objects.
 const STEPS = [
   {
     n: "01",
     title: "Deposit and mint",
     kicker: "Action / Supply",
-    body: "Deposit USDC. The protocol wraps it into Standardized Yield, ready for the splitting mechanism.",
+    body: (
+      <>
+        Deposit <Term>USDC</Term>. The protocol wraps it into Standardized Yield, ready for the
+        splitting mechanism.
+      </>
+    ),
     band: "ink" as const,
   },
   {
     n: "02",
     title: "Split",
     kicker: "Mechanism / Fracture",
-    body: "SY fractures into two parts. The principal is secured as PT, the yield is isolated as YT.",
+    body: (
+      <>
+        <Term>SY</Term> fractures into two parts. The principal is secured as <Term>PT</Term>,
+        the yield is isolated as <Term>YT</Term>.
+      </>
+    ),
     band: "carbon" as const,
   },
   {
     n: "03",
     title: "Trade or hold",
     kicker: "Outcome / Market",
-    body: "Hold PT to maturity for a fixed return, or trade either leg on a time-decay AMM priced by an internal TWAP.",
+    body: (
+      <>
+        Hold <Term>PT</Term> to maturity for a fixed return, or trade either leg on a time-decay
+        AMM priced by an internal TWAP.
+      </>
+    ),
     band: "ink" as const,
   },
 ];
@@ -129,8 +146,8 @@ export default function LandingPage() {
         <div className="hairline" />
         <div className="mx-auto max-w-[1280px] px-6 py-20 sm:px-16">
           <div className="flex items-center justify-between">
-            <h2 className="text-3xl font-light tracking-tight">
-              <WordReveal>Protocol overview</WordReveal>
+            <h2 className="text-4xl font-light tracking-tight sm:text-5xl">
+              <WordReveal brightWords={[0]}>Protocol overview</WordReveal>
             </h2>
             <p className="glow-signal label-data text-amber">Live · Testnet</p>
           </div>
