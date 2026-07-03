@@ -19,11 +19,16 @@ body {
 }
 
 /* Darkroom scrollbar: a hairline paper thumb floating on an invisible track,
-   inset from the edge, brightening under the pointer. Firefox gets the
-   closest native equivalent via scrollbar-color. */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+   inset from the edge, brightening under the pointer.
+
+   The standard scrollbar-width/color properties MUST stay Firefox-only: as of
+   Chrome 121 setting either makes Chromium ignore every ::-webkit-scrollbar
+   rule, which silently replaces the filament below with the stock thin bar. */
+@supports (-moz-appearance: none) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+  }
 }
 *::-webkit-scrollbar {
   width: 12px;
