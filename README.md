@@ -65,6 +65,33 @@ route compile and pass under `mock_all_auths`, but the nested authorization tree
 has not been proven without permissive mocks or on testnet, so they are not
 demo-ready. See [Current limitations](#current-limitations).
 
+## Verified on-chain activity
+
+Beyond the test suites, we exercise the live testnet deployment with automated
+multi-wallet simulations: agent-driven wallets that onboard through the public
+Blend faucet and run the full lifecycle exactly as a user would, signing with
+their own keys. These are simulated users we run ourselves, not organic
+traction, and we label them as such. What they prove is that the deployed
+contracts settle real value for ordinary wallets: every balance reconciles to
+the base unit, and every invalid action is rejected on chain.
+
+The 2026-07-04 run: 13 wallets, roughly 80 confirmed transactions covering
+deposits (12 to 2,500 USDC), splits, cross-account transfers of all three
+tokens, a bilateral OTC PT sale, yield claims paying real Blend v2 interest,
+recombination of third-party legs, and full exits back to USDC. Methodology,
+findings, and wallet-by-wallet reconciliation:
+[`docs/testing/cohort-sim-2026-07-04.md`](./docs/testing/cohort-sim-2026-07-04.md).
+
+Browse the activity yourself on the testnet explorer, for example:
+
+- [`GDSZLAE3...N5Z72`](https://stellar.expert/explorer/testnet/account/GDSZLAE3PCPLTKXXO4F5L3PPXAXEXTMRTHEE5NIP4JRECKZ6GM7N5Z72), the day-one lifecycle wallet (deposit, split, claim, recombine)
+- [`GC4UWHHJ...A5AUS`](https://stellar.expert/explorer/testnet/account/GC4UWHHJO36TZZBAKKWZGMKJYVQV6HJN777CVB5SQKJCELY4Y36A5AUS), the largest single deposit (2,500 USDC in one transaction)
+- [`GA6DVF2A...XWW77`](https://stellar.expert/explorer/testnet/account/GA6DVF2AVVNA3ZWV7MUEDBXMOV5OGSATMVWLZHPEH4CAAKTV4V5XWW77), a fixed-rate buyer holding PT bought at a discount over the counter
+
+Or start from the deployed contracts in
+[`deployments/testnet.toml`](./deployments/testnet.toml) and read every
+interaction they have ever had.
+
 ## Architecture
 
 ```

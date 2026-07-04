@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Metadata } from "next";
+import { Analytics } from "@vercel/analytics/next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { WalletProvider } from "@/lib/wallet";
@@ -29,6 +30,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className={`scroll-smooth ${inter.variable}`}>
       <body className="min-h-screen font-sans">
         <WalletProvider>{children}</WalletProvider>
+        <Analytics />
       </body>
     </html>
   );
