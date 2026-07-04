@@ -14,6 +14,30 @@ A 90-second walkthrough on Stellar testnet: the landing page, the PT + YT = SY i
 
 ---
 
+## Public testnet cohort
+
+On 2026-07-04, an automated multi-wallet cohort simulation ran against the live
+Stellar testnet deployment. Thirteen freshly created wallets submitted roughly
+80 on-chain transactions covering deposits, splits, cross-account PT/YT/SY
+transfers, yield claims, recombination, an OTC PT sale, and exits back to USDC.
+Every wallet balance reconciled to the base unit after each epoch.
+
+This is synthetic QA activity, not organic user traction. It is useful because
+the wallets and transactions are public on testnet and reproduce real protocol
+settlement without mock auth or deployer-only shortcuts. The audit writeup is in
+[`docs/testing/cohort-sim-2026-07-04.md`](./docs/testing/cohort-sim-2026-07-04.md).
+
+Dune tracking is prepared in [`analytics/dune`](./analytics/dune):
+
+- `sidereal_active_users.sql` counts distinct on-chain wallets that touch the
+  deployed Sidereal contracts through Dune's native Stellar tables.
+- `sidereal_cohort_uploaded_user_count.sql` counts uploaded synthetic cohort
+  events separately, so QA wallets are never mixed with organic usage.
+- `scripts/dune-upload-cohort-events.mjs` uploads cohort JSONL events to a Dune
+  table when run with `DUNE_API_KEY` and `DUNE_NAMESPACE`.
+
+---
+
 ## What this is
 
 A protocol that takes a yield-bearing asset on Stellar and splits it into two tradable tokens:
