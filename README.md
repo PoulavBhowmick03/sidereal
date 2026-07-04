@@ -4,6 +4,14 @@
 
 **Status:** active Stellar Build Station / Instaward prototype. Testnet only. Not audited. Do not deposit real funds. The core lifecycle (deposit, split, recombine, redeem, claim) settles real SEP-41 tokens. The PT/SY AMM and the YT flash route are experimental and pending testnet auth verification (see [Current limitations](#current-limitations)).
 
+## Demo
+
+A 90-second walkthrough on Stellar testnet: the landing page, the PT + YT = SY invariant, adding liquidity against the live Blend v2 USDC pool, and a transaction building and submitting end to end.
+
+[![Sidereal walkthrough](docs/marketing/assets/walkthrough-poster.png)](docs/marketing/assets/walkthrough.mp4)
+
+*Click the image to open the video ([direct file](docs/marketing/assets/walkthrough.mp4), 5.8&nbsp;MB).*
+
 ---
 
 ## What this is
