@@ -16,16 +16,37 @@ A 90-second walkthrough on Stellar testnet: the landing page, the PT + YT = SY i
 
 ## Public testnet cohort
 
-On 2026-07-04, an automated multi-wallet cohort simulation ran against the live
-Stellar testnet deployment. Thirteen freshly created wallets submitted roughly
-80 on-chain transactions covering deposits, splits, cross-account PT/YT/SY
-transfers, yield claims, recombination, an OTC PT sale, and exits back to USDC.
-Every wallet balance reconciled to the base unit after each epoch.
+An automated multi-wallet cohort continuously exercises the live Stellar
+testnet deployment: agent-driven wallets onboard through the public Blend
+faucet and run the full lifecycle end to end, signing with their own keys.
+Cohort status (updated as the simulation grows):
+
+| Metric | Value |
+|---|---|
+| Cohort wallets on testnet | 26 and growing |
+| Confirmed transactions | 135+ |
+| Lifecycle coverage | deposit, split, transfer (PT/YT/SY), claim, recombine, OTC trade, redeem, full exit |
+| Yield claims paying real Blend v2 interest | 9 (1 to 1,734 base units, scaling with hold time) |
+| Balance reconciliation | exact to the base unit, every wallet, every epoch |
+| Global invariant checks (PT supply = YT supply, escrow coverage) | verified externally, twice |
+| Invalid-action probes rejected as designed | 9 of 9 |
+
+Last updated 2026-07-05.
 
 This is synthetic QA activity, not organic user traction. It is useful because
 the wallets and transactions are public on testnet and reproduce real protocol
 settlement without mock auth or deployer-only shortcuts. The audit writeup is in
 [`docs/testing/cohort-sim-2026-07-04.md`](./docs/testing/cohort-sim-2026-07-04.md).
+
+Browse the cohort on the testnet explorer, for example:
+
+- [`GDSZLAE3...N5Z72`](https://stellar.expert/explorer/testnet/account/GDSZLAE3PCPLTKXXO4F5L3PPXAXEXTMRTHEE5NIP4JRECKZ6GM7N5Z72), the day-one lifecycle wallet (deposit, split, claim, recombine)
+- [`GC4UWHHJ...A5AUS`](https://stellar.expert/explorer/testnet/account/GC4UWHHJO36TZZBAKKWZGMKJYVQV6HJN777CVB5SQKJCELY4Y36A5AUS), the largest single deposit (2,500 USDC in one transaction)
+- [`GA6DVF2A...XWW77`](https://stellar.expert/explorer/testnet/account/GA6DVF2AVVNA3ZWV7MUEDBXMOV5OGSATMVWLZHPEH4CAAKTV4V5XWW77), a fixed-rate buyer holding PT bought at a discount over the counter
+
+Or start from the deployed contracts in
+[`deployments/testnet.toml`](./deployments/testnet.toml) and read every
+interaction they have ever had.
 
 Dune tracking is prepared in [`analytics/dune`](./analytics/dune):
 
@@ -72,7 +93,7 @@ Status legend: **built** (real settlement, tested) · **experimental** (works un
 | YT SEP-41 token (balance/transfer/allowance, per-holder yield checkpoints) | ✅ built |
 | Tokenizer split / recombine / redeem (asset-unit PT/YT, principal redemption) | ✅ built |
 | YT yield claim (pays accrued yield in SY out of escrow, transfer-safe) | ✅ built |
-| Insolvency guard + escrow-coverage invariant (pro-rata cap, YT subordinated) | ✅ built |
+| Insolvency handling (shortfalls priced pro-rata at redemption and recombine, no on-chain coverage gate) | ✅ built |
 | Checked tokenization math + initialize gates (audit M2/M3) | ✅ built |
 | AMM integer fixed-point math (no float opcodes) + CI guard | ✅ built |
 | TypeScript SDK (typed client, quote, build, claim, submit) | ✅ built |
@@ -88,33 +109,6 @@ that reconcile balances against the actual token contracts. The AMM and YT flash
 route compile and pass under `mock_all_auths`, but the nested authorization tree
 has not been proven without permissive mocks or on testnet, so they are not
 demo-ready. See [Current limitations](#current-limitations).
-
-## Verified on-chain activity
-
-Beyond the test suites, we exercise the live testnet deployment with automated
-multi-wallet simulations: agent-driven wallets that onboard through the public
-Blend faucet and run the full lifecycle exactly as a user would, signing with
-their own keys. These are simulated users we run ourselves, not organic
-traction, and we label them as such. What they prove is that the deployed
-contracts settle real value for ordinary wallets: every balance reconciles to
-the base unit, and every invalid action is rejected on chain.
-
-The 2026-07-04 run: 13 wallets, roughly 80 confirmed transactions covering
-deposits (12 to 2,500 USDC), splits, cross-account transfers of all three
-tokens, a bilateral OTC PT sale, yield claims paying real Blend v2 interest,
-recombination of third-party legs, and full exits back to USDC. Methodology,
-findings, and wallet-by-wallet reconciliation:
-[`docs/testing/cohort-sim-2026-07-04.md`](./docs/testing/cohort-sim-2026-07-04.md).
-
-Browse the activity yourself on the testnet explorer, for example:
-
-- [`GDSZLAE3...N5Z72`](https://stellar.expert/explorer/testnet/account/GDSZLAE3PCPLTKXXO4F5L3PPXAXEXTMRTHEE5NIP4JRECKZ6GM7N5Z72), the day-one lifecycle wallet (deposit, split, claim, recombine)
-- [`GC4UWHHJ...A5AUS`](https://stellar.expert/explorer/testnet/account/GC4UWHHJO36TZZBAKKWZGMKJYVQV6HJN777CVB5SQKJCELY4Y36A5AUS), the largest single deposit (2,500 USDC in one transaction)
-- [`GA6DVF2A...XWW77`](https://stellar.expert/explorer/testnet/account/GA6DVF2AVVNA3ZWV7MUEDBXMOV5OGSATMVWLZHPEH4CAAKTV4V5XWW77), a fixed-rate buyer holding PT bought at a discount over the counter
-
-Or start from the deployed contracts in
-[`deployments/testnet.toml`](./deployments/testnet.toml) and read every
-interaction they have ever had.
 
 ## Architecture
 
