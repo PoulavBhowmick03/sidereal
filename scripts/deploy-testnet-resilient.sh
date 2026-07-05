@@ -22,7 +22,7 @@ cd "$REPO"
 NETWORK="${NETWORK:-testnet}"
 NETWORK_PASSPHRASE="${NETWORK_PASSPHRASE:-Test SDF Network ; September 2015}"
 IDENTITY="${DEPLOY_IDENTITY:-sidereal-deployer}"
-WASM_DIR="${WASM_DIR:-target/wasm32v1-none/release}"
+WASM_DIR="${WASM_DIR:-target/wasm32v1-none/release/optimized}"
 DEPLOYMENTS_DIR="${DEPLOYMENTS_DIR:-deployments}"
 STATE_FILE="${STATE_FILE:-$DEPLOYMENTS_DIR/$NETWORK.state.env}"
 MANIFEST_OUT="${MANIFEST_OUT:-$DEPLOYMENTS_DIR/$NETWORK.toml}"
@@ -286,19 +286,8 @@ SOURCE_COMMIT="$CURRENT_SOURCE_COMMIT"
 DEPLOY_STARTED_AT="${DEPLOY_STARTED_AT:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 save_state
 
-log "Building contracts to wasm from $SOURCE_COMMIT"
-cargo build --release --target wasm32v1-none --locked \
-  -p sidereal-sy-wrapper -p sidereal-pt-token -p sidereal-yt-token \
-  -p sidereal-tokenizer -p sidereal-amm
-
-if [[ "${SKIP_WASM_FLOAT_CHECK:-0}" != "1" ]]; then
-  bash scripts/check-wasm-floats.sh \
-    "$WASM_DIR/sidereal_sy_wrapper.wasm" \
-    "$WASM_DIR/sidereal_pt_token.wasm" \
-    "$WASM_DIR/sidereal_yt_token.wasm" \
-    "$WASM_DIR/sidereal_tokenizer.wasm" \
-    "$WASM_DIR/sidereal_amm.wasm"
-fi
+log "Building optimized deployable Wasm from $SOURCE_COMMIT"
+OPT_WASM_DIR="$WASM_DIR" bash scripts/build-optimized-wasm.sh
 
 SY_WASM_HASH="$(wasm_hash "$WASM_DIR/sidereal_sy_wrapper.wasm")"
 PT_WASM_HASH="$(wasm_hash "$WASM_DIR/sidereal_pt_token.wasm")"

@@ -12,7 +12,7 @@
 #
 # Requirements:
 #   - stellar-cli
-#   - built release Wasm in target/wasm32v1-none/release
+#   - built optimized Wasm in target/wasm32v1-none/release/optimized
 #   - a funded testnet identity, default DEPLOY_IDENTITY=sidereal-smoke
 #
 # Usage:
@@ -31,7 +31,7 @@ cd "$REPO"
 
 NETWORK="${NETWORK:-testnet}"
 IDENTITY="${DEPLOY_IDENTITY:-sidereal-smoke}"
-WASM_DIR="${WASM_DIR:-target/wasm32v1-none/release}"
+WASM_DIR="${WASM_DIR:-target/wasm32v1-none/release/optimized}"
 REPORT_FILE="${REPORT_FILE:-deployments/amm-routes-testnet.state.env}"
 CIRCLE_TESTNET_USDC_ISSUER="${CIRCLE_TESTNET_USDC_ISSUER:-GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5}"
 DEFAULT_UNDERLYING_ASSET="USDC:$CIRCLE_TESTNET_USDC_ISSUER"

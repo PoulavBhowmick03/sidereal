@@ -18,7 +18,7 @@
 # throwaway market on a short term. No private keys are written or echoed.
 #
 # Requirements: stellar-cli, the release wasm already built
-# (target/wasm32v1-none/release/*.wasm), a funded deployer identity.
+# (target/wasm32v1-none/release/optimized/*.wasm), a funded deployer identity.
 #
 # Usage:
 #   bash scripts/smoke-testnet.sh
@@ -31,7 +31,7 @@ cd "$REPO"
 
 NETWORK="${NETWORK:-testnet}"
 IDENTITY="${DEPLOY_IDENTITY:-sidereal-deployer}"
-WASM_DIR="${WASM_DIR:-target/wasm32v1-none/release}"
+WASM_DIR="${WASM_DIR:-target/wasm32v1-none/release/optimized}"
 
 WAD="1000000000000000000"
 # How long the throwaway market lives before maturity. Must comfortably exceed
@@ -175,7 +175,7 @@ deploy_hash() {
 }
 
 command -v stellar >/dev/null 2>&1 || die "stellar-cli not found"
-[[ -f "$WASM_DIR/sidereal_sy_wrapper.wasm" ]] || die "wasm not built; run: make build"
+[[ -f "$WASM_DIR/sidereal_sy_wrapper.wasm" ]] || die "wasm not built; run: make wasm"
 
 ADMIN="$(stellar keys address "$IDENTITY")"
 MATURITY="$(( $(date -u +%s) + TERM_SECONDS ))"

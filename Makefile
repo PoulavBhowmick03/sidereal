@@ -24,10 +24,8 @@ app-test: ## Typecheck and test the frontend
 	pnpm --filter @sidereal/app run typecheck
 	pnpm --filter @sidereal/app test
 
-wasm: ## Build all contracts to wasm release
-	cargo build --release --target wasm32v1-none \
-		-p sidereal-sy-wrapper -p sidereal-pt-token -p sidereal-yt-token \
-		-p sidereal-tokenizer -p sidereal-amm
+wasm: ## Build optimized deployable contract Wasm artifacts
+	bash scripts/build-optimized-wasm.sh
 
 build: wasm ## Build contracts (wasm), the SDK, and the app
 	pnpm --filter @sidereal/sdk build

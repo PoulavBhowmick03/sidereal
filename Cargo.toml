@@ -23,3 +23,6 @@ repository = "https://github.com/PoulavBhowmick03/sidereal"
 
 [workspace.dependencies]
 soroban-sdk = { version = "=26.1.0", default-features = false }
+
+[profile.release]
+overflow-checks = true

@@ -18,7 +18,7 @@ cd "$REPO"
 
 NETWORK="${NETWORK:-testnet}"
 IDENTITY="${DEPLOY_IDENTITY:-sidereal-deployer}"
-WASM_DIR="target/wasm32v1-none/release"
+WASM_DIR="${WASM_DIR:-target/wasm32v1-none/release/optimized}"
 ENV_OUT="${ENV_OUT:-app/.env.local}"
 CIRCLE_TESTNET_USDC_ISSUER="${CIRCLE_TESTNET_USDC_ISSUER:-GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5}"
 DEFAULT_UNDERLYING_ASSET="USDC:$CIRCLE_TESTNET_USDC_ISSUER"
@@ -61,10 +61,8 @@ else
   YIELD_SOURCE_URL="${YIELD_SOURCE_URL:-}"
 fi
 
-log "Building contracts to wasm ($WASM_DIR)"
-cargo build --release --target wasm32v1-none \
-  -p sidereal-sy-wrapper -p sidereal-pt-token -p sidereal-yt-token \
-  -p sidereal-tokenizer -p sidereal-amm
+log "Building optimized deployable Wasm ($WASM_DIR)"
+OPT_WASM_DIR="$WASM_DIR" bash scripts/build-optimized-wasm.sh
 
 # --- deployer identity -------------------------------------------------------
 if ! stellar keys address "$IDENTITY" >/dev/null 2>&1; then
