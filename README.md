@@ -48,7 +48,7 @@ Status legend: **built** (real settlement, tested) · **experimental** (works un
 | YT SEP-41 token (balance/transfer/allowance, per-holder yield checkpoints) | ✅ built |
 | Tokenizer split / recombine / redeem (asset-unit PT/YT, principal redemption) | ✅ built |
 | YT yield claim (pays accrued yield in SY out of escrow, transfer-safe) | ✅ built |
-| Insolvency guard + escrow-coverage invariant (pro-rata cap, YT subordinated) | ✅ built |
+| Insolvency handling (shortfalls priced pro-rata at redemption and recombine, no on-chain coverage gate) | ✅ built |
 | Checked tokenization math + initialize gates (audit M2/M3) | ✅ built |
 | AMM integer fixed-point math (no float opcodes) + CI guard | ✅ built |
 | TypeScript SDK (typed client, quote, build, claim, submit) | ✅ built |
