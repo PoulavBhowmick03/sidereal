@@ -568,8 +568,8 @@ export default function DemoPage() {
           <h1 className="text-5xl font-light tracking-tight sm:text-6xl">Demo</h1>
           <p className="max-w-2xl text-smoke">
             {runnerAvailable
-              ? "Run the automated integration proof from the UI. A controlled backend runs the auth invariant, deploys a fresh testnet market, seeds liquidity, executes every AMM route, and streams the raw output here."
-              : "The automated runner needs either local development or the hosted runner configuration. It runs CLI commands and testnet transactions from a controlled backend."}
+              ? "Run the integration proof from the UI. A controlled backend runs the auth invariant, deploys a fresh testnet market, seeds liquidity, executes every AMM route, and streams the raw output here."
+              : "The runner needs either local development or the hosted configuration. It runs CLI commands and testnet transactions from a controlled backend."}
           </p>
         </div>
         <button

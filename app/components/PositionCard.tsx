@@ -20,9 +20,9 @@ function Cell({ label, value, signal }: { label: string; value: string; signal?:
 }
 
 /** Compact view of a holder's SY/PT/YT balances and claimable yield. Always
- *  rendered, even when disconnected: the bar shows zeroed placeholders so the
- *  app shell reads as a real surface before a wallet connects. The claimable
- *  yield is the one live/risk value, so it carries the amber accent. */
+ *  rendered, even when disconnected: the bar shows zeroed balances before a
+ *  wallet connects. The claimable yield is the live risk value, so it carries
+ *  the amber accent. */
 export function PositionCard({
   position,
   decimals,

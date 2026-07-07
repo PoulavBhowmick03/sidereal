@@ -180,7 +180,7 @@ Finding: Internal TWAP is implemented and same-ledger-resistant, but manipulatio
 Finding: Swap fees accrue to LPs correctly via reserve reconciliation; there is no separate fee bucket.
 
 - Current state: Fees are folded into the SY leg (fee subtracted from pre_fee_sy_out, added on the in-leg) and remain in the pool, raising reserves against constant LP supply, so LP value grows. No protocol fee split.
-- Gap: None for an LP-only fee model. There is no protocol-fee switch (out of scope per REMAINING.md).
+- Gap: None for an LP-only fee model. There is no protocol-fee switch in scope.
 - Risk if shipped as-is: Low.
 - Estimated effort: none.
 
@@ -302,13 +302,12 @@ Layer 9: Documentation accuracy
 Finding: The README is mostly honest about the AMM but lies about YT claim and the deploy script, and both README and ARCHITECTURE imply a real yield source that does not exist.
 
 - Current state and the specific lies:
-  - README:40 and REMAINING.md:25,67: "YT yield claim ✅ built / assert payout." claim_yield transfers nothing; there is no payout path.
+  - README:40: "YT yield claim ✅ built / assert payout." claim_yield transfers nothing; there is no payout path.
   - README:47: "Testnet deploy script ✅ scripts/deploy-testnet.sh." It is missing --yt_token and would fail; the real deploy used an uncommitted script.
   - README:11,24 and ARCHITECTURE:39-45: imply USDC-in-Blend yield and the OpenZeppelin Vault extension. Neither is in the code; the rate is an admin knob.
   - ARCHITECTURE:68: the worked example double-counts the yield (gives it to PT and claims it for YT).
   - README:139: "property tests ... if a change fails them it does not ship" overstates the gate, since the float defect ships through CI untested on wasm.
-  - REMAINING.md does not mention the wasm float blocker at all, framing the AMM gap as auth-only.
-- Work required: Rewrite the YT-claim, yield-source, deploy-script, and worked-example claims to match the code. Add the float/wasm blocker to REMAINING.md. State plainly that yield is mocked.
+- Work required: Rewrite the YT-claim, yield-source, deploy-script, and worked-example claims to match the code. Track the float/wasm blocker in the hardening checklist. State plainly that yield is mocked.
 - Risk if shipped as-is: High for credibility. A reviewer who reads the code will find the gaps fast.
 - Estimated effort: 1 day.
 
@@ -328,7 +327,7 @@ Finding: The README is mostly honest about the AMM but lies about YT claim and t
 1. Cap redemption to recoverable underlying (insolvency guard) and define post-maturity YT settlement.
 1. Integrate a real yield source (DeFindex adapter) so the exchange rate is backed; remove set_exchange_rate.
 1. Full frontend verification pass against live contracts for every flow.
-1. Reconcile README/ARCHITECTURE/REMAINING with the code.
+1. Reconcile README and ARCHITECTURE with the code.
 
 Items 8 through 11 are the line between "demo" and "product."
 

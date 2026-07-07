@@ -11,8 +11,8 @@
 //!
 //! `flash_route_top_level_auth_is_arg_pinned` runs today and asserts the
 //! user-facing entry is bound to exact args. `flash_route_user_only_signs_
-//! the_swap` is the strict end-state and is #[ignore]d until the real auth tree
-//! is wired.
+//! the_swap` is the strict end-state and stays in CI so the real auth tree
+//! cannot regress.
 
 use sidereal_amm::{AmmMarket, AmmMarketClient};
 use sidereal_pt_token::PtToken;

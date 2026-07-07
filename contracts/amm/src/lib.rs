@@ -97,6 +97,31 @@ struct Precompute {
     time_to_expiry: u64,
 }
 
+#[inline(never)]
+fn load_live_market(env: &Env, amount: i128) -> Result<(Config, State, Precompute), Error> {
+    require_bounded_amount_result(amount)?;
+    let config = read_config(env)?;
+    require_live_result(env, &config)?;
+    let state = read_state(env)?;
+    require_seeded_result(&state)?;
+    let comp = precompute_or_panic(env, &config, &state);
+    Ok((config, state, comp))
+}
+
+fn load_live_market_or_panic(env: &Env, amount: i128) -> (Config, State, Precompute) {
+    match load_live_market(env, amount) {
+        Ok(loaded) => loaded,
+        Err(error) => panic_with_error!(env, error),
+    }
+}
+
+#[inline(never)]
+fn settle_and_record(env: &Env, config: &Config, state: &mut State, observed_ln_rate: i128) {
+    reconcile_reserves(env, config, state);
+    sync_twap(env, config, state, observed_ln_rate);
+    write_state(env, state);
+}
+
 #[contract]
 pub struct AmmMarket;
 
@@ -201,68 +226,42 @@ impl AmmMarket {
         Ok(())
     }
 
+    pub fn bump_lp_ttl(env: Env, holder: Address) -> Result<(), Error> {
+        read_config(&env)?;
+        bump_lp_balance_ttl(&env, holder);
+        Ok(())
+    }
+
     pub fn lp_balance(env: Env, holder: Address) -> Result<i128, Error> {
         read_config(&env)?;
         Ok(read_lp_balance(&env, holder))
     }
 
     pub fn quote_pt_for_sy(env: Env, pt_in: i128) -> Result<i128, Error> {
-        require_bounded_amount_result(pt_in)?;
-
-        let config = read_config(&env)?;
-        require_live_result(&env, &config)?;
-
-        let state = read_state(&env)?;
-        require_seeded_result(&state)?;
-
-        let comp = precompute_or_panic(&env, &config, &state);
+        let (config, state, comp) = load_live_market(&env, pt_in)?;
         Ok(exact_pt_in_sy_out_or_panic(
             &env, &config, &state, &comp, pt_in,
         ))
     }
 
     pub fn quote_sy_for_pt(env: Env, sy_in: i128) -> Result<i128, Error> {
-        require_bounded_amount_result(sy_in)?;
-
-        let config = read_config(&env)?;
-        require_live_result(&env, &config)?;
-
-        let state = read_state(&env)?;
-        require_seeded_result(&state)?;
-
-        let comp = precompute_or_panic(&env, &config, &state);
+        let (config, state, comp) = load_live_market(&env, sy_in)?;
         Ok(exact_sy_in_pt_out_or_panic(
             &env, &config, &state, &comp, sy_in,
         ))
     }
 
     pub fn quote_sy_for_yt(env: Env, sy_in: i128) -> Result<i128, Error> {
-        require_bounded_amount_result(sy_in)?;
-
-        let config = read_config(&env)?;
-        require_live_result(&env, &config)?;
-
-        let state = read_state(&env)?;
-        require_seeded_result(&state)?;
-
+        let (config, state, comp) = load_live_market(&env, sy_in)?;
         let rate = sy_rate_or_panic(&env, &config);
-        let comp = precompute_or_panic(&env, &config, &state);
         Ok(solve_yt_out_for_sy_in(
             &env, &config, &state, &comp, sy_in, rate,
         ))
     }
 
     pub fn quote_yt_for_sy(env: Env, yt_in: i128) -> Result<i128, Error> {
-        require_bounded_amount_result(yt_in)?;
-
-        let config = read_config(&env)?;
-        require_live_result(&env, &config)?;
-
-        let state = read_state(&env)?;
-        require_seeded_result(&state)?;
-
+        let (config, state, comp) = load_live_market(&env, yt_in)?;
         let rate = sy_rate_or_panic(&env, &config);
-        let comp = precompute_or_panic(&env, &config, &state);
         let sy_cost = exact_pt_out_sy_in_or_panic(&env, &config, &state, &comp, yt_in);
         // Recombining `yt_in` face of PT + YT returns floor(yt_in * WAD / rate)
         // SY shares (the tokenizer's own floor); the seller nets that minus the
@@ -366,37 +365,21 @@ impl AmmMarket {
 impl Market for AmmMarket {
     fn swap_pt_for_sy(env: &Env, from: Address, pt_in: i128, min_sy_out: i128) -> i128 {
         from.require_auth();
-        require_bounded_amount(env, pt_in);
+        let (config, mut state, comp) = load_live_market_or_panic(env, pt_in);
 
-        let config = read_config_or_panic(env);
-        require_live(env, &config);
-
-        let mut state = read_state_or_panic(env);
-        require_seeded(env, &state);
-
-        let comp = precompute_or_panic(env, &config, &state);
         let (sy_out, observed_ln_rate) =
             apply_exact_pt_in_trade_or_panic(env, &config, &mut state, &comp, pt_in, min_sy_out);
         transfer_into_pool(env, &config.pt_token, &from, pt_in);
         transfer_out_of_pool(env, &config.sy_token, &from, sy_out);
-        reconcile_reserves(env, &config, &mut state);
-        sync_twap(env, &config, &mut state, observed_ln_rate);
-        write_state(env, &state);
+        settle_and_record(env, &config, &mut state, observed_ln_rate);
 
         sy_out
     }
 
     fn swap_sy_for_pt(env: &Env, from: Address, sy_in: i128, min_pt_out: i128) -> i128 {
         from.require_auth();
-        require_bounded_amount(env, sy_in);
+        let (config, mut state, comp) = load_live_market_or_panic(env, sy_in);
 
-        let config = read_config_or_panic(env);
-        require_live(env, &config);
-
-        let mut state = read_state_or_panic(env);
-        require_seeded(env, &state);
-
-        let comp = precompute_or_panic(env, &config, &state);
         let pt_out = exact_sy_in_pt_out_or_panic(env, &config, &state, &comp, sy_in);
         if pt_out < min_pt_out {
             panic_with_error!(env, Error::SlippageExceeded);
@@ -406,29 +389,20 @@ impl Market for AmmMarket {
             apply_exact_sy_in_trade_or_panic(env, &config, &mut state, &comp, sy_in, pt_out);
         transfer_into_pool(env, &config.sy_token, &from, sy_in);
         transfer_out_of_pool(env, &config.pt_token, &from, pt_out);
-        reconcile_reserves(env, &config, &mut state);
-        sync_twap(env, &config, &mut state, observed_ln_rate);
-        write_state(env, &state);
+        settle_and_record(env, &config, &mut state, observed_ln_rate);
 
         pt_out
     }
 
     fn swap_sy_for_yt(env: &Env, from: Address, sy_in: i128, min_yt_out: i128) -> i128 {
         from.require_auth();
-        require_bounded_amount(env, sy_in);
-
-        let config = read_config_or_panic(env);
-        require_live(env, &config);
-
-        let mut state = read_state_or_panic(env);
-        require_seeded(env, &state);
+        let (config, mut state, comp) = load_live_market_or_panic(env, sy_in);
 
         // The curve prices PT face units; the tokenizer escrows SY shares and
         // mints face = shares * rate / WAD. Every conversion between the two
         // unit systems happens here at the flash boundary, using the same rate
         // source the tokenizer reads (the SY contract's exchange_rate).
         let rate = sy_rate_or_panic(env, &config);
-        let comp = precompute_or_panic(env, &config, &state);
         let yt_out = solve_yt_out_for_sy_in(env, &config, &state, &comp, sy_in, rate);
         if yt_out < min_yt_out {
             panic_with_error!(env, Error::SlippageExceeded);
@@ -468,27 +442,18 @@ impl Market for AmmMarket {
         // the curve reserves on the reconcile below, and the YT dust sits in
         // pool custody as an equal, recombinable pair with that PT. The trader
         // never receives the dust, so rounding cannot be farmed against LPs.
-        reconcile_reserves(env, &config, &mut state);
-        sync_twap(env, &config, &mut state, observed_ln_rate);
-        write_state(env, &state);
+        settle_and_record(env, &config, &mut state, observed_ln_rate);
 
         yt_out
     }
 
     fn swap_yt_for_sy(env: &Env, from: Address, yt_in: i128, min_sy_out: i128) -> i128 {
         from.require_auth();
-        require_bounded_amount(env, yt_in);
-
-        let config = read_config_or_panic(env);
-        require_live(env, &config);
-
-        let mut state = read_state_or_panic(env);
-        require_seeded(env, &state);
+        let (config, mut state, comp) = load_live_market_or_panic(env, yt_in);
 
         // Curve amounts are PT face; the recombine returns SY shares. Convert
         // at the flash boundary with the tokenizer's own rate source.
         let rate = sy_rate_or_panic(env, &config);
-        let comp = precompute_or_panic(env, &config, &state);
         let sy_cost = exact_pt_out_sy_in_or_panic(env, &config, &state, &comp, yt_in);
         // SY shares the recombine of `yt_in` face returns, floored exactly like
         // the tokenizer floors, so the payout budget never exceeds what will
@@ -519,9 +484,7 @@ impl Market for AmmMarket {
             panic_with_error!(env, Error::InsufficientLiquidity);
         }
         transfer_out_of_pool(env, &config.sy_token, &from, sy_out);
-        reconcile_reserves(env, &config, &mut state);
-        sync_twap(env, &config, &mut state, observed_ln_rate);
-        write_state(env, &state);
+        settle_and_record(env, &config, &mut state, observed_ln_rate);
 
         sy_out
     }
@@ -680,17 +643,36 @@ fn bump_instance_ttl(env: &Env) {
     );
 }
 
+// LP balances live in persistent storage, one entry per holder, matching the
+// token contracts' balance pattern. Keeping them in the instance entry would
+// make every invocation's IO scale with the number of LP holders and cap how
+// many holders can exist at the instance entry size limit.
 fn read_lp_balance(env: &Env, holder: Address) -> i128 {
     env.storage()
-        .instance()
+        .persistent()
         .get(&DataKey::LpBalance(holder))
         .unwrap_or(0)
 }
 
 fn write_lp_balance(env: &Env, holder: Address, balance: i128) {
-    env.storage()
-        .instance()
-        .set(&DataKey::LpBalance(holder), &balance);
+    let key = DataKey::LpBalance(holder);
+    env.storage().persistent().set(&key, &balance);
+    extend_lp_balance_ttl(env, &key);
+}
+
+fn bump_lp_balance_ttl(env: &Env, holder: Address) {
+    let key = DataKey::LpBalance(holder);
+    if env.storage().persistent().has(&key) {
+        extend_lp_balance_ttl(env, &key);
+    }
+}
+
+fn extend_lp_balance_ttl(env: &Env, key: &DataKey) {
+    env.storage().persistent().extend_ttl(
+        key,
+        AMM_INSTANCE_TTL_THRESHOLD_LEDGERS,
+        AMM_INSTANCE_TTL_EXTEND_TO_LEDGERS,
+    );
 }
 
 fn pool_token_balance(env: &Env, token_id: &Address) -> i128 {
@@ -708,24 +690,35 @@ fn transfer_into_pool(env: &Env, token_id: &Address, from: &Address, amount: i12
     token::TokenClient::new(env, token_id).transfer(from, &to, &amount);
 }
 
+#[inline(never)]
+fn auth_entry(
+    env: &Env,
+    contract: &Address,
+    fn_name: &str,
+    args: Vec<Val>,
+) -> InvokerContractAuthEntry {
+    InvokerContractAuthEntry::Contract(SubContractInvocation {
+        context: ContractContext {
+            contract: contract.clone(),
+            fn_name: Symbol::new(env, fn_name),
+            args,
+        },
+        sub_invocations: vec![env],
+    })
+}
+
 fn transfer_out_of_pool(env: &Env, token_id: &Address, to: &Address, amount: i128) {
     let pool = env.current_contract_address();
     let to_muxed = MuxedAddress::from(to);
+    let transfer_args: Vec<Val> = vec![
+        env,
+        pool.clone().into_val(env),
+        to_muxed.clone().into_val(env),
+        amount.into_val(env),
+    ];
     env.authorize_as_current_contract(vec![
         env,
-        InvokerContractAuthEntry::Contract(SubContractInvocation {
-            context: ContractContext {
-                contract: token_id.clone(),
-                fn_name: Symbol::new(env, "transfer"),
-                args: vec![
-                    env,
-                    pool.clone().into_val(env),
-                    to_muxed.clone().into_val(env),
-                    amount.into_val(env),
-                ],
-            },
-            sub_invocations: vec![env],
-        }),
+        auth_entry(env, token_id, "transfer", transfer_args),
     ]);
     token::TokenClient::new(env, token_id).transfer(&pool, &to_muxed, &amount);
 }
@@ -1092,22 +1085,8 @@ fn flash_split(env: &Env, config: &Config, amount: i128) -> (i128, i128) {
     ];
     env.authorize_as_current_contract(vec![
         env,
-        InvokerContractAuthEntry::Contract(SubContractInvocation {
-            context: ContractContext {
-                contract: config.tokenizer.clone(),
-                fn_name: Symbol::new(env, "split"),
-                args: split_args.clone(),
-            },
-            sub_invocations: vec![env],
-        }),
-        InvokerContractAuthEntry::Contract(SubContractInvocation {
-            context: ContractContext {
-                contract: config.sy_token.clone(),
-                fn_name: Symbol::new(env, "transfer"),
-                args: pull_args,
-            },
-            sub_invocations: vec![env],
-        }),
+        auth_entry(env, &config.tokenizer, "split", split_args.clone()),
+        auth_entry(env, &config.sy_token, "transfer", pull_args),
     ]);
     env.invoke_contract::<(i128, i128)>(&config.tokenizer, &Symbol::new(env, "split"), split_args)
 }
@@ -1128,30 +1107,9 @@ fn flash_recombine(env: &Env, config: &Config, amount: i128) -> i128 {
         soroban_sdk::vec![env, amm.clone().into_val(env), amount.into_val(env)];
     env.authorize_as_current_contract(vec![
         env,
-        InvokerContractAuthEntry::Contract(SubContractInvocation {
-            context: ContractContext {
-                contract: config.tokenizer.clone(),
-                fn_name: Symbol::new(env, "recombine"),
-                args: recombine_args.clone(),
-            },
-            sub_invocations: vec![env],
-        }),
-        InvokerContractAuthEntry::Contract(SubContractInvocation {
-            context: ContractContext {
-                contract: config.pt_token.clone(),
-                fn_name: Symbol::new(env, "burn"),
-                args: burn_args.clone(),
-            },
-            sub_invocations: vec![env],
-        }),
-        InvokerContractAuthEntry::Contract(SubContractInvocation {
-            context: ContractContext {
-                contract: config.yt_token.clone(),
-                fn_name: Symbol::new(env, "burn"),
-                args: burn_args,
-            },
-            sub_invocations: vec![env],
-        }),
+        auth_entry(env, &config.tokenizer, "recombine", recombine_args.clone()),
+        auth_entry(env, &config.pt_token, "burn", burn_args.clone()),
+        auth_entry(env, &config.yt_token, "burn", burn_args),
     ]);
     env.invoke_contract::<i128>(
         &config.tokenizer,
@@ -1499,7 +1457,9 @@ mod test {
     use super::*;
     use proptest::prelude::*;
     use sidereal_sy_wrapper::{SyWrapper, SyWrapperClient};
-    use soroban_sdk::testutils::{Address as _, Deployer, EnvTestConfig, Ledger};
+    use soroban_sdk::testutils::{
+        storage::Persistent, Address as _, Deployer, EnvTestConfig, Ledger,
+    };
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
     const NOW: u64 = 1_770_000_000;
@@ -1708,6 +1668,42 @@ mod test {
                 .get_contract_instance_ttl(&fixture.contract_id)
                 >= AMM_INSTANCE_TTL_EXTEND_TO_LEDGERS
         );
+    }
+
+    #[test]
+    fn bump_lp_ttl_extends_idle_lp_balance_ttl() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &10_000, &10_000);
+
+        let key = DataKey::LpBalance(fixture.admin.clone());
+        let ttl = fixture.env.as_contract(&fixture.contract_id, || {
+            fixture.env.storage().persistent().get_ttl(&key)
+        });
+        assert!(ttl > AMM_INSTANCE_TTL_THRESHOLD_LEDGERS);
+
+        let target_ttl = AMM_INSTANCE_TTL_THRESHOLD_LEDGERS - 1;
+        fixture
+            .env
+            .ledger()
+            .set_sequence_number(fixture.env.ledger().sequence() + ttl - target_ttl);
+        fixture.env.as_contract(&fixture.contract_id, || {
+            assert!(
+                fixture.env.storage().persistent().get_ttl(&key)
+                    < AMM_INSTANCE_TTL_THRESHOLD_LEDGERS
+            );
+        });
+
+        fixture.client.bump_lp_ttl(&fixture.admin);
+
+        fixture.env.as_contract(&fixture.contract_id, || {
+            assert!(
+                fixture.env.storage().persistent().get_ttl(&key)
+                    >= AMM_INSTANCE_TTL_EXTEND_TO_LEDGERS
+            );
+        });
     }
 
     #[test]

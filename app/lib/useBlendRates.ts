@@ -10,8 +10,8 @@ import { makeClient } from "./sdk";
 /**
  * Reads the configured Blend reserve's live rate curve once on mount. Returns
  * null while loading, for non-Blend yield sources, and on an RPC error, so the
- * yield-source card can render a placeholder instead of crashing. Mirrors
- * useMarket's cancellation pattern.
+ * yield-source card can render a fallback state. Mirrors useMarket's
+ * cancellation pattern.
  */
 export function useBlendRates(): BlendRates | null {
   const [rates, setRates] = useState<BlendRates | null>(null);

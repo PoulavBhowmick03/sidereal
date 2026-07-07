@@ -2,9 +2,9 @@
 
 Test result: `cargo test --workspace` passed on 2026-06-24. The run covered 40 Rust tests plus doc tests, including the AMM 10,000-case property test; it emitted one existing `dead_code` warning in `contracts/yt-token/src/lib.rs` tests.
 
-Summary: The contracts are not ready for an untrusted public testnet. The internal-accounting limitation documented in `docs/REMAINING.md` was treated as accepted scope, not as a finding. Even within that model, the AMM has no holder-scoped LP ownership and the TWAP can be overwritten by same-ledger swaps, so the recommendation is **NO-GO for testnet** until the HIGH findings are fixed and tests are added around them.
+Summary: The contracts are not ready for an untrusted public testnet. The then-current internal-accounting limitation was treated as accepted scope, not as a finding. Even within that model, the AMM has no holder-scoped LP ownership and the TWAP can be overwritten by same-ledger swaps, so the recommendation is **NO-GO for testnet** until the HIGH findings are fixed and tests are added around them.
 
-Scope: `contracts/sy-wrapper`, `contracts/pt-token`, `contracts/yt-token`, `contracts/tokenizer`, `contracts/amm`, and `contracts/shared/types`, with `docs/REMAINING.md` used to separate known internal-accounting gaps from new audit findings.
+Scope: `contracts/sy-wrapper`, `contracts/pt-token`, `contracts/yt-token`, `contracts/tokenizer`, `contracts/amm`, and `contracts/shared/types`, with known internal-accounting gaps separated from new audit findings.
 
 ## Critical
 
@@ -127,7 +127,7 @@ Recommended fix: Define a TTL policy for deployment and mutating entrypoints. Ad
 - Contract crate dependencies are limited to `soroban-sdk`, `sidereal-shared-types`, `libm`, and test-only `proptest`; no copyleft contract dependency was identified in `Cargo.toml`.
 - The AMM property suite is configured for 10,000 cases and passed in the audit run.
 
-## Deferred (Tracked In `docs/REMAINING.md`)
+## Deferred
 
 - Real SEP-41 settlement is not implemented yet. SY deposits/redemptions, tokenizer custody, AMM reserves, and PT/YT balances are internal accounting by documented design.
 - The YT flash routes currently reuse PT/SY reserve math and do not call tokenizer split/recombine or move real PT/YT/SY. This is the WS-5 settlement task, not a separate finding in this pass.

@@ -18,8 +18,8 @@ export function makeClient(
 
 /**
  * Reads market state, returning null instead of throwing when the market is not
- * yet deployed or the RPC read fails. Lets pages render a placeholder rather
- * than crashing during the testnet build-out.
+ * yet deployed or the RPC read fails. Lets pages render a fallback state during
+ * the testnet build-out.
  */
 export async function getMarketSafe(cfg: AppConfig = appConfig()): Promise<MarketState | null> {
   if (!isDeployed(cfg)) {

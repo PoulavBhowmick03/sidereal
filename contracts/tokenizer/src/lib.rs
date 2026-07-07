@@ -132,9 +132,9 @@ impl Tokenizer {
 
     /// PT and YT minted for `sy_amount` SY at the current rate, in asset units.
     pub fn preview_split(env: Env, sy_amount: i128) -> Result<(i128, i128), Error> {
-        Self::require_live(&env)?;
-        Self::require_positive_amount(sy_amount)?;
         let config = Self::read_config(&env)?;
+        Self::require_live(&env, &config)?;
+        Self::require_positive_amount(sy_amount)?;
 
         let rate = current_rate(&env, &config.sy_token);
         let face = mul_div_floor(&env, sy_amount, rate, WAD)?;
@@ -145,7 +145,8 @@ impl Tokenizer {
     /// current rate. This is the principal only; any accrued YT yield is settled
     /// separately into the holder's claim ledger.
     pub fn preview_recombine(env: Env, pt_amount: i128, yt_amount: i128) -> Result<i128, Error> {
-        Self::require_live(&env)?;
+        let config = Self::read_config(&env)?;
+        Self::require_live(&env, &config)?;
         Self::require_positive_amount(pt_amount)?;
         Self::require_positive_amount(yt_amount)?;
 
@@ -153,7 +154,6 @@ impl Tokenizer {
             return Err(Error::AmountMismatch);
         }
 
-        let config = Self::read_config(&env)?;
         let rate = current_rate(&env, &config.sy_token);
         mul_div_floor(&env, pt_amount, WAD, rate)
     }
@@ -185,9 +185,9 @@ impl Tokenizer {
     /// rate equals the PT face exactly at mint, which is the coverage invariant.
     pub fn split(env: Env, from: Address, sy_amount: i128) -> Result<(i128, i128), Error> {
         from.require_auth();
-        Self::require_live(&env)?;
-        Self::require_positive_amount(sy_amount)?;
         let config = Self::read_config(&env)?;
+        Self::require_live(&env, &config)?;
+        Self::require_positive_amount(sy_amount)?;
         Self::bump_instance_ttl(&env);
 
         let rate = current_rate(&env, &config.sy_token);
@@ -223,7 +223,8 @@ impl Tokenizer {
         yt_amount: i128,
     ) -> Result<i128, Error> {
         from.require_auth();
-        Self::require_live(&env)?;
+        let config = Self::read_config(&env)?;
+        Self::require_live(&env, &config)?;
         Self::require_positive_amount(pt_amount)?;
         Self::require_positive_amount(yt_amount)?;
 
@@ -231,7 +232,6 @@ impl Tokenizer {
             return Err(Error::AmountMismatch);
         }
 
-        let config = Self::read_config(&env)?;
         Self::bump_instance_ttl(&env);
         let rate = current_rate(&env, &config.sy_token);
         let full = mul_div_floor(&env, pt_amount, WAD, rate)?;
@@ -245,8 +245,7 @@ impl Tokenizer {
         // collateralization, it prices the shortfall instead. The YT burn above
         // settles the holder's accrued yield into their claim ledger first, so that
         // yield is not lost to the haircut.
-        let escrow_shares =
-            token_balance(&env, &config.sy_token, &env.current_contract_address());
+        let escrow_shares = token_balance(&env, &config.sy_token, &env.current_contract_address());
         let pt_supply = pt_total_supply(&env, &config.pt_token);
         let pro_rata = mul_div_floor(&env, escrow_shares, pt_amount, pt_supply)?;
         let sy_equivalent = if full < pro_rata { full } else { pro_rata };
@@ -275,16 +274,15 @@ impl Tokenizer {
     /// maturity rate so post-maturity rate moves do not change redemption.
     pub fn redeem_at_maturity(env: Env, from: Address, pt_amount: i128) -> Result<i128, Error> {
         from.require_auth();
-        Self::require_matured(&env)?;
-        Self::require_positive_amount(pt_amount)?;
         let config = Self::read_config(&env)?;
+        Self::require_matured(&env, &config)?;
+        Self::require_positive_amount(pt_amount)?;
         Self::bump_instance_ttl(&env);
 
         let rate = effective_rate(&env, &config);
         let full = mul_div_floor(&env, pt_amount, WAD, rate)?;
 
-        let escrow_shares =
-            token_balance(&env, &config.sy_token, &env.current_contract_address());
+        let escrow_shares = token_balance(&env, &config.sy_token, &env.current_contract_address());
         let pt_supply = pt_total_supply(&env, &config.pt_token);
         let pro_rata = mul_div_floor(&env, escrow_shares, pt_amount, pt_supply)?;
         let sy_to_pay = if full < pro_rata { full } else { pro_rata };
@@ -385,8 +383,7 @@ impl Tokenizer {
             .extend_ttl(TTL_THRESHOLD_LEDGERS, TTL_EXTEND_TO_LEDGERS);
     }
 
-    fn require_live(env: &Env) -> Result<(), Error> {
-        let config = Self::read_config(env)?;
+    fn require_live(env: &Env, config: &Config) -> Result<(), Error> {
         if env.ledger().timestamp() >= config.maturity {
             return Err(Error::Matured);
         }
@@ -394,8 +391,7 @@ impl Tokenizer {
         Ok(())
     }
 
-    fn require_matured(env: &Env) -> Result<(), Error> {
-        let config = Self::read_config(env)?;
+    fn require_matured(env: &Env, config: &Config) -> Result<(), Error> {
         if env.ledger().timestamp() < config.maturity {
             return Err(Error::LiveMarket);
         }

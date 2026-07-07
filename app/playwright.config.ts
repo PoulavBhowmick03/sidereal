@@ -2,8 +2,8 @@
 
 import { defineConfig, devices } from "@playwright/test";
 
-// Mobile-first: the app targets phone users (AGENTS.md section 7), so the
-// default project emulates a phone viewport. Run with `pnpm test:e2e`.
+// Mobile-first: the default project emulates a phone viewport. Run with
+// `pnpm test:e2e`.
 // Browsers must be installed once: `pnpm exec playwright install chromium`.
 // Use a dedicated port so the e2e dev server never collides with a default
 // Next app on :3000 (yours or another project's).

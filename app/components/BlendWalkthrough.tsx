@@ -34,11 +34,8 @@ function StepChip({ state }: { state: StepState }) {
 }
 
 /**
- * The manual half of the demo: the wallet-signed Blend onboarding walk that
- * the automated runner cannot perform (docs/REMAINING.md 3b). Each step is
- * verified live against testnet, so the checklist ticks itself as the viewer
- * completes the flow: faucet USDC arrives in the wallet, the Blend deposit
- * appears, and the tokenized PT/YT balances confirm the migration.
+ * Wallet-signed Blend onboarding. Each step is verified live against testnet,
+ * so the checklist ticks itself as the viewer completes the flow.
  */
 export function BlendWalkthrough() {
   const cfg = useMemo(() => appConfig(), []);
@@ -152,8 +149,7 @@ export function BlendWalkthrough() {
         <div>
           <p className="label-data">Manual walkthrough: tokenize a real Blend deposit</p>
           <p className="mt-2 max-w-2xl text-sm text-smoke">
-            The automated runner cannot sign with a browser wallet, so this half is yours.
-            Each step verifies itself against testnet as you complete it.
+            Browser wallet signing stays manual. Each step verifies itself against testnet as you complete it.
           </p>
         </div>
         <span className="font-mono text-sm tabular-nums text-paper">

@@ -5,10 +5,10 @@
 # numbers: deposits underlying for SY and splits part of it into PT + YT (the
 # Tier 1 real-settlement core).
 #
-# The AMM liquidity step is Tier 2 (the AMM/YT flash route is experimental and
-# its nested authorization is not yet proven on testnet, see docs/ROADMAP.md).
-# It is OFF by default so a Tier 1 demo never depends on it. Opt in with
-# SEED_AMM=1 once the AMM auth is verified on testnet.
+# The AMM liquidity step is Tier 2. The AMM/YT flash route is experimental and
+# its nested authorization is not yet proven on testnet. It is OFF by default so
+# a Tier 1 demo never depends on it. Opt in with SEED_AMM=1 once AMM auth is
+# verified on testnet.
 #
 # Run AFTER scripts/deploy-testnet.sh, which writes the contract addresses to
 # app/.env.local. Requires stellar-cli and the same deployer identity.
