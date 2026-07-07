@@ -230,7 +230,7 @@ capture; each is 5 to 10 seconds, captured at 1440px unless noted.
 > Sidereal is mobile-first because Stellar is. The chain's traction is payments and remittances, much of it on phones in Latin America. A fixed savings rate you can lock from the same phone that receives the remittance is the point of putting a rates market on these rails.
 
 - Media: IMG-TRADE at 390px (`trade-390.png`)
-- Virality: connects DeFi mechanics to a human use case; the phone-width screenshot proves the claim instead of asserting it. (AGENTS.md states half of LATAM Stellar wallet users are on phones; that precise figure needs a public source before it goes in copy, so this tweet stays qualitative.)
+- Virality: connects DeFi mechanics to a human use case; the phone-width screenshot proves the claim instead of asserting it.
 
 ### Wildcard
 
@@ -308,7 +308,7 @@ inferred and unverified).** Roughly 18 targets across six groups:
 3. Pendle world: Pendle (~`@pendle_fi`) and the recurring authors of Pendle strategy threads (identify by searching "PT YT" thread authors; do not guess names). They already understand the mechanism and are the likeliest quote-tweeters of M1/M3/M4.
 4. DeFi educators and researchers: the handful of large accounts that explain mechanisms rather than shill (Ignas, The DeFi Edge, and current equivalents; verify who is still active), plus analysts at Messari / Delphi / Blockworks covering yield markets.
 5. Aggregators: DeFiLlama (for the eventual listing), RWA-focused trackers.
-6. The SCF community: fellow grantees and Build Station cohort accounts; small, but they reply, and early replies decide whether the algorithm shows anyone the originals.
+6. The SCF community: fellow grantees and Build Station peer accounts; small, but they reply, and early replies decide whether the algorithm shows anyone the originals.
 
 **Reply-guy doctrine.** Add mechanism insight or a sourced fact under large
 conversations about rates, Pendle, RWA, or Stellar. The reply should be useful
@@ -364,8 +364,8 @@ answer.
 ### Growth loops
 
 - **Repo as content.** Every mechanism tweet links a real file. Readers who click through and find clean, licensed, tested code convert to follows at a far higher rate than readers who find a landing page. The README is a marketing surface; keep its status table honest and current.
-- **Demo video.** The 2-minute demo (AGENTS.md section 14 committed to one) becomes the pinned reply under T1 once it exists, and the highest-value asset for every "what is this" reply.
-- **SCF and Build Station milestones.** Each milestone announcement is a B-category post with receipts, and the SCF community amplifies its own cohort. Community calls are a speaking slot; the M3/O2 threads are the talk track.
+- **Demo video.** A short demo becomes the pinned reply under T1 once it exists, and the highest-value asset for every "what is this" reply.
+- **SCF and Build Station milestones.** Each milestone announcement is a B-category post with receipts, and the SCF community amplifies its own projects. Community calls are a speaking slot; the M3/O2 threads are the talk track.
 - **Design communities.** C-category posts travel through design and frontend Twitter, which DeFi accounts never reach. That audience follows for craft and stays for the build; it is also where future frontend contributors come from.
 - **Funnel mapping.** Impressions come from replies and quote-tweets; profile visits convert on the pin (T1) and bio; follows convert to demo clicks through B-category receipts; demo clicks convert to repo stars and testnet wallets through the app itself. Each category exists to move one specific edge of that funnel: thesis converts visits, mechanism earns bookmarks, build earns trust, craft imports new audiences, ecosystem earns local amplification.
 

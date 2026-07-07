@@ -9,7 +9,7 @@ export type MarketMethod =
   | "swap_sy_for_yt"
   | "swap_yt_for_sy";
 
-/** The four read-only quote accessors codex-1 exposed on the AMM (feat/amm). */
+/** The four read-only quote accessors exposed by the AMM. */
 export type QuoteMethod =
   | "quote_pt_for_sy"
   | "quote_sy_for_pt"
@@ -41,8 +41,7 @@ export function quoteMethodFor(assetIn: Asset, assetOut: Asset): QuoteMethod {
  * Maps an (assetIn, assetOut) pair to the frozen Market trait method.
  *
  * The PT/SY pool only exposes these four routes; YT trades flash-route through
- * it (AGENTS.md section 3). SY<->SY, PT<->YT direct, and same-asset swaps are
- * not valid and throw.
+ * it. SY<->SY, PT<->YT direct, and same-asset swaps are not valid and throw.
  */
 export function marketMethodFor(assetIn: Asset, assetOut: Asset): MarketMethod {
   const route = `${assetIn}->${assetOut}`;

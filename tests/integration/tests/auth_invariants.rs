@@ -5,16 +5,14 @@
 //!
 //! The audit's reframing is the key point: the flash route is a LIVENESS risk,
 //! not a drain risk, BECAUSE every sub-invocation the AMM authorizes is pinned
-//! to exact (contract, fn_name, args) including the exact amount. This file
+//! to exact (contract, fn_name, args) including the exact amount. The test
 //! locks that property in so a future change cannot loosen it into a
 //! coerce-an-arbitrary-transfer hole.
 //!
-//! Ownership: the flash-route auth tree itself is Codex's lane. These tests are
-//! the invariant Codex verifies the real (non-mock) auth tree against on
-//! testnet. `flash_route_top_level_auth_is_arg_pinned` runs today and asserts
-//! the user-facing entry is bound to exact args. `flash_route_user_only_signs_
+//! `flash_route_top_level_auth_is_arg_pinned` runs today and asserts the
+//! user-facing entry is bound to exact args. `flash_route_user_only_signs_
 //! the_swap` is the strict end-state and is #[ignore]d until the real auth tree
-//! is wired (the MuxedAddress-vs-Address recipient encoding is the open item).
+//! is wired.
 
 use sidereal_amm::{AmmMarket, AmmMarketClient};
 use sidereal_pt_token::PtToken;
@@ -134,7 +132,10 @@ fn flash_route_top_level_auth_is_arg_pinned() {
         if sym == &transfer_sym {
             let amount = i128::try_from_val(&env, &args.get(args.len() - 1).expect("amount arg"))
                 .expect("transfer amount decodes to i128");
-            assert!(amount > 0, "authorized transfer amount must be concrete and positive");
+            assert!(
+                amount > 0,
+                "authorized transfer amount must be concrete and positive"
+            );
         }
     }
 }

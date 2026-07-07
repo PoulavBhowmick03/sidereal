@@ -16,7 +16,7 @@ import { TickerBand } from "@/components/TickerBand";
 import { Term } from "@/components/Term";
 import { WordReveal } from "@/components/WordReveal";
 // The token legs live in InvariantBand, defined in the protocol's own terms.
-// No invented financial figures anywhere on this page (AGENTS section 7).
+// No invented financial figures anywhere on this page.
 // Token names in the copy carry the mono Term voice so they read as objects.
 const STEPS = [
   {

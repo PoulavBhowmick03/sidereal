@@ -2,21 +2,21 @@
 
 import { test, expect } from "@playwright/test";
 
-// Full mint -> split -> swap -> redeem journey (AGENTS.md section 8). This needs
-// a deployed market and an injected/automated wallet, so it is gated on
-// E2E_MARKET_DEPLOYED and skipped otherwise. The structure documents the
-// intended flow and is ready to fill in once testnet addresses and a test
-// signer exist.
+// Full mint -> split -> swap -> redeem journey. This needs a deployed market and
+// an injected or automated wallet, so it is gated on E2E_MARKET_DEPLOYED and
+// skipped otherwise.
 const deployed = process.env.E2E_MARKET_DEPLOYED === "1";
+const signerReady = process.env.E2E_WALLET_SIGNER === "1";
 
 test.describe("end-to-end protocol flow", () => {
   test.skip(!deployed, "set E2E_MARKET_DEPLOYED=1 with a deployed market and test wallet");
 
   test("mint, split, swap, then redeem", async ({ page }) => {
+    test.fixme(!signerReady, "set E2E_WALLET_SIGNER=1 after wiring a test signer");
+
     // 1. Connect the test wallet.
     await page.goto("/mint");
     await page.getByRole("button", { name: /connect wallet/i }).click();
-    // TODO: drive the wallet modal / injected signer once a test signer is wired.
 
     // 2. Mint with split: deposit USDC, receive PT + YT.
     await page.getByPlaceholder("0.0").fill("100");

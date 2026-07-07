@@ -746,8 +746,7 @@ impl Rng {
 /// maturity. The escrow-coverage invariant must hold at every step (the
 /// contract also asserts the PT half on every mutation), and the escrow must
 /// drain to dust once everyone has claimed and redeemed. The economics code is
-/// pure integer math, so the native test path and the wasm path are identical
-/// (no float divergence to coordinate with Codex on).
+/// pure integer math, so the native test path and the wasm path are identical.
 #[test]
 fn conservation_holds_across_random_sequences() {
     const N: u64 = 10_000;

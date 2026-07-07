@@ -1,6 +1,6 @@
 # ARCHITECTURE.md — sidereal protocol design
 
-This document is the protocol specification. `AGENTS.md` is the build spec; this is the design spec.
+This document is the protocol design specification.
 
 ---
 

@@ -62,9 +62,9 @@ function requirePositive(label: string, value: bigint): void {
 /**
  * Typed client for the sidereal protocol.
  *
- * Responsibilities (AGENTS.md §6): encode/decode ScVal <-> JS, quote swaps by
- * simulating against the AMM, and build unsigned transaction envelopes for a
- * wallet to sign. This client NEVER signs and NEVER holds keys.
+ * Encodes and decodes ScVal values, quotes swaps by simulating against the AMM,
+ * and builds unsigned transaction envelopes for a wallet to sign. This client
+ * never signs and never holds keys.
  */
 export class StellarYT {
   private readonly server: rpc.Server;
@@ -89,9 +89,9 @@ export class StellarYT {
     const market = new Contract(this.contracts.market);
     const sy = new Contract(this.contracts.sy);
 
-    // Accessors pinned from codex-1's bus reply (feat/amm): twap_apy() is the
-    // internal TWAP, spot_apy() the single-block view, reserve_pt/reserve_sy the
-    // pool balances. APY reads return zero at/after maturity.
+    // twap_apy() is the internal TWAP, spot_apy() is the single-block view, and
+    // reserve_pt/reserve_sy are the pool balances. APY reads return zero at or
+    // after maturity.
     const [
       exchangeRate,
       twapApyBps,

@@ -11,19 +11,19 @@ Status: ☐ open · ◐ in progress · ☑ fixed (with test)
 
 | ID | Severity | Finding | Owner | Status |
 |----|----------|---------|-------|--------|
-| H1 | HIGH | LP shares are global; any caller can remove pool liquidity | codex-1 (AMM) | ☑ |
-| H2 | HIGH | Same-ledger swaps overwrite the TWAP with spot | codex-1 (AMM) | ☑ |
-| M2 | MED  | SY methods mutate state before initialization | codex-2 (sy-wrapper) | ☑ |
-| M3 | MED  | Tokenization state uses unchecked i128 arithmetic | codex-2 (sy-wrapper, tokenizer) | ☑ |
-| M1 | MED  | SY exact-in swaps do not account for the full `sy_in` | codex-1 (AMM) | ☑ |
+| H1 | HIGH | LP shares are global; any caller can remove pool liquidity | AMM | ☑ |
+| H2 | HIGH | Same-ledger swaps overwrite the TWAP with spot | AMM | ☑ |
+| M2 | MED  | SY methods mutate state before initialization | SY wrapper | ☑ |
+| M3 | MED  | Tokenization state uses unchecked i128 arithmetic | SY wrapper, tokenizer | ☑ |
+| M1 | MED  | SY exact-in swaps do not account for the full `sy_in` | AMM | ☑ |
 
 ## Recommended for testnet (☑ or a written accept-risk note)
 
 | ID | Severity | Finding | Owner | Status |
 |----|----------|---------|-------|--------|
-| M4 | MED | AMM curve math uses `f64` (precision loss at bounds) | codex-1 (AMM) | ☑ |
-| L1 | LOW | Unauthorized admin calls return `NotInitialized` | codex-2 (sy-wrapper, yt) | ☐ |
-| L2 | LOW | Long-lived instance state has no TTL/bump strategy | codex-1 + codex-2 (ops) | ◐ AMM fixed; tokenization pending |
+| M4 | MED | AMM curve math uses `f64` (precision loss at bounds) | AMM | ☑ |
+| L1 | LOW | Unauthorized admin calls return `NotInitialized` | SY wrapper, YT | ☐ |
+| L2 | LOW | Long-lived instance state has no TTL/bump strategy | AMM, tokenization, ops | ◐ AMM fixed; tokenization pending |
 
 ## Fix notes (acceptance = the fix lands AND a test proves it)
 
@@ -57,16 +57,17 @@ Status: ☐ open · ◐ in progress · ☑ fixed (with test)
   `bump_ttl` is a public keepalive entrypoint, and AMM initialization/state
   writes extend instance+code TTL when remaining TTL falls below 30 days, back to
   120 days. Operators should call `bump_ttl` at least monthly for idle markets;
-  active markets are bumped by normal AMM mutations. Codex-2 still needs to apply
-  the equivalent policy to SY/tokenizer/PT/YT state before L2 is fully closed.
+  active markets are bumped by normal AMM mutations. Tokenization contracts
+  still need to apply the equivalent policy to SY/tokenizer/PT/YT state before
+  L2 is fully closed.
 
 ## Process
 
 - Each fix is its own PR off `main` (or grouped per owner per contract), with the
-  finding ID in the title and the `Agent:` trailer.
+  finding ID in the title.
 - Keep `cargo test --workspace` green; every fix adds the test named in its row.
 - Update the Status column in the same PR. Testnet deploy is unblocked when the
   "Gate to testnet" table is all ☑ and M4/L1/L2 are either ☑ or have an
   accept-risk note.
-- Settlement-era cautions (checks-effects-interactions, reentrancy) are tracked in
-  [`../ROADMAP.md`](../ROADMAP.md), not here.
+- Settlement-era cautions such as checks-effects-interactions and reentrancy
+  belong with the testnet hardening checklist, not this audit table.

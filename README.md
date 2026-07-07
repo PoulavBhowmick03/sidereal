@@ -200,16 +200,16 @@ what catches a float regression before it reaches a deploy. CI
    reconciles real balances has not yet been recorded.
 4. **Not audited, testnet only.** No third-party audit. Do not use real funds.
 
-The completed settlement work, remaining AMM/auth work, the Tier 2 gate, and
-known risks are tracked in [`docs/ROADMAP.md`](./docs/ROADMAP.md), which also
-carries the three-week execution plan.
+The completed settlement work, remaining AMM/auth work, testnet verification
+checklist, and known risks are tracked in [`docs/ROADMAP.md`](./docs/ROADMAP.md)
+and [`docs/audit/REMEDIATION.md`](./docs/audit/REMEDIATION.md).
 
 ## Contributing
 
 The repo is public from day one and we welcome external eyes. A few notes:
 
-- The build is happening across four parallel agents (2 Codex, 2 Claude Code) per the spec in [`AGENTS.md`](./AGENTS.md). If you want to contribute, that file is the place to start.
-- Open an issue before opening a large PR. Scope is tight by design (see §12 of `AGENTS.md`).
+- Keep PRs focused and include tests for user-visible or contract behavior changes.
+- Open an issue before opening a large PR. Scope is tight by design while the testnet prototype is being hardened.
 - Security findings: please report privately via GitHub's "Report a vulnerability" (Security tab, private advisory) rather than opening a public issue. See [`SECURITY.md`](./SECURITY.md).
 
 ## Influences and prior art

@@ -5,7 +5,7 @@ import type { ContractAddresses } from "@sidereal/sdk";
 /**
  * Public runtime configuration, sourced from NEXT_PUBLIC_* env vars. These are
  * all public values (RPC URL, network passphrase, deployed contract addresses).
- * No secrets or private keys live here, ever (AGENTS.md non-negotiable #5).
+ * No secrets or private keys live here.
  */
 
 export const TESTNET_PASSPHRASE = "Test SDF Network ; September 2015";
