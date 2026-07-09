@@ -1676,7 +1676,7 @@ mod test {
         initialize(&fixture);
         fixture
             .client
-            .add_liquidity(&fixture.admin, &10_000, &10_000);
+            .add_liquidity(&fixture.admin, &10_000, &10_000, &0);
 
         let key = DataKey::LpBalance(fixture.admin.clone());
         let ttl = fixture.env.as_contract(&fixture.contract_id, || {
