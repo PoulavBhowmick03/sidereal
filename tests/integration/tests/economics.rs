@@ -129,6 +129,15 @@ impl Market {
         SyWrapperClient::new(&self.env, &self.sy).set_exchange_rate(&self.admin, &rate);
     }
 
+    /// Records the current SY rate as the tokenizer's latest pre-maturity
+    /// observation (the permissionless poke). Tests that model "the rate at
+    /// maturity is X" must call this after their final pre-maturity set_rate:
+    /// the maturity freeze uses the last observed rate, never a live
+    /// post-maturity read.
+    fn observe(&self) -> i128 {
+        TokenizerClient::new(&self.env, &self.tokenizer).observe_rate()
+    }
+
     fn rate(&self) -> i128 {
         SyWrapperClient::new(&self.env, &self.sy).exchange_rate()
     }
@@ -210,6 +219,7 @@ fn pt_redeems_to_principal_not_share() {
     let pt = m.pt_balance(&alice);
 
     m.set_rate(RATE_1_10);
+    m.observe(); // pin 1.10 as the observed maturity rate
     m.env.ledger().set_timestamp(MATURITY + 1);
 
     let sy_out = m.redeem_pt(&alice, pt);
@@ -277,8 +287,9 @@ fn redemption_uses_frozen_maturity_rate() {
     m.deposit(&alice, 100 * UNIT);
     m.split(&alice, 100 * UNIT);
 
-    // The rate at maturity is 1.10.
+    // The rate at maturity is 1.10, pinned by an observation.
     m.set_rate(RATE_1_10);
+    m.observe();
     m.env.ledger().set_timestamp(MATURITY + 1);
 
     let half = 50 * UNIT;
@@ -297,6 +308,72 @@ fn redemption_uses_frozen_maturity_rate() {
         sy2,
         expected
     );
+}
+
+/// The freeze-timing blocker: Blend has no maturity concept and keeps accruing
+/// after maturity, so if the freeze read the live rate on first post-maturity
+/// touch, a later first touch would pin a higher rate, moving value from PT to
+/// YT and making redemption a race. The freeze must instead use the last rate
+/// observed at or before maturity, no matter how late the first touch lands or
+/// how far the live rate has drifted by then.
+#[test]
+fn freeze_ignores_post_maturity_accrual_even_on_late_first_touch() {
+    let m = deploy();
+    let alice = m.fund(100 * UNIT);
+    m.deposit(&alice, 100 * UNIT);
+    m.split(&alice, 100 * UNIT);
+
+    // Pre-maturity accrual to 1.05, observed by the poke.
+    let rate_1_05: i128 = 1_050_000_000_000_000_000;
+    m.set_rate(rate_1_05);
+    assert_eq!(m.observe(), rate_1_05);
+
+    // Maturity passes with no on-chain touch, and the live source keeps
+    // accruing well past it before anyone shows up.
+    m.env.ledger().set_timestamp(MATURITY + 100_000);
+    m.set_rate(RATE_1_10);
+
+    // The late first touch must freeze the pre-maturity observation, not the
+    // live 1.10 read.
+    let pt = m.pt_balance(&alice);
+    let sy_out = m.redeem_pt(&alice, pt);
+    assert_eq!(m.maturity_rate(), rate_1_05, "frozen at the observation");
+    let expected = pt * WAD / rate_1_05;
+    assert!(
+        (sy_out - expected).abs() <= 4,
+        "redeemed at the observed 1.05, not the drifted 1.10: {} vs {}",
+        sy_out,
+        expected
+    );
+}
+
+/// The unobserved tail is conservative in PT's favor, consistent with PT
+/// seniority: rate moves after the last observation but before maturity are
+/// not priced into the freeze unless someone (any keeper or YT holder, the
+/// poke is permissionless) records them. Yield that IS observed pre-maturity
+/// is pinned exactly.
+#[test]
+fn unobserved_pre_maturity_tail_freezes_at_the_last_observation() {
+    let m = deploy();
+    let alice = m.fund(100 * UNIT);
+    m.deposit(&alice, 100 * UNIT);
+    m.split(&alice, 100 * UNIT); // last mutating op observes rate 1.00
+
+    // The rate climbs pre-maturity, but nothing observes it before maturity.
+    let rate_1_08: i128 = 1_080_000_000_000_000_000;
+    m.set_rate(rate_1_08);
+    m.env.ledger().set_timestamp(MATURITY + 1);
+
+    let pt = m.pt_balance(&alice);
+    let sy_out = m.redeem_pt(&alice, pt);
+    assert_eq!(
+        m.maturity_rate(),
+        WAD,
+        "freeze falls back to the split-time observation, never a live post-maturity read"
+    );
+    // At the frozen 1.00 the full face is capped by pro-rata escrow coverage,
+    // so PT redeems its escrow slice and no post-maturity read decided it.
+    assert!(sy_out > 0);
 }
 
 /// Cross-contract maturity-rate consistency: the split-brain fix.
@@ -331,14 +408,17 @@ fn pt_redeem_and_yt_claim_use_one_frozen_rate_regardless_of_order() {
         m.deposit(&alice, 100 * UNIT);
         m.split(&alice, 100 * UNIT); // 100 UNIT PT + YT, checkpoint at rate 1.00
 
-        // Rate climbs to 1.10 by maturity, so YT has real accrued yield to claim.
+        // Rate climbs to 1.10 by maturity, observed, so YT has real accrued
+        // yield to claim and the freeze has a pre-maturity rate to pin.
         m.set_rate(RATE_1_10);
+        m.observe();
         m.env.ledger().set_timestamp(MATURITY + 1);
 
-        // The SY rate is still drifting after maturity: it is 1.15 when the first
-        // post-maturity action fires, and is bumped to 1.20 before the second.
-        // The frozen rate must be the 1.15 pinned by the first action, for both
-        // PT and YT, regardless of which acts first.
+        // The SY rate is still drifting after maturity: it is 1.15 when the
+        // first post-maturity action fires and 1.20 by the second. NONE of
+        // that drift may reach redemption: the freeze must pin the observed
+        // 1.10 for both PT and YT, regardless of which acts first or how far
+        // the live rate has moved by then.
         m.set_rate(RATE_1_15);
 
         let pt = m.pt_balance(&alice);
@@ -359,10 +439,11 @@ fn pt_redeem_and_yt_claim_use_one_frozen_rate_regardless_of_order() {
     let a = run(true); // PT redeem first, then YT claim
     let b = run(false); // YT claim first, then PT redeem
 
-    // Both orderings freeze the SAME canonical rate: the 1.15 that was live when
-    // the first post-maturity action fired, never the later 1.20.
-    assert_eq!(a.3, RATE_1_15, "PT-first must freeze the rate at the first action");
-    assert_eq!(b.3, RATE_1_15, "YT-first must freeze the rate at the first action");
+    // Both orderings freeze the SAME canonical rate: the last pre-maturity
+    // observation (1.10), never the 1.15 or 1.20 live at the post-maturity
+    // touches. First-touch timing must be economically irrelevant.
+    assert_eq!(a.3, RATE_1_10, "PT-first must freeze the observed rate");
+    assert_eq!(b.3, RATE_1_10, "YT-first must freeze the observed rate");
 
     // Identical economic outcome regardless of order.
     assert_eq!(a.0, b.0, "PT redemption SY must not depend on order");
@@ -371,25 +452,27 @@ fn pt_redeem_and_yt_claim_use_one_frozen_rate_regardless_of_order() {
     assert_eq!(a.2, b.2, "escrow left must not depend on order");
 
     // The rate both contracts used equals the tokenizer's frozen maturity_rate:
-    // cross-check the amounts against a 1.15 computation, and confirm 1.20 would
-    // differ, so the test would fail if either contract used its own later snapshot.
-    let expected_redeem = 100 * UNIT * WAD / RATE_1_15;
-    let expected_claim = owed(100 * UNIT, WAD, RATE_1_15);
+    // cross-check the amounts against a 1.10 computation, and confirm the
+    // drifted rates would differ, so the test fails if either contract read a
+    // live post-maturity rate instead of the observation.
+    let expected_redeem = 100 * UNIT * WAD / RATE_1_10;
+    let expected_claim = owed(100 * UNIT, WAD, RATE_1_10);
     assert!(
         (a.0 - expected_redeem).abs() <= 4,
-        "PT must redeem at the frozen 1.15: {} vs {}",
+        "PT must redeem at the observed 1.10: {} vs {}",
         a.0,
         expected_redeem
     );
     assert!(
         (a.1 - expected_claim).abs() <= 4,
-        "YT must claim at the frozen 1.15: {} vs {}",
+        "YT must claim at the observed 1.10: {} vs {}",
         a.1,
         expected_claim
     );
     assert!(
-        (100 * UNIT * WAD / RATE_1_20 - expected_redeem).abs() > 4,
-        "1.20 must differ from 1.15, else the ordering test proves nothing"
+        (100 * UNIT * WAD / RATE_1_15 - expected_redeem).abs() > 4
+            && (100 * UNIT * WAD / RATE_1_20 - expected_redeem).abs() > 4,
+        "the drifted rates must differ from 1.10, else this test proves nothing"
     );
 }
 
@@ -429,8 +512,10 @@ fn redemption_is_capped_when_rate_regresses() {
     // Solvent: escrow 200 shares worth 200, PT principal 200, rate 1.00.
 
     // The yield source is slashed to 0.95: escrow now worth 190 < 200 of PT.
+    // Observed pre-maturity, so the freeze prices the slash.
     let rate_0_95: i128 = 950_000_000_000_000_000;
     m.set_rate(rate_0_95);
+    m.observe();
     m.env.ledger().set_timestamp(MATURITY + 1);
 
     let alice_pt = m.pt_balance(&alice);
@@ -493,15 +578,22 @@ fn split_and_recombine_survive_a_rate_regression() {
 
     // Recombine succeeds too, returning a fair haircut rather than reverting.
     // Alice's uncapped principal is pt/rate; underwater she gets her pro-rata
-    // slice of escrow, which is strictly less.
+    // slice of escrow, which is strictly less. The preview must quote the
+    // SAME capped number, not the uncapped principal, or the UI overpromises
+    // during exactly the shortfall it matters most in.
     let alice_pt = m.pt_balance(&alice);
     let uncapped = alice_pt * WAD / rate_0_90;
+    let quoted = TokenizerClient::new(&m.env, &m.tokenizer).preview_recombine(&alice_pt, &alice_pt);
     let got = m.recombine(&alice, alice_pt);
     assert!(
         got > 0 && got < uncapped,
         "recombine must haircut under a shortfall: got {} vs uncapped {}",
         got,
         uncapped
+    );
+    assert_eq!(
+        quoted, got,
+        "preview_recombine must quote the capped payout the recombine actually pays"
     );
 }
 

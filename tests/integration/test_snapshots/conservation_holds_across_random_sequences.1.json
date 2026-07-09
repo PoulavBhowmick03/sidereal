@@ -535727,6 +535727,18 @@
                       "key": {
                         "vec": [
                           {
+                            "symbol": "LastObservedRate"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "i128": "1000002080556565828"
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
                             "symbol": "MaturityRate"
                           }
                         ]

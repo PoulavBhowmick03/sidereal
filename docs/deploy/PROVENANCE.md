@@ -123,9 +123,14 @@ Follow this in order. Do not skip the clean-tree step.
 4. Hash and sanity-check locally. Optionally run
    `scripts/verify-reproducible-build.sh --print-only` and confirm the build is
    deterministic with `--determinism`.
-5. Deploy. Deploy the built artifacts and initialize the contracts. Persist the
-   contract addresses (the resilient deploy script writes them to a
-   `deployments/<network>.state.env` state file).
+5. Deploy. Deploy the built artifacts and initialize the contracts. On mainnet
+   the SY wrapper MUST be initialized with `initialize_blend` (a real pool),
+   never plain `initialize`: idle mock-custody mode leaves the admin
+   `set_exchange_rate` knob live, and a compromised admin key could then
+   reprice the whole system. The provenance recorder reads the wrapper's
+   config back from RPC and refuses to write a manifest for a non-Blend
+   wrapper. Persist the contract addresses (the resilient deploy script writes
+   them to a `deployments/<network>.state.env` state file).
 6. Read back. For each deployed contract, read the on-chain Wasm hash from RPC
    and confirm it equals the local sha256.
 7. Record. Run `scripts/record-deploy-provenance.sh` (with `NETWORK=mainnet`).
@@ -140,3 +145,23 @@ Follow this in order. Do not skip the clean-tree step.
 No private keys ever go into a manifest, a state file, or any committed file.
 Deployer identities come from `stellar keys generate` and only their public
 address is recorded.
+
+## Post-deploy operations
+
+Two standing duties after a production deploy:
+
+1. Maturity-rate observation. The tokenizer freezes redemption at the last SY
+   rate observed at or before maturity, never at a live post-maturity read.
+   Every user operation records an observation, but on an idle market the ops
+   keeper should call the permissionless `observe_rate` shortly before
+   maturity (and `freeze_maturity_rate` just after it) so the frozen rate sits
+   as close to the maturity instant as possible. YT holders have the same
+   permissionless lever and an incentive to use it; the keeper poke is a
+   courtesy floor, not a trust assumption.
+
+2. Archived LP entries. AMM LP balances live in persistent storage. If a
+   holder's entry TTL lapses, Soroban archives the entry rather than deleting
+   it; a `RestoreFootprintOp` (`stellar contract restore`) brings it back, and
+   the balance is intact. `bump_lp_ttl` and the app's keepalive keep active
+   entries live; restoration is the documented recovery path for dormant ones.
+   No contract entrypoint is needed and none exists on purpose.

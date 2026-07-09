@@ -1127,7 +1127,14 @@ fn sync_twap(env: &Env, config: &Config, state: &mut State, observed_ln_rate: i1
     }
 
     if elapsed >= config.twap_window {
+        // After an idle gap of a full window there is no history worth
+        // blending, so the TWAP snaps to this single observation. One trade
+        // deciding the TWAP is exactly the manipulation window the TWAP
+        // exists to prevent, so re-enter warm-up: consumers that gate on
+        // twap_warming_up (the SDK and app already do) will not trust the
+        // value again until a full window of fresh observations has passed.
         state.twap_ln_implied_rate = observed_ln_rate;
+        state.warmup_until = now + config.twap_window;
     } else {
         let weight = mul_div_down_or_panic(env, elapsed as i128, WAD, config.twap_window as i128);
         let retained = checked_sub(env, WAD, weight);
@@ -2200,6 +2207,44 @@ mod test {
         assert_eq!(fixture.client.spot_apy(), 0);
         assert_eq!(fixture.client.twap_apy(), 0);
         assert!(!fixture.client.twap_warming_up());
+    }
+
+    /// After an idle gap of a full TWAP window, the next swap's observation
+    /// fully replaces the TWAP (there is no history worth blending). One trade
+    /// deciding the oracle value is the manipulation window the TWAP exists to
+    /// close, so that snap must re-enter warm-up: consumers gating on
+    /// twap_warming_up ignore the value until a fresh window has passed.
+    #[test]
+    fn twap_re_enters_warmup_after_an_idle_gap_snaps_it() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
+
+        // Trade while warm so the TWAP has a real blended history, then let
+        // the initial warm-up lapse.
+        fixture.env.ledger().set_timestamp(NOW + 60);
+        fixture.client.swap_sy_for_pt(&fixture.admin, &1_000, &1);
+        fixture.env.ledger().set_timestamp(NOW + TWAP_WINDOW + 61);
+        assert!(!fixture.client.twap_warming_up(), "warmed up after a window");
+
+        // Idle for well over a full window, then a single swap lands: the
+        // observation snaps the TWAP, so the market must declare itself
+        // warming up again for a full window from that swap.
+        let after_gap = NOW + TWAP_WINDOW + 61 + 3 * TWAP_WINDOW;
+        fixture.env.ledger().set_timestamp(after_gap);
+        fixture.client.swap_sy_for_pt(&fixture.admin, &1_000, &1);
+        assert!(
+            fixture.client.twap_warming_up(),
+            "a full-window idle snap must re-enter warm-up"
+        );
+
+        fixture.env.ledger().set_timestamp(after_gap + TWAP_WINDOW);
+        assert!(
+            !fixture.client.twap_warming_up(),
+            "trust returns after a fresh window"
+        );
     }
 
     #[test]

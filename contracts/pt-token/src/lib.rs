@@ -102,12 +102,11 @@ impl PtToken {
         Ok(env.ledger().timestamp() >= config.maturity)
     }
 
-    pub fn redeemable_sy(env: Env, pt_amount: i128) -> Result<i128, Error> {
-        Self::require_matured(&env)?;
-        Self::require_positive_amount(pt_amount)?;
-
-        Ok(pt_amount)
-    }
+    // There is deliberately no redemption-quote helper here. PT redemption is
+    // priced by the tokenizer (principal at the frozen maturity rate, capped
+    // pro-rata by escrow coverage), and this contract has neither the frozen
+    // rate nor the escrow balance, so any quote it computed would be wrong the
+    // moment the rate moved off 1.0. Quote against the tokenizer instead.
 
     // --- Minter-privileged supply control (only the tokenizer) -------------
 
@@ -220,14 +219,6 @@ impl PtToken {
         }
     }
 
-    fn require_matured(env: &Env) -> Result<(), Error> {
-        let config = Self::read_config(env)?;
-        if env.ledger().timestamp() < config.maturity {
-            return Err(Error::LiveMarket);
-        }
-
-        Ok(())
-    }
 
     fn require_positive_amount(amount: i128) -> Result<(), Error> {
         if amount <= 0 {
@@ -430,22 +421,6 @@ mod test {
             fixture.client.symbol(),
             String::from_str(&fixture.env, "sPT")
         );
-    }
-
-    #[test]
-    #[should_panic(expected = "Error(Contract, #5)")]
-    fn redeem_rejects_before_maturity() {
-        let fixture = fixture(NOW);
-        initialize(&fixture);
-        fixture.client.redeemable_sy(&100);
-    }
-
-    #[test]
-    fn redeem_returns_one_to_one_sy_after_maturity() {
-        let fixture = fixture(NOW);
-        initialize(&fixture);
-        fixture.env.ledger().set_timestamp(MATURITY);
-        assert_eq!(fixture.client.redeemable_sy(&100), 100);
     }
 
     #[test]

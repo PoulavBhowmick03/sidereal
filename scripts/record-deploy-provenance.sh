@@ -140,6 +140,19 @@ for i in "${!KEYS[@]}"; do
   fi
 done
 
+# --- assert Blend custody ------------------------------------------------------
+# The SY wrapper's admin rate setter (set_exchange_rate) is only disabled when a
+# Blend pool is configured (config.pool is Some). An idle-mode wrapper on a real
+# network would let a compromised admin key reprice the entire system, so a
+# production manifest must never be recorded for one. `config` is a read-only
+# view; --send=no simulates without submitting.
+log "Asserting the SY wrapper is Blend-backed (admin rate knob dead)"
+SY_CONFIG="$(stellar contract invoke --id "$SY" --network "$NETWORK" --send=no -- config 2>/dev/null)" \
+  || die "failed to read SY wrapper config for $SY on $NETWORK"
+if ! grep -q '"pool": *"C' <<<"$SY_CONFIG"; then
+  die "SY wrapper $SY has no Blend pool configured (idle mock-custody mode): the admin rate setter is live, refusing to record a production manifest. Initialize with initialize_blend. Config read: $SY_CONFIG"
+fi
+
 # --- write manifest ----------------------------------------------------------
 log "Writing $MANIFEST_OUT"
 mkdir -p "$DEPLOYMENTS_DIR"

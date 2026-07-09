@@ -269,6 +269,7 @@
         }
       ]
     ],
+    [],
     [
       [
         "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAOLZM",
@@ -989,6 +990,18 @@
                             }
                           }
                         ]
+                      }
+                    },
+                    {
+                      "key": {
+                        "vec": [
+                          {
+                            "symbol": "LastObservedRate"
+                          }
+                        ]
+                      },
+                      "val": {
+                        "i128": "1100000000000000000"
                       }
                     },
                     {

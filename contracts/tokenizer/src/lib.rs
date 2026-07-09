@@ -41,6 +41,13 @@ enum DataKey {
     /// SY rate frozen at maturity, used for all post-maturity redemption so
     /// later rate moves cannot change what PT redeems for.
     MaturityRate,
+    /// The most recent SY rate read by a pre-maturity mutating operation (or a
+    /// permissionless `observe_rate` poke). The maturity freeze uses this
+    /// observation instead of a live post-maturity read, so yield that a live
+    /// source (Blend has no maturity concept) keeps accruing after maturity can
+    /// never leak into redemption, no matter how late the first post-maturity
+    /// call arrives.
+    LastObservedRate,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -108,10 +115,25 @@ impl Tokenizer {
         Ok(env.ledger().timestamp() >= config.maturity)
     }
 
+    /// Permissionless: before maturity, read the live SY rate and record it as
+    /// the latest observation the maturity freeze may use. Every mutating
+    /// operation records one as a side effect; this poke exists so anyone (a
+    /// keeper, or a YT holder who wants the freeze to credit yield accrued
+    /// right up to maturity) can refresh the observation on an otherwise idle
+    /// market without moving tokens. Returns the observed rate.
+    pub fn observe_rate(env: Env) -> Result<i128, Error> {
+        let config = Self::read_config(&env)?;
+        Self::require_live(&env, &config)?;
+        Self::bump_instance_ttl(&env);
+        Ok(observe_live_rate(&env, &config))
+    }
+
     /// Permissionless: after maturity, snapshot and return the SY rate used for
     /// all redemption. Any caller may poke this so the maturity rate is captured
     /// promptly; redemption also snapshots it lazily on first use. Idempotent
-    /// once set.
+    /// once set. The snapshot is the last rate observed at or before maturity,
+    /// never a live post-maturity read (see `effective_rate`), so the timing of
+    /// this call cannot move value between PT and YT.
     pub fn freeze_maturity_rate(env: Env) -> Result<i128, Error> {
         let config = Self::read_config(&env)?;
         if env.ledger().timestamp() < config.maturity {
@@ -143,7 +165,9 @@ impl Tokenizer {
 
     /// SY shares returned for recombining equal PT and YT (asset units) at the
     /// current rate. This is the principal only; any accrued YT yield is settled
-    /// separately into the holder's claim ledger.
+    /// separately into the holder's claim ledger. Mirrors `recombine` exactly,
+    /// including the pro-rata escrow cap, so the preview never overquotes
+    /// during a rate-regression shortfall.
     pub fn preview_recombine(env: Env, pt_amount: i128, yt_amount: i128) -> Result<i128, Error> {
         let config = Self::read_config(&env)?;
         Self::require_live(&env, &config)?;
@@ -155,7 +179,11 @@ impl Tokenizer {
         }
 
         let rate = current_rate(&env, &config.sy_token);
-        mul_div_floor(&env, pt_amount, WAD, rate)
+        let full = mul_div_floor(&env, pt_amount, WAD, rate)?;
+        let escrow_shares = token_balance(&env, &config.sy_token, &env.current_contract_address());
+        let pt_supply = pt_total_supply(&env, &config.pt_token);
+        let pro_rata = mul_div_floor(&env, escrow_shares, pt_amount, pt_supply)?;
+        Ok(if full < pro_rata { full } else { pro_rata })
     }
 
     /// PT and YT balances the holder currently owns, read from the token
@@ -190,7 +218,7 @@ impl Tokenizer {
         Self::require_positive_amount(sy_amount)?;
         Self::bump_instance_ttl(&env);
 
-        let rate = current_rate(&env, &config.sy_token);
+        let rate = observe_live_rate(&env, &config);
         let face = mul_div_floor(&env, sy_amount, rate, WAD)?;
         Self::require_positive_amount(face)?;
 
@@ -233,7 +261,7 @@ impl Tokenizer {
         }
 
         Self::bump_instance_ttl(&env);
-        let rate = current_rate(&env, &config.sy_token);
+        let rate = observe_live_rate(&env, &config);
         let full = mul_div_floor(&env, pt_amount, WAD, rate)?;
 
         // Cap the principal returned to the holder's pro-rata share of escrow, the
@@ -478,14 +506,37 @@ fn pt_total_supply(env: &Env, pt_token: &Address) -> i128 {
     env.invoke_contract(pt_token, &Symbol::new(env, "total_supply"), args)
 }
 
+/// Reads the live SY rate and records it as the latest pre-maturity
+/// observation. Every mutating pre-maturity operation routes its rate read
+/// through here, so the maturity freeze always has a rate that was actually
+/// observed before maturity to fall back on.
+fn observe_live_rate(env: &Env, config: &Config) -> i128 {
+    let rate = current_rate(env, &config.sy_token);
+    env.storage()
+        .instance()
+        .set(&DataKey::LastObservedRate, &rate);
+    rate
+}
+
 /// The rate to value the escrow at: the live SY rate before maturity, and the
-/// rate frozen at maturity afterwards. The first post-maturity caller snapshots
-/// it; later callers reuse the snapshot, so post-maturity rate moves cannot
-/// change redemption. Real yield sources stop accruing at maturity, so the live
-/// rate is expected flat by then; the snapshot defends against a stray late move.
+/// rate frozen at maturity afterwards. The freeze does NOT read the live rate
+/// after maturity: Blend has no maturity concept and keeps accruing, so a live
+/// post-maturity read would let the freeze timing move value between PT and YT
+/// (a later snapshot means a higher rate, fewer SY shares per PT, and more for
+/// YT). Instead the freeze uses the last rate observed at or before maturity
+/// (every mutating operation records one, and anyone can record a fresher one
+/// with `observe_rate`), so post-maturity accrual can never reach redemption
+/// regardless of when the first post-maturity call lands. The unobserved tail
+/// between the last observation and the maturity instant is credited to
+/// neither side's advantage deterministically: the frozen rate is at most the
+/// true maturity rate, which favors PT, consistent with PT being senior. YT
+/// holders can narrow that tail to nothing by poking `observe_rate` shortly
+/// before maturity. The live-read fallback below is reachable only for a
+/// market that never had a single mutating operation, which has no PT or YT
+/// outstanding and therefore nothing to misprice.
 fn effective_rate(env: &Env, config: &Config) -> i128 {
     if env.ledger().timestamp() < config.maturity {
-        return current_rate(env, &config.sy_token);
+        return observe_live_rate(env, config);
     }
     if let Some(rate) = env
         .storage()
@@ -494,7 +545,11 @@ fn effective_rate(env: &Env, config: &Config) -> i128 {
     {
         return rate;
     }
-    let rate = current_rate(env, &config.sy_token);
+    let rate = env
+        .storage()
+        .instance()
+        .get::<_, i128>(&DataKey::LastObservedRate)
+        .unwrap_or_else(|| current_rate(env, &config.sy_token));
     env.storage().instance().set(&DataKey::MaturityRate, &rate);
     rate
 }
@@ -645,13 +700,10 @@ mod test {
         assert_eq!(fixture.client.preview_split(&100), (100, 100));
     }
 
-    #[test]
-    fn preview_recombine_returns_sy_for_equal_pt_and_yt() {
-        let fixture = fixture(NOW);
-        initialize(&fixture);
-        assert_eq!(fixture.client.preview_recombine(&100, &100), 100);
-    }
-
+    // preview_recombine's happy path reads real escrow and PT supply for its
+    // pro-rata cap, so it is covered in tests/integration (economics.rs)
+    // against real tokens; the unit fixture's placeholder PT address cannot
+    // answer total_supply. Only the argument gating is asserted here.
     #[test]
     #[should_panic(expected = "Error(Contract, #5)")]
     fn preview_recombine_rejects_mismatched_pt_and_yt() {
