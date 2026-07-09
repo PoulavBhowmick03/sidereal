@@ -168,9 +168,9 @@ export class StellarYT {
    * PT and YT are real SEP-41 tokens now, so tokenizer.position reads the
    * holder's on-chain PT/YT balances and SY balance is the wrapper's
    * share_balance. Claimable yield uses YT's preview_claim_yield, which reads
-   * the holder's real YT balance and the SY exchange rate itself (no caller
-   * supplied rate), and returns the claimable amount in SY shares. LP balance
-   * comes from the AMM's per-holder accounting.
+   * the holder's banked yield, real YT balance, and the SY exchange rate itself
+   * (no caller supplied rate), and returns the claimable amount in SY shares.
+   * LP balance comes from the AMM's per-holder accounting.
    */
   async getPosition(holder: string, marketId: string): Promise<Position> {
     const sy = new Contract(this.contracts.sy);
@@ -189,13 +189,6 @@ export class StellarYT {
     const ptBalance = position.pt_balance;
     const ytBalance = position.yt_balance;
 
-    // Always read preview_claim_yield. It returns banked yield plus what a
-    // settle at the current rate would add, and banked yield survives a zero YT
-    // balance: a holder can bank yield (a transfer settles them) and then send
-    // or recombine away all their YT while still being owed SY. A YT-balance
-    // short-circuit would report that owed SY as zero even though a claim would
-    // pay out. pending_yield contributes zero at a zero balance, so the read is
-    // safe to make unconditionally.
     const claimableYield = await this.simulateRead<bigint>(
       new Contract(this.contracts.yt).call("preview_claim_yield", holderScVal),
     );

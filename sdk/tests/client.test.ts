@@ -250,19 +250,40 @@ describe("getPosition", () => {
     expect(preview?.args).toHaveLength(1);
   });
 
-  it("reports banked yield even when the YT balance is zero", async () => {
-    // A holder who banked yield then moved all their YT away still has zero YT
-    // balance but positive banked yield. getPosition must surface it, so the
-    // read is unconditional (no YT-balance short-circuit).
+  it("reads banked yield even when YT balance is zero", async () => {
     state().returns = {
       share_balance: 0n,
       position: { pt_balance: 0n, yt_balance: 0n },
       lp_balance: 0n,
-      preview_claim_yield: 4n,
+      preview_claim_yield: 11n,
     };
     const p = await newClient().getPosition("G1", "mkt");
-    expect(p.claimableYield).toBe(4n);
+    expect(p.claimableYield).toBe(11n);
     expect(state().calls.some((c) => c.method === "preview_claim_yield")).toBe(true);
+  });
+
+  it("returns the YT preview result when zero YT has no banked yield", async () => {
+    state().returns = {
+      share_balance: 0n,
+      position: { pt_balance: 0n, yt_balance: 0n },
+      lp_balance: 0n,
+      preview_claim_yield: 0n,
+    };
+    const p = await newClient().getPosition("G1", "mkt");
+    expect(p.claimableYield).toBe(0n);
+    expect(state().calls.some((c) => c.method === "preview_claim_yield")).toBe(true);
+  });
+
+  it("does not pass a caller-supplied rate to yield preview when YT is zero", async () => {
+    state().returns = {
+      share_balance: 0n,
+      position: { pt_balance: 0n, yt_balance: 0n },
+      lp_balance: 0n,
+      preview_claim_yield: 5n,
+    };
+    await newClient().getPosition("G1", "mkt");
+    const preview = state().calls.find((c) => c.method === "preview_claim_yield");
+    expect(preview?.args).toHaveLength(1);
   });
 });
 
