@@ -230,31 +230,31 @@ export default function MintPage() {
           Deposit USDC to receive SY, and optionally split it into equal amounts of PT and YT.
         </p>
         <MaturityBadge maturity={market?.maturity ?? null} />
-        <section className="panel-subtle max-w-3xl space-y-3 p-5" aria-labelledby="funded-run-blocker">
+        <section className="panel-subtle max-w-3xl space-y-3 p-5" aria-labelledby="mint-getting-started">
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <h2 id="funded-run-blocker" className="label-data text-amber">
-              Blocker 3: Funded manual run
+            <h2 id="mint-getting-started" className="label-data text-amber">
+              Getting started
             </h2>
             <span className="rounded-pill border border-white/15 px-2.5 py-1 text-[13px] uppercase tracking-[0.1em] text-smoke">
-              Browser wallet
+              Testnet
             </span>
           </div>
           <ol className="grid gap-2 text-xs leading-relaxed text-smoke sm:grid-cols-2">
             <li>
-              <span className="text-paper">Prepare:</span> testnet wallet with the Blend USDC
-              trustline, {cfg.yieldSource.reserveAsset || "USDC:GATALT...5V56"}.
+              <span className="text-paper">Connect:</span> a Stellar testnet wallet in your
+              browser. All transactions are signed by you.
             </li>
             <li>
-              <span className="text-paper">Fund:</span> transfer reserve USDC from the
-              sidereal-smoke identity instead of using Circle faucet USDC.
+              <span className="text-paper">Fund:</span> if your wallet holds no Blend USDC, a
+              faucet option appears below to get testnet USDC.
             </li>
             <li>
-              <span className="text-paper">Walk:</span> run the demo checklist, supply on Blend,
-              tokenize here, sell YT if pool depth allows, then check Portfolio.
+              <span className="text-paper">Mint:</span> deposit USDC to receive SY, and
+              optionally split it into equal amounts of PT and YT.
             </li>
             <li>
-              <span className="text-paper">Record:</span> transaction hashes in USER_FLOW section 9
-              and REMAINING 3b before flipping this blocker to done.
+              <span className="text-paper">Track:</span> see your SY, PT, and YT balances on the
+              Portfolio page after each transaction confirms.
             </li>
           </ol>
         </section>

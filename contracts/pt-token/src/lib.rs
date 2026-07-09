@@ -169,13 +169,7 @@ impl PtToken {
             panic_with_error!(&env, Error::InvalidExpiration);
         }
         Self::bump_instance_ttl(&env);
-        env.storage().temporary().set(
-            &DataKey::Allowance(from, spender),
-            &AllowanceValue {
-                amount,
-                expiration_ledger,
-            },
-        );
+        Self::write_allowance(&env, &from, &spender, amount, expiration_ledger);
     }
 
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
@@ -310,17 +304,49 @@ impl PtToken {
         }
     }
 
+    /// Writes the allowance and, when the allowance is live (amount > 0),
+    /// extends the temporary entry's own TTL so it survives until
+    /// `expiration_ledger`. A freshly created temporary entry only lives for
+    /// the network minimum temporary TTL; bumping the instance TTL does not
+    /// keep per-entry temporary storage alive, so without this extension the
+    /// allowance archives long before the requested expiration.
+    fn write_allowance(
+        env: &Env,
+        from: &Address,
+        spender: &Address,
+        amount: i128,
+        expiration_ledger: u32,
+    ) {
+        let key = DataKey::Allowance(from.clone(), spender.clone());
+        env.storage().temporary().set(
+            &key,
+            &AllowanceValue {
+                amount,
+                expiration_ledger,
+            },
+        );
+        if amount > 0 {
+            // Callers guarantee expiration_ledger >= the current sequence
+            // whenever amount > 0 (approve validates it; spend_allowance only
+            // reaches here through a live, unexpired allowance).
+            let live_for = expiration_ledger - env.ledger().sequence();
+            env.storage()
+                .temporary()
+                .extend_ttl(&key, live_for, live_for);
+        }
+    }
+
     fn spend_allowance(env: &Env, from: &Address, spender: &Address, amount: i128) {
         let allowance = Self::read_allowance(env, from, spender);
         if allowance.amount < amount {
             panic_with_error!(env, Error::InsufficientAllowance);
         }
-        env.storage().temporary().set(
-            &DataKey::Allowance(from.clone(), spender.clone()),
-            &AllowanceValue {
-                amount: allowance.amount - amount,
-                expiration_ledger: allowance.expiration_ledger,
-            },
+        Self::write_allowance(
+            env,
+            from,
+            spender,
+            allowance.amount - amount,
+            allowance.expiration_ledger,
         );
     }
 
@@ -474,7 +500,7 @@ mod test {
         fixture.client.mint(&fixture.alice, &1_000);
         fixture
             .client
-            .approve(&fixture.alice, &fixture.bob, &500, &(NOW as u32 + 1_000));
+            .approve(&fixture.alice, &fixture.bob, &500, &1_000);
         assert_eq!(fixture.client.allowance(&fixture.alice, &fixture.bob), 500);
 
         fixture
@@ -493,10 +519,71 @@ mod test {
         fixture.client.mint(&fixture.alice, &1_000);
         fixture
             .client
-            .approve(&fixture.alice, &fixture.bob, &100, &(NOW as u32 + 1_000));
+            .approve(&fixture.alice, &fixture.bob, &100, &1_000);
         fixture
             .client
             .transfer_from(&fixture.bob, &fixture.alice, &fixture.bob, &101);
+    }
+
+    #[test]
+    fn allowance_entry_ttl_covers_requested_expiration() {
+        use soroban_sdk::testutils::storage::Temporary as _;
+
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture.client.mint(&fixture.alice, &1_000);
+
+        // Model mainnet-like conditions: the network minimum temporary-entry
+        // TTL is far shorter than the requested allowance lifetime.
+        const START_SEQ: u32 = 1_000;
+        const MIN_TEMP_TTL: u32 = 1_600;
+        const EXPIRATION: u32 = START_SEQ + 500_000;
+        fixture.env.ledger().set_sequence_number(START_SEQ);
+        fixture.env.ledger().set_min_temp_entry_ttl(MIN_TEMP_TTL);
+
+        fixture
+            .client
+            .approve(&fixture.alice, &fixture.bob, &500, &EXPIRATION);
+
+        // The test host never archives entries on a sequence jump, so reading
+        // the allowance back after a jump would pass even without the fix.
+        // Assert the entry's own TTL instead: it must cover the requested
+        // expiration ledger, not just the minimum it gets at creation.
+        let key = DataKey::Allowance(fixture.alice.clone(), fixture.bob.clone());
+        let ttl = fixture.env.as_contract(&fixture.client.address, || {
+            fixture.env.storage().temporary().get_ttl(&key)
+        });
+        assert!(
+            START_SEQ + ttl >= EXPIRATION,
+            "allowance TTL {} from sequence {} must cover expiration {}",
+            ttl,
+            START_SEQ,
+            EXPIRATION
+        );
+
+        // Jump well past the minimum temporary TTL but before expiration; the
+        // allowance must still be readable and spendable.
+        const JUMPED: u32 = START_SEQ + MIN_TEMP_TTL + 100_000;
+        fixture.env.ledger().set_sequence_number(JUMPED);
+        assert_eq!(fixture.client.allowance(&fixture.alice, &fixture.bob), 500);
+        fixture
+            .client
+            .transfer_from(&fixture.bob, &fixture.alice, &fixture.bob, &300);
+        assert_eq!(fixture.client.allowance(&fixture.alice, &fixture.bob), 200);
+        assert_eq!(fixture.client.balance(&fixture.bob), 300);
+
+        // The reduced allowance written back by transfer_from must also keep
+        // a TTL covering the stored expiration ledger.
+        let ttl = fixture.env.as_contract(&fixture.client.address, || {
+            fixture.env.storage().temporary().get_ttl(&key)
+        });
+        assert!(
+            JUMPED + ttl >= EXPIRATION,
+            "post-spend allowance TTL {} from sequence {} must cover expiration {}",
+            ttl,
+            JUMPED,
+            EXPIRATION
+        );
     }
 
     #[test]

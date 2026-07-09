@@ -67,8 +67,8 @@ Agent split for this sprint:
 - **Codex Agent:** CI/CD, boilerplate, generated clients, test scaffolding,
   small refactors, dependency bumps.
 
-See [`docs/ROADMAP.md`](./docs/ROADMAP.md) for the three-week plan and
-[`docs/REMAINING.md`](./docs/REMAINING.md) for the Tier 2 gate.
+See [`docs/ROADMAP.md`](./docs/ROADMAP.md) for the three-week plan and the
+Tier 2 gate.
 
 ---
 

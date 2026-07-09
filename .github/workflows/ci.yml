@@ -23,12 +23,19 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Test workspace
         run: cargo test --workspace --locked
-      - name: Build optimized deployable Wasm
-        run: make wasm
       - name: Install Wasm inspection tools
         run: |
           sudo apt-get update
           sudo apt-get install --yes wabt
+      - name: Install stellar-cli
+        run: |
+          curl -fsSL -o /tmp/stellar-cli.tar.gz \
+            https://github.com/stellar/stellar-cli/releases/download/v27.0.0/stellar-cli-27.0.0-x86_64-unknown-linux-gnu.tar.gz
+          tar -xzf /tmp/stellar-cli.tar.gz -C /tmp
+          sudo install /tmp/stellar /usr/local/bin/stellar
+          stellar version
+      - name: Build optimized deployable Wasm
+        run: make wasm
       - name: Reject floating-point Wasm opcodes
         run: |
           bash scripts/check-wasm-floats.sh \
@@ -91,3 +98,52 @@ jobs:
         run: pnpm --filter @sidereal/app exec playwright install --with-deps chromium
       - name: Run smoke e2e
         run: pnpm --filter @sidereal/app exec playwright test --project=desktop-chromium
+
+  reproducible-build:
+    name: reproducible build (determinism + manifest drift)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so scripts/verify-reproducible-build.sh can create a
+          # clean worktree for HEAD (and any committed source_commit).
+          fetch-depth: 0
+      - name: Install Rust (pinned toolchain, see rust-toolchain.toml)
+        run: |
+          rustup toolchain install 1.96.0 --profile minimal
+          rustup target add wasm32v1-none --toolchain 1.96.0
+      - uses: Swatinem/rust-cache@v2
+      - name: Install stellar-cli
+        run: |
+          curl -fsSL -o /tmp/stellar-cli.tar.gz \
+            https://github.com/stellar/stellar-cli/releases/download/v27.0.0/stellar-cli-27.0.0-x86_64-unknown-linux-gnu.tar.gz
+          tar -xzf /tmp/stellar-cli.tar.gz -C /tmp
+          sudo install /tmp/stellar /usr/local/bin/stellar
+          stellar version
+      # Reproducibility gate: build the committed HEAD twice from clean
+      # worktrees and assert byte-identical Wasm. This asserts "same committed
+      # source -> same hash", which is the property mainnet provenance depends
+      # on. It deliberately does NOT compare against deployments/testnet.toml:
+      # those hashes belong to an older commit (27ce517...) built before the
+      # release profile was pinned, so HEAD is expected to differ from them.
+      - name: Determinism check (HEAD builds byte-identically)
+        run: bash scripts/verify-reproducible-build.sh --determinism
+      # Drift gate: only fires once a real mainnet manifest is committed AND its
+      # source_commit equals HEAD. Until then it is a no-op, so it never turns
+      # CI red on the expected testnet mismatch. When mainnet.toml exists at the
+      # deployed commit, any drift between committed source and recorded hashes
+      # fails here.
+      - name: Manifest drift check (mainnet.toml at HEAD, if present)
+        run: |
+          manifest="deployments/mainnet.toml"
+          if [[ ! -f "$manifest" ]]; then
+            echo "no $manifest yet; skipping drift check"
+            exit 0
+          fi
+          recorded="$(awk -F'"' '/^source_commit[[:space:]]*=/ {print $2; exit}' "$manifest")"
+          head="$(git rev-parse HEAD)"
+          if [[ "$recorded" != "$head" ]]; then
+            echo "$manifest records $recorded, HEAD is $head; drift check not applicable at this commit"
+            exit 0
+          fi
+          bash scripts/verify-reproducible-build.sh --manifest "$manifest" --commit "$head"

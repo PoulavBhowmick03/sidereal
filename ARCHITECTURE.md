@@ -225,6 +225,8 @@ The trade succeeds atomically or reverts. Soroban's transaction-level atomicity 
 
 Symmetric. Flash-borrow PT, recombine with the user's YT into SY via the tokenizer, swap part of the SY back to PT to repay the flash, send the rest to the user.
 
+**Known limitation: sub-share rounding dust on the buy side.** Step 3 sizes the SY sent to the tokenizer by rounding the requested YT face up to the next whole share (so the tokenizer's floor-rounded mint never comes up short of what the buyer was quoted). At a non-par SY rate this can over-mint a fraction of a face unit of PT and YT beyond what the buyer receives; both stay in pool custody as a matched, unclaimed pair rather than being handed to the trader (so it cannot be farmed against LPs). We tried recombining that pair back into SY inside the same call, and reverted it: the dust is by construction worth less than one SY share, and the tokenizer's `recombine` rejects a zero SY-equivalent, so the fix panicked on every swap that actually produced dust. The standing YT can accrue yield that banks to the pool's own address, which the pool has no entrypoint to claim, so it strands as escrow dust rather than being lost to a trader. Bounded per swap, no user funds at risk, and the solver's quote path lands in the dust-producing rounding window only occasionally. A real fix needs either resizing the split so it hits the exact YT face when possible, or a dedicated pool self-sweep entrypoint; both are scoped as future work, not a blocker. See `tests/integration/tests/journey.rs::flash_route_over_mint_dust_stays_a_matched_pair_and_never_panics` for the regression coverage that locks in the safe (non-panicking) behavior.
+
 ### 4.4 Internal TWAP
 
 Every swap updates an exponentially-weighted moving average of the implied APY. The TWAP is:
@@ -309,6 +311,7 @@ YT is already implicitly an option on yield direction. Building an explicit opti
 | AMM math bug | Property-based testing with 10k iterations; reference implementation cross-check against Pendle V2 contracts |
 | Underlying protocol failure (Blend bug) | SY wrapper is isolated; a Blend failure affects only the SY-blendUSDC pool, not the protocol |
 | Flash-swap atomicity bug | Comprehensive integration tests covering revert scenarios; Soroban's transaction model makes this easier than EVM |
+| Sub-share YT dust stranding on the buy-side flash route (§4.3) | Accepted for launch: bounded per swap, matched pair never reaches the trader, swap never reverts because of it; tracked as future work (split resizing or a pool self-sweep entrypoint) |
 
 ---
 

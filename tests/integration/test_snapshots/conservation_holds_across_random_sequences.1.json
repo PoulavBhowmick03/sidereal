@@ -535638,18 +535638,6 @@
                       "key": {
                         "vec": [
                           {
-                            "symbol": "MaturityRate"
-                          }
-                        ]
-                      },
-                      "val": {
-                        "i128": "1000002080556565828"
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
                             "symbol": "TotalSupply"
                           }
                         ]

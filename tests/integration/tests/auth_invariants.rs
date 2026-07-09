@@ -74,7 +74,7 @@ fn deploy(env: Env) -> Market {
     // Seed AMM liquidity so the route can quote: deposit, split, add PT + SY.
     SyWrapperClient::new(&env, &sy).deposit(&user, &2_000_000_000_i128);
     TokenizerClient::new(&env, &tokenizer).split(&user, &1_000_000_000_i128);
-    AmmMarketClient::new(&env, &amm).add_liquidity(&user, &800_000_000_i128, &800_000_000_i128);
+    AmmMarketClient::new(&env, &amm).add_liquidity(&user, &800_000_000_i128, &800_000_000_i128, &0);
 
     Market { user, sy, amm }
 }

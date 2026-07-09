@@ -189,13 +189,16 @@ export class StellarYT {
     const ptBalance = position.pt_balance;
     const ytBalance = position.yt_balance;
 
-    // preview_claim_yield rejects a non-positive YT balance, so short-circuit.
-    const claimableYield =
-      ytBalance > 0n
-        ? await this.simulateRead<bigint>(
-            new Contract(this.contracts.yt).call("preview_claim_yield", holderScVal),
-          )
-        : 0n;
+    // Always read preview_claim_yield. It returns banked yield plus what a
+    // settle at the current rate would add, and banked yield survives a zero YT
+    // balance: a holder can bank yield (a transfer settles them) and then send
+    // or recombine away all their YT while still being owed SY. A YT-balance
+    // short-circuit would report that owed SY as zero even though a claim would
+    // pay out. pending_yield contributes zero at a zero balance, so the read is
+    // safe to make unconditionally.
+    const claimableYield = await this.simulateRead<bigint>(
+      new Contract(this.contracts.yt).call("preview_claim_yield", holderScVal),
+    );
 
     return {
       holder,
@@ -337,8 +340,26 @@ export class StellarYT {
    * checkpoint, and a genuine shortfall is priced pro-rata at redemption rather
    * than blocking the claim, so a claim no longer reverts under a rate
    * regression.
+   *
+   * The contract deliberately has no owed>0 guard, so a zero-value claim would
+   * land on chain and burn fees for nothing. We guard against that here with a
+   * network read: preview_claim_yield reads the holder's real YT balance and the
+   * SY rate itself (no caller-supplied rate) and returns the claimable SY shares,
+   * so if it is not positive we refuse to build rather than return a fee-burning
+   * envelope. This matches the SDK's other read-then-build guards (buildRedeem
+   * reads is_matured before choosing the route) and the input-guard error style
+   * (a plain Error with a clear message, like buildBlendWithdraw's empty case).
    */
   async buildClaimYield(args: ClaimArgs): Promise<TransactionEnvelope> {
+    const claimable = await this.simulateRead<bigint>(
+      new Contract(this.contracts.yt).call(
+        "preview_claim_yield",
+        new Address(args.from).toScVal(),
+      ),
+    );
+    if (claimable <= 0n) {
+      throw new Error("nothing to claim: previewed yield is zero");
+    }
     const op = new Contract(this.contracts.tokenizer).call(
       "claim_yield",
       new Address(args.from).toScVal(),
@@ -449,7 +470,15 @@ export class StellarYT {
     return this.buildEnvelope(args.from, [op]);
   }
 
-  /** Builds a transaction that adds PT/SY liquidity and mints LP tokens. */
+  /**
+   * Builds a transaction that adds PT/SY liquidity and mints LP tokens.
+   *
+   * Argument order matches the AMM entrypoint
+   * `add_liquidity(from, pt_in, sy_in, min_lp_out)`: min_lp_out comes after
+   * sy_in. The bound is caller-supplied and must be a slippage-adjusted value
+   * from a preview (the SDK does not compute a default); the AMM reverts the
+   * entire invocation with SlippageExceeded if the LP minted is below it.
+   */
   async buildAddLiquidity(args: AddLiquidityArgs): Promise<TransactionEnvelope> {
     requirePositive("ptIn", args.ptIn);
     requirePositive("syIn", args.syIn);
@@ -458,17 +487,28 @@ export class StellarYT {
       new Address(args.from).toScVal(),
       nativeToScVal(args.ptIn, { type: "i128" }),
       nativeToScVal(args.syIn, { type: "i128" }),
+      nativeToScVal(args.minLpOut, { type: "i128" }),
     );
     return this.buildEnvelope(args.from, [op]);
   }
 
-  /** Builds a transaction that burns LP tokens and withdraws PT and SY. */
+  /**
+   * Builds a transaction that burns LP tokens and withdraws PT and SY.
+   *
+   * Argument order matches the AMM entrypoint
+   * `remove_liquidity(from, lp_in, min_pt_out, min_sy_out)`: min_pt_out then
+   * min_sy_out come after lp_in. Both bounds are caller-supplied slippage-adjusted
+   * values from a preview; a violation on either leg reverts the whole invocation
+   * with SlippageExceeded.
+   */
   async buildRemoveLiquidity(args: RemoveLiquidityArgs): Promise<TransactionEnvelope> {
     requirePositive("lpIn", args.lpIn);
     const op = new Contract(this.contracts.market).call(
       "remove_liquidity",
       new Address(args.from).toScVal(),
       nativeToScVal(args.lpIn, { type: "i128" }),
+      nativeToScVal(args.minPtOut, { type: "i128" }),
+      nativeToScVal(args.minSyOut, { type: "i128" }),
     );
     return this.buildEnvelope(args.from, [op]);
   }

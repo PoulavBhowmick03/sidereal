@@ -13,6 +13,7 @@ import {
   parseTokenAmount,
 } from "@/lib/format";
 import { previewAddLiquidity, previewRemoveLiquidity } from "@/lib/lpPreview";
+import { applySlippage, DEFAULT_SLIPPAGE_BPS, SLIPPAGE_OPTIONS } from "@/lib/slippage";
 import { useBlendRates } from "@/lib/useBlendRates";
 import { useLpPosition } from "@/lib/useLpPosition";
 import { useMarketStatus } from "@/lib/useMarket";
@@ -34,6 +35,9 @@ export default function PoolPage() {
   const [syAmount, setSyAmount] = useState("");
   const [lpAmount, setLpAmount] = useState("");
   const [activeAction, setActiveAction] = useState<"add" | "remove" | null>(null);
+  // One slippage setting for both LP actions, reusing the swap page's helper and
+  // options rather than inventing a second slippage system.
+  const [slippageBps, setSlippageBps] = useState<bigint>(DEFAULT_SLIPPAGE_BPS);
 
   const refreshKey = phase.kind === "done" ? phase.hash : 0;
   const { market, loading: marketLoading } = useMarketStatus(refreshKey);
@@ -72,6 +76,14 @@ export default function PoolPage() {
     }
   }, [cfg.decimals, market, lpAmount]);
 
+  // Slippage-adjusted minimum outputs the AMM enforces. The pool ratio can move
+  // between this preview and execution, so we submit a floor derived from the
+  // preview and the chosen tolerance; the contract reverts with SlippageExceeded
+  // if the real output falls below it.
+  const addMinLpOut = addPreview !== null ? applySlippage(addPreview.lpOut, slippageBps) : 0n;
+  const removeMinPtOut = removePreview !== null ? applySlippage(removePreview.ptOut, slippageBps) : 0n;
+  const removeMinSyOut = removePreview !== null ? applySlippage(removePreview.syOut, slippageBps) : 0n;
+
   const ptError = amountError(ptAmount, cfg.decimals, position?.ptBalance);
   const syError = amountError(syAmount, cfg.decimals, position?.syBalance);
   const lpFieldError = amountError(lpAmount, cfg.decimals, lpPosition?.lpBalance);
@@ -106,6 +118,7 @@ export default function PoolPage() {
         from: address,
         ptIn: parseTokenAmount(ptAmount, cfg.decimals),
         syIn: parseTokenAmount(syAmount, cfg.decimals),
+        minLpOut: addMinLpOut,
       }),
     );
   }
@@ -118,6 +131,8 @@ export default function PoolPage() {
         marketId: cfg.marketId,
         from: address,
         lpIn: parseTokenAmount(lpAmount, cfg.decimals),
+        minPtOut: removeMinPtOut,
+        minSyOut: removeMinSyOut,
       }),
     );
   }
@@ -194,6 +209,11 @@ export default function PoolPage() {
               <PreviewRow label="SY left in wallet" value={formatTokenAmount(addPreview.syUnused, cfg.decimals)} />
               <PreviewRow label="Limiting side" value={addPreview.limitingSide} />
               <PreviewRow label="New share" value={bpsToPercent(addPreview.shareBpsAfter)} signal />
+              <SlippageControl slippageBps={slippageBps} onChange={setSlippageBps} />
+              <PreviewRow
+                label={`Min LP out (${slippageLabel(slippageBps)} slippage)`}
+                value={formatTokenAmount(addMinLpOut, cfg.decimals)}
+              />
             </dl>
           ) : null}
 
@@ -238,6 +258,15 @@ export default function PoolPage() {
                 signal
               />
               <PreviewRow label="Pool share burned" value={bpsToPercent(removePreview.shareBps)} />
+              <SlippageControl slippageBps={slippageBps} onChange={setSlippageBps} />
+              <PreviewRow
+                label={`Min PT out (${slippageLabel(slippageBps)} slippage)`}
+                value={formatTokenAmount(removeMinPtOut, cfg.decimals)}
+              />
+              <PreviewRow
+                label={`Min SY out (${slippageLabel(slippageBps)} slippage)`}
+                value={formatTokenAmount(removeMinSyOut, cfg.decimals)}
+              />
             </dl>
           ) : null}
 
@@ -309,6 +338,44 @@ export default function PoolPage() {
             />
           </dl>
         </aside>
+      </div>
+    </div>
+  );
+}
+
+function slippageLabel(slippageBps: bigint): string {
+  return SLIPPAGE_OPTIONS.find((o) => o.bps === slippageBps)?.label ?? `${slippageBps} bps`;
+}
+
+// Shared slippage selector for both LP actions. Bound to the page's single
+// slippageBps state, so rendering it in both preview panels keeps one setting,
+// not two. Mirrors the swap page's inline chip row.
+function SlippageControl({
+  slippageBps,
+  onChange,
+}: {
+  slippageBps: bigint;
+  onChange: (bps: bigint) => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-4 border-t border-white/10 py-2">
+      <span className="text-ash">Slippage tolerance</span>
+      <div className="flex gap-px border border-white/10">
+        {SLIPPAGE_OPTIONS.map((opt) => (
+          <button
+            key={opt.label}
+            type="button"
+            onClick={() => onChange(opt.bps)}
+            aria-pressed={slippageBps === opt.bps}
+            className={`px-3 py-1.5 text-[13px] tabular-nums transition ${
+              slippageBps === opt.bps
+                ? "bg-amber/10 text-amber"
+                : "text-smoke hover:text-paper"
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
       </div>
     </div>
   );

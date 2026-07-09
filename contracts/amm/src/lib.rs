@@ -87,6 +87,7 @@ pub enum Error {
     UnsupportedRoute = 16,
     TradeNotFound = 17,
     InputOutOfBounds = 18,
+    InvalidSyRate = 19,
 }
 
 struct Precompute {
@@ -244,8 +245,11 @@ impl AmmMarket {
         let state = read_state(&env)?;
         require_seeded_result(&state)?;
 
+        let rate = sy_rate_or_panic(&env, &config);
         let comp = precompute_or_panic(&env, &config, &state);
-        Ok(solve_yt_out_for_sy_in(&env, &config, &state, &comp, sy_in))
+        Ok(solve_yt_out_for_sy_in(
+            &env, &config, &state, &comp, sy_in, rate,
+        ))
     }
 
     pub fn quote_yt_for_sy(env: Env, yt_in: i128) -> Result<i128, Error> {
@@ -257,12 +261,17 @@ impl AmmMarket {
         let state = read_state(&env)?;
         require_seeded_result(&state)?;
 
+        let rate = sy_rate_or_panic(&env, &config);
         let comp = precompute_or_panic(&env, &config, &state);
         let sy_cost = exact_pt_out_sy_in_or_panic(&env, &config, &state, &comp, yt_in);
-        if sy_cost >= yt_in {
+        // Recombining `yt_in` face of PT + YT returns floor(yt_in * WAD / rate)
+        // SY shares (the tokenizer's own floor); the seller nets that minus the
+        // curve-side cost of buying back the PT leg.
+        let sy_value = shares_out_for_face_down(&env, yt_in, rate);
+        if sy_cost >= sy_value {
             return Err(Error::InsufficientLiquidity);
         }
-        Ok(yt_in - sy_cost)
+        Ok(sy_value - sy_cost)
     }
 
     pub fn spot_apy(env: Env) -> Result<i128, Error> {
@@ -311,12 +320,38 @@ impl AmmMarket {
         <Self as Market>::swap_yt_for_sy(&env, from, yt_in, min_sy_out)
     }
 
-    pub fn add_liquidity(env: Env, from: Address, pt_in: i128, sy_in: i128) -> i128 {
-        <Self as Market>::add_liquidity(&env, from, pt_in, sy_in)
+    pub fn add_liquidity(
+        env: Env,
+        from: Address,
+        pt_in: i128,
+        sy_in: i128,
+        min_lp_out: i128,
+    ) -> i128 {
+        let lp_out = <Self as Market>::add_liquidity(&env, from, pt_in, sy_in);
+        // Slippage bound enforced here, after the shared-trait implementation,
+        // because the Market trait signature is frozen (contracts/shared/types).
+        // A panic reverts the entire invocation, transfers included, so this is
+        // equivalent to checking before any token moves.
+        if lp_out < min_lp_out {
+            panic_with_error!(&env, Error::SlippageExceeded);
+        }
+        lp_out
     }
 
-    pub fn remove_liquidity(env: Env, from: Address, lp_in: i128) -> (i128, i128) {
-        <Self as Market>::remove_liquidity(&env, from, lp_in)
+    pub fn remove_liquidity(
+        env: Env,
+        from: Address,
+        lp_in: i128,
+        min_pt_out: i128,
+        min_sy_out: i128,
+    ) -> (i128, i128) {
+        let (pt_out, sy_out) = <Self as Market>::remove_liquidity(&env, from, lp_in);
+        // Same pattern as add_liquidity: bound checked after the frozen-trait
+        // call; the panic reverts everything.
+        if pt_out < min_pt_out || sy_out < min_sy_out {
+            panic_with_error!(&env, Error::SlippageExceeded);
+        }
+        (pt_out, sy_out)
     }
 
     pub fn implied_apy(env: Env) -> i128 {
@@ -388,27 +423,56 @@ impl Market for AmmMarket {
         let mut state = read_state_or_panic(env);
         require_seeded(env, &state);
 
+        // The curve prices PT face units; the tokenizer escrows SY shares and
+        // mints face = shares * rate / WAD. Every conversion between the two
+        // unit systems happens here at the flash boundary, using the same rate
+        // source the tokenizer reads (the SY contract's exchange_rate).
+        let rate = sy_rate_or_panic(env, &config);
         let comp = precompute_or_panic(env, &config, &state);
-        let yt_out = solve_yt_out_for_sy_in(env, &config, &state, &comp, sy_in);
+        let yt_out = solve_yt_out_for_sy_in(env, &config, &state, &comp, sy_in, rate);
         if yt_out < min_yt_out {
             panic_with_error!(env, Error::SlippageExceeded);
         }
 
         // The pool keeps the PT the split mints, so the curve moves as if it
-        // bought `yt_out` PT.
-        let (_, observed_ln_rate) =
+        // bought `yt_out` PT; `sy_funded` is the SY the curve pays for that PT.
+        let (sy_funded, observed_ln_rate) =
             apply_exact_pt_in_trade_or_panic(env, &config, &mut state, &comp, yt_out, 0);
 
+        // Shares to split, rounded UP so the tokenizer's floored face mint is
+        // at least `yt_out`, the amount the curve accounted for and the buyer
+        // was quoted. Rounding up costs the pool at most one extra face unit of
+        // shares, and that cost is backed one-for-one by the dust pair it keeps
+        // (see below).
+        let shares_to_split = shares_in_for_face_up(env, yt_out, rate);
+        // The split is funded by the buyer's sy_in plus at most the curve-side
+        // proceeds of the PT leg. The solver guarantees this bound; fail closed
+        // if a future change breaks it, because exceeding it would tap LP
+        // reserves the curve never accounted for.
+        if shares_to_split > checked_add(env, sy_in, sy_funded) {
+            panic_with_error!(env, Error::InsufficientLiquidity);
+        }
+
         // Take the buyer's SY, split pool-funded SY into PT + YT, keep the PT,
-        // and send the YT to the buyer.
+        // and send exactly the quoted YT to the buyer.
         transfer_into_pool(env, &config.sy_token, &from, sy_in);
-        let (_pt_minted, yt_minted) = flash_split(env, &config, yt_out);
-        transfer_out_of_pool(env, &config.yt_token, &from, yt_minted);
+        let (_pt_minted, yt_minted) = flash_split(env, &config, shares_to_split);
+        if yt_minted < yt_out {
+            // Cannot happen while the tokenizer floors against the same rate we
+            // ceiled with; a drifted rate read would under-mint, so fail closed.
+            panic_with_error!(env, Error::InsufficientLiquidity);
+        }
+        transfer_out_of_pool(env, &config.yt_token, &from, yt_out);
+        // Rounding dust: the ceil above can over-mint up to one face unit of
+        // PT and YT beyond `yt_out`. Both stay in the pool: the PT dust enters
+        // the curve reserves on the reconcile below, and the YT dust sits in
+        // pool custody as an equal, recombinable pair with that PT. The trader
+        // never receives the dust, so rounding cannot be farmed against LPs.
         reconcile_reserves(env, &config, &mut state);
         sync_twap(env, &config, &mut state, observed_ln_rate);
         write_state(env, &state);
 
-        yt_minted
+        yt_out
     }
 
     fn swap_yt_for_sy(env: &Env, from: Address, yt_in: i128, min_sy_out: i128) -> i128 {
@@ -421,12 +485,19 @@ impl Market for AmmMarket {
         let mut state = read_state_or_panic(env);
         require_seeded(env, &state);
 
+        // Curve amounts are PT face; the recombine returns SY shares. Convert
+        // at the flash boundary with the tokenizer's own rate source.
+        let rate = sy_rate_or_panic(env, &config);
         let comp = precompute_or_panic(env, &config, &state);
         let sy_cost = exact_pt_out_sy_in_or_panic(env, &config, &state, &comp, yt_in);
-        let sy_out = checked_sub(env, yt_in, sy_cost);
-        if sy_out <= 0 {
+        // SY shares the recombine of `yt_in` face returns, floored exactly like
+        // the tokenizer floors, so the payout budget never exceeds what will
+        // actually arrive.
+        let sy_value = shares_out_for_face_down(env, yt_in, rate);
+        if sy_value <= sy_cost {
             panic_with_error!(env, Error::InsufficientLiquidity);
         }
+        let sy_out = sy_value - sy_cost;
         if sy_out < min_sy_out {
             panic_with_error!(env, Error::SlippageExceeded);
         }
@@ -438,7 +509,15 @@ impl Market for AmmMarket {
         // Take the seller's YT, recombine pool PT + seller YT into SY, pay the
         // seller, and keep the spread.
         transfer_into_pool(env, &config.yt_token, &from, yt_in);
-        let _sy_from_recombine = flash_recombine(env, &config, yt_in);
+        let sy_from_recombine = flash_recombine(env, &config, yt_in);
+        // The tokenizer pays floor(yt_in * WAD / rate) shares, pro-rata capped
+        // under an escrow shortfall. At a constant rate the cap never binds
+        // (split floors face against the same rate, so escrow always covers).
+        // If less than the budget arrives, the escrow is genuinely short: fail
+        // closed and revert the swap rather than pay the seller from LP funds.
+        if sy_from_recombine < sy_value {
+            panic_with_error!(env, Error::InsufficientLiquidity);
+        }
         transfer_out_of_pool(env, &config.sy_token, &from, sy_out);
         reconcile_reserves(env, &config, &mut state);
         sync_twap(env, &config, &mut state, observed_ln_rate);
@@ -926,24 +1005,34 @@ fn try_exact_pt_in_sy_out(
     Some(sy_out)
 }
 
-/// Solves for the YT a buyer receives for `sy_in` SY. The pool mints `yt_out`
-/// PT and sells it to itself; the buyer covers the difference between `yt_out`
-/// and that PT sale. `yt_out - sell_pt(yt_out)` is monotonic in `yt_out`, so we
-/// binary search for the largest `yt_out` the buyer can afford.
+/// Solves for the YT face a buyer receives for `sy_in` SY shares. The pool
+/// splits ceil(yt_out * WAD / rate) shares to mint `yt_out` face of PT + YT
+/// and sells the PT to itself for `sy_paid` shares; the buyer covers the
+/// difference. We binary search for the largest affordable `yt_out`; `best` is
+/// only ever set on a candidate whose cost fits inside `sy_in`, so even if the
+/// cost curve is locally non-monotone the result can only be suboptimal for
+/// the buyer, never unsafe for the pool.
 fn solve_yt_out_for_sy_in(
     env: &Env,
     config: &Config,
     state: &State,
     comp: &Precompute,
     sy_in: i128,
+    rate: i128,
 ) -> i128 {
     let mut low = 1;
-    let mut high = checked_add(env, sy_in, state.total_sy);
+    // The largest face any split could mint from the buyer's SY plus the whole
+    // SY reserve, converted from shares to face at the rate.
+    let max_shares = checked_add(env, sy_in, state.total_sy);
+    let mut high = mul_div_down_or_panic(env, max_shares, rate, WAD);
     let mut best = 0;
     while low <= high {
         let mid = low + ((high - low) / 2);
+        let shares_needed = shares_in_for_face_up(env, mid, rate);
         match try_exact_pt_in_sy_out(env, config, state, comp, mid) {
-            Some(sy_paid) if mid > sy_paid && (mid - sy_paid) <= sy_in => {
+            Some(sy_paid)
+                if shares_needed > sy_paid && (shares_needed - sy_paid) <= sy_in =>
+            {
                 best = mid;
                 low = mid + 1;
             }
@@ -958,8 +1047,39 @@ fn solve_yt_out_for_sy_in(
     best
 }
 
+/// Reads the SY exchange rate (asset per share, WAD scaled) from the SY token,
+/// the same `exchange_rate` entrypoint the tokenizer prices split and recombine
+/// with, so the AMM's unit conversions cannot drift from what the tokenizer
+/// actually mints and burns.
+fn sy_rate_or_panic(env: &Env, config: &Config) -> i128 {
+    let args: Vec<Val> = vec![env];
+    let rate: i128 =
+        env.invoke_contract(&config.sy_token, &Symbol::new(env, "exchange_rate"), args);
+    if rate <= 0 {
+        panic_with_error!(env, Error::InvalidSyRate);
+    }
+    rate
+}
+
+/// SY shares that must be split so the tokenizer's floored face mint covers
+/// `face`: ceil(face * WAD / rate). Rounding up is the safe direction for the
+/// pool: the split can over-mint face dust (which the pool keeps) but can
+/// never mint less than the curve accounted for.
+fn shares_in_for_face_up(env: &Env, face: i128, rate: i128) -> i128 {
+    mul_div_up_or_panic(env, face, WAD, rate)
+}
+
+/// SY shares a recombine of `face` PT + YT returns: floor(face * WAD / rate),
+/// mirroring the tokenizer's own floor, so the pool never budgets more SY out
+/// than the recombine actually delivers.
+fn shares_out_for_face_down(env: &Env, face: i128, rate: i128) -> i128 {
+    mul_div_down_or_panic(env, face, WAD, rate)
+}
+
 /// Calls `tokenizer.split(amm, amount)`, authorizing the exact tokenizer call
-/// and the exact SY pull it performs from the pool.
+/// and the exact SY pull it performs from the pool. `amount` is denominated in
+/// SY shares (what split escrows), not PT face (what split mints); callers
+/// convert curve face amounts with shares_in_for_face_up first.
 fn flash_split(env: &Env, config: &Config, amount: i128) -> (i128, i128) {
     let amm = env.current_contract_address();
     let split_args: Vec<Val> =
@@ -994,6 +1114,8 @@ fn flash_split(env: &Env, config: &Config, amount: i128) -> (i128, i128) {
 
 /// Calls `tokenizer.recombine(amm, amount, amount)`, authorizing the call and
 /// the PT and YT burns it performs on the pool's balances, and returns SY out.
+/// `amount` is PT face (what recombine burns); the return value is SY shares,
+/// floor(amount * WAD / rate) when the escrow is solvent.
 fn flash_recombine(env: &Env, config: &Config, amount: i128) -> i128 {
     let amm = env.current_contract_address();
     let recombine_args: Vec<Val> = soroban_sdk::vec![
@@ -1376,6 +1498,7 @@ extern crate std;
 mod test {
     use super::*;
     use proptest::prelude::*;
+    use sidereal_sy_wrapper::{SyWrapper, SyWrapperClient};
     use soroban_sdk::testutils::{Address as _, Deployer, EnvTestConfig, Ledger};
     use std::panic::{catch_unwind, AssertUnwindSafe};
 
@@ -1392,6 +1515,7 @@ mod test {
         client: AmmMarketClient<'static>,
         contract_id: Address,
         admin: Address,
+        underlying: Address,
         pt_token: Address,
         sy_token: Address,
         yt_token: Address,
@@ -1412,9 +1536,16 @@ mod test {
         let pt_token = env
             .register_stellar_asset_contract_v2(admin.clone())
             .address();
-        let sy_token = env
+        // A real SY wrapper in idle mock-custody mode (no Blend pool), so the
+        // YT quote paths can read exchange_rate the same way the tokenizer
+        // does. All unit tests run at the default rate of 1.0, where SY shares
+        // and asset units coincide; the non-par flash routes are exercised in
+        // tests/integration.
+        let underlying = env
             .register_stellar_asset_contract_v2(admin.clone())
             .address();
+        let sy_token = env.register(SyWrapper, ());
+        SyWrapperClient::new(&env, &sy_token).initialize(&admin, &underlying);
         // A placeholder YT token; the unit fixture uses a stub tokenizer, so the
         // YT flash routes are exercised in tests/integration instead.
         let yt_token = env
@@ -1424,13 +1555,15 @@ mod test {
         let bob = Address::generate(&env);
 
         token::StellarAssetClient::new(&env, &pt_token).mint(&admin, &INITIAL_TOKEN_BALANCE);
-        token::StellarAssetClient::new(&env, &sy_token).mint(&admin, &INITIAL_TOKEN_BALANCE);
+        token::StellarAssetClient::new(&env, &underlying).mint(&admin, &INITIAL_TOKEN_BALANCE);
+        SyWrapperClient::new(&env, &sy_token).deposit(&admin, &INITIAL_TOKEN_BALANCE);
 
         Fixture {
             env,
             client,
             contract_id,
             admin,
+            underlying,
             pt_token,
             sy_token,
             yt_token,
@@ -1459,16 +1592,21 @@ mod test {
         token::StellarAssetClient::new(&fixture.env, &fixture.pt_token).mint(holder, &amount);
     }
 
+    /// Mints `amount` SY shares to `holder` by depositing underlying at the
+    /// wrapper's default 1.0 rate (1 underlying deposits to 1 share).
     fn mint_sy(fixture: &Fixture, holder: &Address, amount: i128) {
-        token::StellarAssetClient::new(&fixture.env, &fixture.sy_token).mint(holder, &amount);
+        token::StellarAssetClient::new(&fixture.env, &fixture.underlying).mint(holder, &amount);
+        SyWrapperClient::new(&fixture.env, &fixture.sy_token).deposit(holder, &amount);
     }
 
     fn burn_pt(fixture: &Fixture, holder: &Address, amount: i128) {
         token::TokenClient::new(&fixture.env, &fixture.pt_token).burn(holder, &amount);
     }
 
+    /// Burns `amount` SY shares from `holder` by redeeming them for underlying
+    /// at the wrapper's default 1.0 rate.
     fn burn_sy(fixture: &Fixture, holder: &Address, amount: i128) {
-        token::TokenClient::new(&fixture.env, &fixture.sy_token).burn(holder, &amount);
+        SyWrapperClient::new(&fixture.env, &fixture.sy_token).redeem(holder, &amount);
     }
 
     fn initialize(fixture: &Fixture) {
@@ -1552,7 +1690,7 @@ mod test {
 
         fixture
             .client
-            .add_liquidity(&fixture.admin, &(MAX_RESERVE_UNITS + 1), &10_000);
+            .add_liquidity(&fixture.admin, &(MAX_RESERVE_UNITS + 1), &10_000, &0);
     }
 
     #[test]
@@ -1580,7 +1718,7 @@ mod test {
 
         fixture
             .client
-            .add_liquidity(&fixture.admin, &10_000, &10_000);
+            .add_liquidity(&fixture.admin, &10_000, &10_000, &0);
 
         assert!(
             fixture
@@ -1600,7 +1738,7 @@ mod test {
 
         let lp_out = fixture
             .client
-            .add_liquidity(&fixture.admin, &10_000, &10_000);
+            .add_liquidity(&fixture.admin, &10_000, &10_000, &0);
         let state = fixture.client.state();
 
         assert_eq!(lp_out, 9_000);
@@ -1631,9 +1769,9 @@ mod test {
         let admin_sy_before = sy_balance(&fixture, &fixture.admin);
         fixture
             .client
-            .add_liquidity(&fixture.admin, &10_000, &10_000);
+            .add_liquidity(&fixture.admin, &10_000, &10_000, &0);
 
-        let (pt_out, sy_out) = fixture.client.remove_liquidity(&fixture.admin, &9_000);
+        let (pt_out, sy_out) = fixture.client.remove_liquidity(&fixture.admin, &9_000, &0, &0);
         let state = fixture.client.state();
 
         assert_eq!((pt_out, sy_out), (9_000, 9_000));
@@ -1661,10 +1799,10 @@ mod test {
         let admin_sy_before = sy_balance(&fixture, &fixture.admin);
         fixture
             .client
-            .add_liquidity(&fixture.admin, &10_000, &10_000);
+            .add_liquidity(&fixture.admin, &10_000, &10_000, &0);
 
         fixture.env.ledger().set_timestamp(MATURITY);
-        let (pt_out, sy_out) = fixture.client.remove_liquidity(&fixture.admin, &9_000);
+        let (pt_out, sy_out) = fixture.client.remove_liquidity(&fixture.admin, &9_000, &0, &0);
         let state = fixture.client.state();
 
         assert_eq!((pt_out, sy_out), (9_000, 9_000));
@@ -1685,16 +1823,140 @@ mod test {
     }
 
     #[test]
+    #[should_panic(expected = "Error(Contract, #11)")]
+    fn add_liquidity_reverts_when_min_lp_out_not_met() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+
+        // The initial seed mints sqrt(10_000 * 10_000) - MINIMUM_LIQUIDITY
+        // = 9_000 LP; asking for one more must revert with SlippageExceeded.
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &10_000, &10_000, &9_001);
+    }
+
+    #[test]
+    fn add_liquidity_passes_exact_min_lp_out() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+
+        let lp_out = fixture
+            .client
+            .add_liquidity(&fixture.admin, &10_000, &10_000, &9_000);
+        assert_eq!(lp_out, 9_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #11)")]
+    fn add_liquidity_min_lp_out_catches_ratio_move_between_quote_and_execution() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
+        mint_pt(&fixture, &fixture.bob, 1_000);
+        mint_sy(&fixture, &fixture.bob, 1_000);
+
+        // Quoted off the seeded 20_000/20_000 pool: 1_000 PT + 1_000 SY mints
+        // 1_000 LP. Someone else moves the ratio before bob executes.
+        let stale_quote = 1_000;
+        mint_sy(&fixture, &fixture.admin, 2_000);
+        fixture.client.swap_sy_for_pt(&fixture.admin, &2_000, &1);
+
+        // With total_sy grown past 20_000, lp_by_sy = 1_000 * total_lp /
+        // total_sy < 1_000, so the stale min must revert.
+        fixture
+            .client
+            .add_liquidity(&fixture.bob, &1_000, &1_000, &stale_quote);
+    }
+
+    #[test]
+    fn add_liquidity_generous_min_survives_ratio_move() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
+        mint_pt(&fixture, &fixture.bob, 1_000);
+        mint_sy(&fixture, &fixture.bob, 1_000);
+        mint_sy(&fixture, &fixture.admin, 2_000);
+        fixture.client.swap_sy_for_pt(&fixture.admin, &2_000, &1);
+
+        let lp_out = fixture
+            .client
+            .add_liquidity(&fixture.bob, &1_000, &1_000, &900);
+        assert!(lp_out >= 900 && lp_out < 1_000);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #11)")]
+    fn remove_liquidity_reverts_when_min_sy_out_not_met() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
+
+        // Quoted pro-rata for 1_000 LP: 1_000 PT and 1_000 SY. A PT seller
+        // drains SY from the pool before the removal executes, so the stale
+        // min_sy_out must revert.
+        let stale_sy_quote = 1_000;
+        mint_pt(&fixture, &fixture.admin, 2_000);
+        fixture.client.swap_pt_for_sy(&fixture.admin, &2_000, &1);
+
+        fixture
+            .client
+            .remove_liquidity(&fixture.admin, &1_000, &0, &stale_sy_quote);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #11)")]
+    fn remove_liquidity_reverts_when_min_pt_out_not_met() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
+
+        // A PT buyer drains PT from the pool, so pt_out per LP falls below the
+        // stale pro-rata quote of 1_000.
+        let stale_pt_quote = 1_000;
+        mint_sy(&fixture, &fixture.admin, 2_000);
+        fixture.client.swap_sy_for_pt(&fixture.admin, &2_000, &1);
+
+        fixture
+            .client
+            .remove_liquidity(&fixture.admin, &1_000, &stale_pt_quote, &0);
+    }
+
+    #[test]
+    fn remove_liquidity_generous_bounds_pass_after_ratio_move() {
+        let fixture = fixture(NOW);
+        initialize(&fixture);
+        fixture
+            .client
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
+        mint_pt(&fixture, &fixture.admin, 2_000);
+        fixture.client.swap_pt_for_sy(&fixture.admin, &2_000, &1);
+
+        let (pt_out, sy_out) = fixture
+            .client
+            .remove_liquidity(&fixture.admin, &1_000, &1_000, &900);
+        assert!(pt_out >= 1_000, "PT per LP grew after the PT sell");
+        assert!(sy_out >= 900 && sy_out < 1_000, "SY per LP shrank");
+    }
+
+    #[test]
     #[should_panic(expected = "Error(Contract, #10)")]
     fn add_liquidity_rejects_after_maturity() {
         let fixture = fixture(NOW);
         initialize(&fixture);
         fixture
             .client
-            .add_liquidity(&fixture.admin, &10_000, &10_000);
+            .add_liquidity(&fixture.admin, &10_000, &10_000, &0);
 
         fixture.env.ledger().set_timestamp(MATURITY);
-        fixture.client.add_liquidity(&fixture.admin, &1_000, &1_000);
+        fixture.client.add_liquidity(&fixture.admin, &1_000, &1_000, &0);
     }
 
     #[test]
@@ -1704,7 +1966,7 @@ mod test {
         initialize(&fixture);
         fixture
             .client
-            .add_liquidity(&fixture.admin, &20_000, &20_000);
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
         mint_pt(&fixture, &fixture.admin, 1_000);
 
         fixture.env.ledger().set_timestamp(MATURITY);
@@ -1718,7 +1980,7 @@ mod test {
         initialize(&fixture);
         fixture
             .client
-            .add_liquidity(&fixture.admin, &20_000, &20_000);
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
         mint_sy(&fixture, &fixture.admin, 1_000);
 
         fixture.env.ledger().set_timestamp(MATURITY);
@@ -1732,7 +1994,7 @@ mod test {
         initialize(&fixture);
         fixture
             .client
-            .add_liquidity(&fixture.admin, &20_000, &20_000);
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
         mint_sy(&fixture, &fixture.admin, 1_000);
 
         fixture.env.ledger().set_timestamp(MATURITY);
@@ -1746,7 +2008,7 @@ mod test {
         initialize(&fixture);
         fixture
             .client
-            .add_liquidity(&fixture.admin, &20_000, &20_000);
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
 
         fixture.env.ledger().set_timestamp(MATURITY);
         fixture.client.swap_yt_for_sy(&fixture.admin, &1_000, &1);
@@ -1759,9 +2021,9 @@ mod test {
         initialize(&fixture);
         fixture
             .client
-            .add_liquidity(&fixture.admin, &10_000, &10_000);
+            .add_liquidity(&fixture.admin, &10_000, &10_000, &0);
 
-        fixture.client.remove_liquidity(&fixture.bob, &1_000);
+        fixture.client.remove_liquidity(&fixture.bob, &1_000, &0, &0);
     }
 
     #[test]
@@ -1770,7 +2032,7 @@ mod test {
         initialize(&fixture);
         fixture
             .client
-            .add_liquidity(&fixture.admin, &20_000, &20_000);
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
         mint_pt(&fixture, &fixture.admin, 1_000);
         let admin_pt_before = pt_balance(&fixture, &fixture.admin);
         let admin_sy_before = sy_balance(&fixture, &fixture.admin);
@@ -1802,7 +2064,7 @@ mod test {
         initialize(&fixture);
         fixture
             .client
-            .add_liquidity(&fixture.admin, &20_000, &20_000);
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
         mint_sy(&fixture, &fixture.admin, 1_000);
         let admin_pt_before = pt_balance(&fixture, &fixture.admin);
         let admin_sy_before = sy_balance(&fixture, &fixture.admin);
@@ -1834,7 +2096,7 @@ mod test {
         initialize(&pt_fixture);
         pt_fixture
             .client
-            .add_liquidity(&pt_fixture.admin, &20_000, &20_000);
+            .add_liquidity(&pt_fixture.admin, &20_000, &20_000, &0);
         let (sy_in, required_sy) = sy_in_with_rounding_gap(&pt_fixture);
         assert!(required_sy < sy_in);
 
@@ -1852,7 +2114,7 @@ mod test {
         initialize(&fixture);
         fixture
             .client
-            .add_liquidity(&fixture.admin, &20_000, &20_000);
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
 
         fixture.env.ledger().set_timestamp(NOW + 60);
         fixture.client.swap_sy_for_pt(&fixture.admin, &1_000, &1);
@@ -1881,7 +2143,7 @@ mod test {
         initialize(&fixture);
         fixture
             .client
-            .add_liquidity(&fixture.admin, &20_000, &20_000);
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
 
         // Buying YT is leveraged: each SY buys more than its face in YT,
         // because the freshly minted PT is sold to fund the position.
@@ -1895,7 +2157,7 @@ mod test {
         initialize(&fixture);
         fixture
             .client
-            .add_liquidity(&fixture.admin, &20_000, &20_000);
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
 
         // Selling YT yields less SY than its face: PT must be repurchased to
         // complete the recombine.
@@ -1909,7 +2171,7 @@ mod test {
         initialize(&fixture);
         fixture
             .client
-            .add_liquidity(&fixture.admin, &20_000, &20_000);
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
         fixture.env.ledger().set_timestamp(NOW + 60);
         fixture.client.swap_sy_for_pt(&fixture.admin, &1_000, &1);
 
@@ -1930,7 +2192,7 @@ mod test {
         initialize(&fixture);
         fixture
             .client
-            .add_liquidity(&fixture.admin, &20_000, &20_000);
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
 
         assert!(fixture.client.twap_warming_up());
 
@@ -1950,7 +2212,7 @@ mod test {
         initialize(&first_fixture);
         first_fixture
             .client
-            .add_liquidity(&first_fixture.admin, &20_000, &20_000);
+            .add_liquidity(&first_fixture.admin, &20_000, &20_000, &0);
 
         let before = first_fixture.client.state();
         let quoted_sy_out = first_fixture.client.quote_pt_for_sy(&1_000);
@@ -1969,7 +2231,7 @@ mod test {
         initialize(&second_fixture);
         second_fixture
             .client
-            .add_liquidity(&second_fixture.admin, &20_000, &20_000);
+            .add_liquidity(&second_fixture.admin, &20_000, &20_000, &0);
         assert_eq!(
             quoted_pt_out,
             second_fixture
@@ -1984,7 +2246,7 @@ mod test {
         initialize(&fixture);
         fixture
             .client
-            .add_liquidity(&fixture.admin, &20_000, &20_000);
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
 
         let before = fixture.client.state();
         assert!(fixture.client.quote_sy_for_yt(&1_000) > 0);
@@ -2037,7 +2299,7 @@ mod test {
         initialize(&fixture);
         fixture
             .client
-            .add_liquidity(&fixture.admin, &20_000, &20_000);
+            .add_liquidity(&fixture.admin, &20_000, &20_000, &0);
         fixture.env.ledger().set_timestamp(MATURITY);
 
         assert_eq!(
@@ -2196,7 +2458,7 @@ mod test {
             burn_sy(&fixture, &fixture.admin, INITIAL_TOKEN_BALANCE);
             mint_pt(&fixture, &fixture.admin, 2_000_000);
             mint_sy(&fixture, &fixture.admin, 2_000_000);
-            fixture.client.add_liquidity(&fixture.admin, &1_000_000, &1_000_000);
+            fixture.client.add_liquidity(&fixture.admin, &1_000_000, &1_000_000, &0);
 
             let mut model = PositionModel::new(1_000_000);
             let mut wallet_pt = 1_000_000;

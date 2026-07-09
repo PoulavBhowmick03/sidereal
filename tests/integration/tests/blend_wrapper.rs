@@ -12,7 +12,8 @@ use sidereal_tokenizer::{Tokenizer, TokenizerClient};
 use sidereal_yt_token::{YtToken, YtTokenClient};
 use soroban_sdk::{
     auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
-    contract, contractimpl, contracttype,
+    contract, contracterror, contractimpl, contracttype,
+    panic_with_error,
     testutils::{Address as _, Ledger as _},
     token, vec, Address, Env, IntoVal, Map, Symbol, Vec,
 };
@@ -36,6 +37,19 @@ enum DataKey {
     /// Reserve index the pool reports for the underlying, 0 unless a test
     /// simulates a pool reconfiguration.
     ReserveIndex,
+    /// Reserve list the pool reports, defaulting to `[underlying]`. A test that
+    /// simulates a reindex sets this so the underlying sits at a new position.
+    ReserveList,
+    /// When set, `submit` fails a withdraw request as a transient Blend hiccup
+    /// would, so the wrapper's tolerated-failure path can be exercised.
+    FailWithdraw,
+}
+
+#[contracterror]
+#[derive(Copy, Clone)]
+#[repr(u32)]
+enum MockError {
+    WithdrawUnavailable = 1,
 }
 
 #[contract]
@@ -60,14 +74,34 @@ impl MockBlendPool {
     }
 
     /// Simulates the pool moving the underlying to a different reserve index,
-    /// as a reconfiguration over the market's life could.
+    /// as a reconfiguration over the market's life could. This drives both the
+    /// index reported by `get_reserve` and the key `get_positions` files the
+    /// supply under, matching how a real pool keys positions by reserve index.
     pub fn set_reserve_index(env: Env, index: u32) {
         env.storage().instance().set(&DataKey::ReserveIndex, &index);
     }
 
+    /// Overrides the reserve list the pool advertises so a test can place the
+    /// underlying at an arbitrary position (or omit it entirely).
+    pub fn set_reserve_list(env: Env, list: Vec<Address>) {
+        env.storage().instance().set(&DataKey::ReserveList, &list);
+    }
+
+    /// Toggles a transient withdraw failure, so the wrapper's tolerated-failure
+    /// path (and its explicit error) can be exercised.
+    pub fn set_should_fail_withdraw(env: Env, fail: bool) {
+        env.storage().instance().set(&DataKey::FailWithdraw, &fail);
+    }
+
     pub fn get_reserve_list(env: Env) -> Vec<Address> {
-        let config: MockConfig = env.storage().instance().get(&DataKey::Config).unwrap();
-        vec![&env, config.underlying]
+        match env.storage().instance().get(&DataKey::ReserveList) {
+            Some(list) => list,
+            None => {
+                let config: MockConfig =
+                    env.storage().instance().get(&DataKey::Config).unwrap();
+                vec![&env, config.underlying]
+            }
+        }
     }
 
     pub fn get_reserve(env: Env, asset: Address) -> Reserve {
@@ -77,7 +111,7 @@ impl MockBlendPool {
     }
 
     pub fn get_positions(env: Env, address: Address) -> Positions {
-        positions(&env, supply_balance(&env, &address))
+        positions(&env, reserve_index(&env), supply_balance(&env, &address))
     }
 
     pub fn submit(
@@ -109,6 +143,16 @@ impl MockBlendPool {
                 );
                 supply += b_tokens_from_assets(request.amount, config.b_rate).unwrap();
             } else if request.request_type == REQUEST_WITHDRAW {
+                if env
+                    .storage()
+                    .instance()
+                    .get(&DataKey::FailWithdraw)
+                    .unwrap_or(false)
+                {
+                    // A recoverable contract error, so the wrapper's
+                    // try_submit sees Err and takes its tolerated-failure path.
+                    panic_with_error!(&env, MockError::WithdrawUnavailable);
+                }
                 let requested_b = request
                     .amount
                     .checked_mul(BLEND_SCALAR_12)
@@ -140,16 +184,19 @@ impl MockBlendPool {
         env.storage()
             .persistent()
             .set(&DataKey::Supply(from), &supply);
-        positions(&env, supply)
+        positions(&env, reserve_index(&env), supply)
     }
 }
 
-fn reserve(env: &Env, config: MockConfig) -> Reserve {
-    let index: u32 = env
-        .storage()
+fn reserve_index(env: &Env) -> u32 {
+    env.storage()
         .instance()
         .get(&DataKey::ReserveIndex)
-        .unwrap_or(0);
+        .unwrap_or(0)
+}
+
+fn reserve(env: &Env, config: MockConfig) -> Reserve {
+    let index: u32 = reserve_index(env);
     Reserve {
         asset: config.underlying,
         config: ReserveConfig {
@@ -180,10 +227,10 @@ fn reserve(env: &Env, config: MockConfig) -> Reserve {
     }
 }
 
-fn positions(env: &Env, supply: i128) -> Positions {
+fn positions(env: &Env, index: u32, supply: i128) -> Positions {
     let mut supplies = Map::new(env);
     if supply > 0 {
-        supplies.set(0, supply);
+        supplies.set(index, supply);
     }
     Positions {
         collateral: Map::new(env),
@@ -327,4 +374,158 @@ fn exchange_rate_traps_when_the_reserve_index_moves() {
 
     pool_client.set_reserve_index(&1);
     sy_client.exchange_rate();
+}
+
+/// A Blend-backed wrapper with a single depositor, ready for reindex/failure
+/// scenarios. Returns the env plus the clients and actors the tests need.
+struct BlendFixture {
+    env: Env,
+    pool_client: MockBlendPoolClient<'static>,
+    sy_client: SyWrapperClient<'static>,
+    admin: Address,
+    alice: Address,
+    underlying: Address,
+}
+
+fn blend_fixture() -> BlendFixture {
+    let env = Env::default();
+    env.mock_all_auths();
+    env.ledger().set_timestamp(1);
+
+    let admin = Address::generate(&env);
+    let alice = Address::generate(&env);
+    let underlying = env
+        .register_stellar_asset_contract_v2(admin.clone())
+        .address();
+    let pool = env.register(MockBlendPool, ());
+    let sy = env.register(SyWrapper, ());
+
+    let pool_client = MockBlendPoolClient::new(&env, &pool);
+    pool_client.initialize(&underlying);
+    let sy_client = SyWrapperClient::new(&env, &sy);
+    sy_client.initialize_blend(&admin, &underlying, &pool);
+
+    token::StellarAssetClient::new(&env, &underlying).mint(&alice, &(100 * UNIT));
+    sy_client.deposit(&alice, &(100 * UNIT));
+    assert_eq!(sy_client.exchange_rate(), WAD);
+
+    BlendFixture {
+        env,
+        pool_client,
+        sy_client,
+        admin,
+        alice,
+        underlying,
+    }
+}
+
+/// After a Blend reindex trips the fail-closed guard, an admin migration
+/// re-syncs the stored reserve index and rate reads recover.
+#[test]
+fn migrate_reserve_index_recovers_after_a_reindex() {
+    let f = blend_fixture();
+
+    // The pool moves the underlying from slot 0 to slot 1. The rate path now
+    // traps because the stored index no longer matches the pool's.
+    let other = Address::generate(&f.env);
+    f.pool_client
+        .set_reserve_list(&vec![&f.env, other, f.underlying.clone()]);
+    f.pool_client.set_reserve_index(&1);
+    assert_eq!(
+        f.sy_client.try_exchange_rate(),
+        Err(Ok(SyError::InvalidBlendReserve.into()))
+    );
+
+    // Admin migrates; the wrapper re-derives index 1 from the pool.
+    assert_eq!(f.sy_client.migrate_reserve_index(&f.admin), 1);
+    assert_eq!(f.sy_client.config().reserve_index, 1);
+
+    // Rate reads (and therefore every deposit/redeem path) work again.
+    assert_eq!(f.sy_client.exchange_rate(), WAD);
+}
+
+/// The migration is admin-gated: a non-admin caller is rejected without
+/// touching the stored index.
+#[test]
+fn migrate_reserve_index_rejects_non_admin() {
+    let f = blend_fixture();
+
+    let other = Address::generate(&f.env);
+    f.pool_client
+        .set_reserve_list(&vec![&f.env, other, f.underlying.clone()]);
+    f.pool_client.set_reserve_index(&1);
+
+    assert!(matches!(
+        f.sy_client.try_migrate_reserve_index(&f.alice),
+        Err(Ok(SyError::NotInitialized))
+    ));
+    // Still bricked: the rejected call left the stored index untouched.
+    assert_eq!(f.sy_client.config().reserve_index, 0);
+}
+
+/// The migration only accepts an index whose asset is `config.underlying`. If
+/// the pool's list no longer contains the underlying, the migration is refused
+/// rather than pointing the rate at some other asset.
+#[test]
+fn migrate_reserve_index_rejects_when_underlying_absent() {
+    let f = blend_fixture();
+
+    let other = Address::generate(&f.env);
+    f.pool_client.set_reserve_list(&vec![&f.env, other]);
+
+    assert!(matches!(
+        f.sy_client.try_migrate_reserve_index(&f.admin),
+        Err(Ok(SyError::InvalidBlendReserve))
+    ));
+    assert_eq!(f.sy_client.config().reserve_index, 0);
+}
+
+/// The list position and the pool's authoritative `get_reserve` index must
+/// agree. If the list claims the underlying sits at a slot the reserve record
+/// disagrees with, the migration is refused (the asset-match cross-check).
+#[test]
+fn migrate_reserve_index_rejects_on_index_mismatch() {
+    let f = blend_fixture();
+
+    // List places the underlying at slot 1, but the reserve record still
+    // reports index 0. The cross-check must reject the migration.
+    let other = Address::generate(&f.env);
+    f.pool_client
+        .set_reserve_list(&vec![&f.env, other, f.underlying.clone()]);
+    // reserve_index left at 0.
+
+    assert!(matches!(
+        f.sy_client.try_migrate_reserve_index(&f.admin),
+        Err(Ok(SyError::InvalidBlendReserve))
+    ));
+    assert_eq!(f.sy_client.config().reserve_index, 0);
+}
+
+/// A tolerated Blend withdrawal failure must surface as an explicit typed error
+/// (BlendWithdrawalFailed, #11), not a silent zero, and must leave the holder's
+/// shares untouched so the failed redeem can be retried.
+#[test]
+fn redeem_surfaces_tolerated_withdrawal_failure() {
+    let f = blend_fixture();
+
+    let shares_before = f.sy_client.balance(&f.alice);
+    let supply_before = f.sy_client.total_supply();
+    assert!(shares_before > 0);
+
+    f.pool_client.set_should_fail_withdraw(&true);
+
+    // `redeem` returns a bare i128, so its `try_` variant surfaces the trap as
+    // a raw soroban error carrying the contract error code, not the typed enum.
+    assert_eq!(
+        f.sy_client.try_redeem(&f.alice, &(40 * UNIT)),
+        Err(Ok(SyError::BlendWithdrawalFailed.into()))
+    );
+
+    // The failed withdraw burned nothing: funds are intact, not bricked.
+    assert_eq!(f.sy_client.balance(&f.alice), shares_before);
+    assert_eq!(f.sy_client.total_supply(), supply_before);
+
+    // Once Blend recovers, the same redeem succeeds.
+    f.pool_client.set_should_fail_withdraw(&false);
+    assert!(f.sy_client.redeem(&f.alice, &(40 * UNIT)) > 0);
 }

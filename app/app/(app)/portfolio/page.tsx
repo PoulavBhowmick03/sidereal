@@ -244,7 +244,7 @@ export default function PortfolioPage() {
             </div>
             <div className="flex justify-between">
               <span className="label-data">At maturity</span>
-              <span className="text-sm tabular-nums text-amber">1 PT = 1.000 SY</span>
+              <span className="text-sm tabular-nums text-amber">1 PT = 1.000 underlying, paid in SY</span>
             </div>
           </div>
         </aside>

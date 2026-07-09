@@ -6,7 +6,7 @@
 # Tier 1 real-settlement core).
 #
 # The AMM liquidity step is Tier 2 (the AMM/YT flash route is experimental and
-# its nested authorization is not yet proven on testnet, see docs/REMAINING.md).
+# its nested authorization is not yet proven on testnet, see docs/ROADMAP.md).
 # It is OFF by default so a Tier 1 demo never depends on it. Opt in with
 # SEED_AMM=1 once the AMM auth is verified on testnet.
 #

@@ -69,4 +69,4 @@ Status: ☐ open · ◐ in progress · ☑ fixed (with test)
   "Gate to testnet" table is all ☑ and M4/L1/L2 are either ☑ or have an
   accept-risk note.
 - Settlement-era cautions (checks-effects-interactions, reentrancy) are tracked in
-  [`../REMAINING.md`](../REMAINING.md), not here.
+  [`../ROADMAP.md`](../ROADMAP.md), not here.

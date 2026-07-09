@@ -48,9 +48,6 @@ enum DataKey {
     /// SY shares accrued to the holder but not yet claimed, carried across
     /// transfers. Persistent, holder-keyed.
     AccruedYield(Address),
-    /// SY rate frozen at maturity. After maturity YT stops accruing new yield;
-    /// settlement uses this snapshot so post-maturity rate moves add nothing.
-    MaturityRate,
 }
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
@@ -67,6 +64,11 @@ pub enum Error {
     InsufficientAllowance = 8,
     MathOverflow = 9,
     InvalidExpiration = 10,
+    /// `consume` was asked to remove more than the holder's banked balance. This
+    /// is a tokenizer-side invariant violation (it only consumes what a prior
+    /// `settle` reported as banked), surfaced as an error rather than a silent
+    /// underflow.
+    ConsumeExceedsBanked = 11,
 }
 
 #[contract]
@@ -130,27 +132,60 @@ impl YtToken {
     /// the rate from the SY contract itself, so no caller can supply a fake one.
     pub fn preview_claim_yield(env: Env, holder: Address) -> Result<i128, Error> {
         let config = Self::read_config(&env)?;
-        let rate = Self::effective_rate(&env, &config);
+        let rate = Self::preview_rate(&env, &config);
         let banked = Self::read_accrued(&env, &holder);
         let pending = Self::pending_yield(&env, &holder, rate)?;
         banked.checked_add(pending).ok_or(Error::MathOverflow)
     }
 
-    /// Settles `holder` to the current SY rate, then consumes (zeroes) and
-    /// returns their banked yield in SY shares. Restricted to the tokenizer,
-    /// which calls this from its own `claim_yield` and then pays the returned SY
-    /// out of escrow. This moves no tokens itself; it is the bookkeeping half of
-    /// a claim, paired with the tokenizer's escrow transfer.
-    pub fn settle_and_consume(env: Env, holder: Address) -> Result<i128, Error> {
+    /// Settles `holder` at the `rate` supplied by the tokenizer and returns their
+    /// current banked total in SY shares WITHOUT zeroing it. Restricted to the
+    /// tokenizer. Moves no tokens; it is the first half of a claim.
+    ///
+    /// This is deliberately split from `consume` (they used to be one
+    /// `settle_and_consume` that zeroed the whole ledger). All-or-nothing consume
+    /// could not express a partial payment, but the tokenizer now caps a claim to
+    /// the escrow surplus over the senior PT reservation. So it `settle`s to learn
+    /// the owed total, decides how much the surplus can cover, and `consume`s only
+    /// that. Whatever it does not consume stays banked and is claimable later.
+    ///
+    /// The rate is passed in, not read here, on purpose. The tokenizer is already
+    /// on the call stack when it invokes this (claim_yield -> here), so yt cannot
+    /// call back into the tokenizer to fetch the canonical maturity rate: Soroban
+    /// prohibits re-entering a contract already on the stack. The tokenizer instead
+    /// computes its single canonical rate (live before maturity, its frozen
+    /// snapshot after) and hands it down. Trusting it is safe because this
+    /// entrypoint is gated on the tokenizer's own auth, so no other caller can
+    /// supply a rate.
+    pub fn settle(env: Env, holder: Address, rate: i128) -> Result<i128, Error> {
         let config = Self::read_config(&env)?;
         config.tokenizer.require_auth();
         Self::bump_instance_ttl(&env);
-        Self::settle(&env, &holder);
-        let owed = Self::read_accrued(&env, &holder);
-        if owed > 0 {
-            Self::write_accrued(&env, &holder, 0);
+        Self::settle_into_ledger(&env, &holder, rate);
+        Ok(Self::read_accrued(&env, &holder))
+    }
+
+    /// Subtracts exactly `amount` SY shares from `holder`'s banked ledger.
+    /// Restricted to the tokenizer, which calls this after `settle` and pushes the
+    /// same `amount` of SY out of escrow itself. Moves no tokens. `amount == 0` is
+    /// a no-op; `amount` must be `<= banked` (the tokenizer only ever consumes what
+    /// a prior `settle` reported), enforced so the ledger can never go negative.
+    /// The remainder stays banked and claimable later once escrow can cover it.
+    pub fn consume(env: Env, holder: Address, amount: i128) -> Result<(), Error> {
+        let config = Self::read_config(&env)?;
+        config.tokenizer.require_auth();
+        if amount < 0 {
+            return Err(Error::InvalidAmount);
         }
-        Ok(owed)
+        Self::bump_instance_ttl(&env);
+        let banked = Self::read_accrued(&env, &holder);
+        if amount > banked {
+            return Err(Error::ConsumeExceedsBanked);
+        }
+        if amount > 0 {
+            Self::write_accrued(&env, &holder, banked - amount);
+        }
+        Ok(())
     }
 
     // --- Minter-privileged supply control (only the tokenizer) -------------
@@ -165,7 +200,11 @@ impl YtToken {
         Self::require_amount_or_panic(&env, amount);
         Self::bump_instance_ttl(&env);
 
-        Self::settle(&env, &to);
+        // Mint is only reached through the tokenizer's `split`, which is gated
+        // pre-maturity, so `committing_rate` always takes its live-rate branch
+        // here and never calls back into the tokenizer (which would re-enter).
+        let rate = Self::committing_rate(&env, &config);
+        Self::settle_into_ledger(&env, &to, rate);
 
         let balance = Self::read_balance(&env, &to);
         Self::write_balance(&env, &to, Self::add_or_panic(&env, balance, amount));
@@ -217,21 +256,17 @@ impl YtToken {
             panic_with_error!(&env, Error::InvalidExpiration);
         }
         Self::bump_instance_ttl(&env);
-        env.storage().temporary().set(
-            &DataKey::Allowance(from, spender),
-            &AllowanceValue {
-                amount,
-                expiration_ledger,
-            },
-        );
+        Self::write_allowance(&env, &from, &spender, amount, expiration_ledger);
     }
 
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
         from.require_auth();
         Self::require_amount_or_panic(&env, amount);
         Self::bump_instance_ttl(&env);
-        Self::settle(&env, &from);
-        Self::settle(&env, &to);
+        let config = Self::read_config_or_panic(&env);
+        let rate = Self::committing_rate(&env, &config);
+        Self::settle_into_ledger(&env, &from, rate);
+        Self::settle_into_ledger(&env, &to, rate);
         Self::move_balance(&env, &from, &to, amount);
     }
 
@@ -240,8 +275,10 @@ impl YtToken {
         Self::require_amount_or_panic(&env, amount);
         Self::bump_instance_ttl(&env);
         Self::spend_allowance(&env, &from, &spender, amount);
-        Self::settle(&env, &from);
-        Self::settle(&env, &to);
+        let config = Self::read_config_or_panic(&env);
+        let rate = Self::committing_rate(&env, &config);
+        Self::settle_into_ledger(&env, &from, rate);
+        Self::settle_into_ledger(&env, &to, rate);
         Self::move_balance(&env, &from, &to, amount);
     }
 
@@ -252,7 +289,9 @@ impl YtToken {
         from.require_auth();
         Self::require_amount_or_panic(&env, amount);
         Self::bump_instance_ttl(&env);
-        Self::settle(&env, &from);
+        let config = Self::read_config_or_panic(&env);
+        let rate = Self::committing_rate(&env, &config);
+        Self::settle_into_ledger(&env, &from, rate);
         Self::burn_balance(&env, &from, amount);
     }
 
@@ -261,7 +300,9 @@ impl YtToken {
         Self::require_amount_or_panic(&env, amount);
         Self::bump_instance_ttl(&env);
         Self::spend_allowance(&env, &from, &spender, amount);
-        Self::settle(&env, &from);
+        let config = Self::read_config_or_panic(&env);
+        let rate = Self::committing_rate(&env, &config);
+        Self::settle_into_ledger(&env, &from, rate);
         Self::burn_balance(&env, &from, amount);
     }
 
@@ -275,25 +316,52 @@ impl YtToken {
         env.invoke_contract(&config.sy_token, &Symbol::new(env, "exchange_rate"), args)
     }
 
-    /// The rate yield settles against: the live SY rate before maturity, and the
-    /// rate frozen at maturity afterwards, so YT stops accruing new yield once
-    /// the term ends. The first post-maturity settlement snapshots it. (A
-    /// read-only simulation that triggers the snapshot does not persist it, so
-    /// the value is fixed by the first state-committing settle.)
-    fn effective_rate(env: &Env, config: &Config) -> i128 {
-        let raw = Self::current_rate(env, config);
+    /// The rate a state-committing settle uses on a path yt is entered directly
+    /// (transfer, burn, mint). Before maturity it is the live SY rate. After
+    /// maturity it is the tokenizer's single canonical frozen rate: yt pokes the
+    /// tokenizer's permissionless `freeze_maturity_rate`, which snapshots the SY
+    /// rate on the first post-maturity call and returns that same value on every
+    /// later call. yt keeps no maturity snapshot of its own, so YT yield and PT
+    /// redemption can never settle against different post-maturity rates.
+    ///
+    /// This must never run while the tokenizer is on the call stack, or the
+    /// cross-contract call would re-enter it (prohibited). It is safe here: the
+    /// callers are entered directly by a holder or (for mint) only pre-maturity,
+    /// where the live-rate branch is taken and the tokenizer is never called.
+    /// The one path where the tokenizer calls yt post-maturity, `settle`,
+    /// receives the rate as an argument instead.
+    fn committing_rate(env: &Env, config: &Config) -> i128 {
         if env.ledger().timestamp() < config.maturity {
-            return raw;
+            return Self::current_rate(env, config);
         }
-        if let Some(rate) = env
-            .storage()
-            .instance()
-            .get::<_, i128>(&DataKey::MaturityRate)
-        {
-            return rate;
+        let args: soroban_sdk::Vec<Val> = vec![env];
+        env.invoke_contract(
+            &config.tokenizer,
+            &Symbol::new(env, "freeze_maturity_rate"),
+            args,
+        )
+    }
+
+    /// The rate for a read-only yield preview. Before maturity, the live SY
+    /// rate. After maturity, the tokenizer's canonical frozen rate once it has
+    /// been snapshotted, else the live SY rate as a best estimate (the value the
+    /// first post-maturity action will freeze). This never writes, so it is safe
+    /// to run in a simulation, and it reads the tokenizer without freezing.
+    fn preview_rate(env: &Env, config: &Config) -> i128 {
+        if env.ledger().timestamp() < config.maturity {
+            return Self::current_rate(env, config);
         }
-        env.storage().instance().set(&DataKey::MaturityRate, &raw);
-        raw
+        let args: soroban_sdk::Vec<Val> = vec![env];
+        let frozen: i128 = env.invoke_contract(
+            &config.tokenizer,
+            &Symbol::new(env, "maturity_rate"),
+            args,
+        );
+        if frozen > 0 {
+            frozen
+        } else {
+            Self::current_rate(env, config)
+        }
     }
 
     /// SY shares `holder` would accrue if settled at `rate` right now, without
@@ -313,15 +381,17 @@ impl YtToken {
         Self::owed_shares(balance, last, rate)
     }
 
-    /// Banks `holder`'s accrued yield up to the current rate and advances their
+    /// Banks `holder`'s accrued yield up to `rate` and advances their
     /// checkpoint. Bookkeeping only: it never moves SY. A fresh holder simply
-    /// starts accruing from the current rate. On a rate dip the checkpoint is
-    /// held (not lowered), so no yield is paid for the dip and the holder
-    /// resumes accruing only once the rate climbs back above it.
-    fn settle(env: &Env, holder: &Address) {
-        let config = Self::read_config_or_panic(env);
-        let rate = Self::effective_rate(env, &config);
-
+    /// starts accruing from `rate`. On a rate dip the checkpoint is held (not
+    /// lowered), so no yield is paid for the dip and the holder resumes accruing
+    /// only once the rate climbs back above it. The caller sources `rate` (live
+    /// before maturity, the tokenizer's canonical frozen rate after) so this
+    /// function makes no cross-contract call of its own.
+    ///
+    /// Named `settle_into_ledger` to distinguish it from the public `settle`
+    /// entrypoint, which wraps this and returns the banked total without zeroing.
+    fn settle_into_ledger(env: &Env, holder: &Address, rate: i128) {
         let last = match Self::read_checkpoint(env, holder) {
             Some(c) => c,
             None => {
@@ -482,17 +552,49 @@ impl YtToken {
         }
     }
 
+    /// Writes the allowance and, when the allowance is live (amount > 0),
+    /// extends the temporary entry's own TTL so it survives until
+    /// `expiration_ledger`. A freshly created temporary entry only lives for
+    /// the network minimum temporary TTL; bumping the instance TTL does not
+    /// keep per-entry temporary storage alive, so without this extension the
+    /// allowance archives long before the requested expiration.
+    fn write_allowance(
+        env: &Env,
+        from: &Address,
+        spender: &Address,
+        amount: i128,
+        expiration_ledger: u32,
+    ) {
+        let key = DataKey::Allowance(from.clone(), spender.clone());
+        env.storage().temporary().set(
+            &key,
+            &AllowanceValue {
+                amount,
+                expiration_ledger,
+            },
+        );
+        if amount > 0 {
+            // Callers guarantee expiration_ledger >= the current sequence
+            // whenever amount > 0 (approve validates it; spend_allowance only
+            // reaches here through a live, unexpired allowance).
+            let live_for = expiration_ledger - env.ledger().sequence();
+            env.storage()
+                .temporary()
+                .extend_ttl(&key, live_for, live_for);
+        }
+    }
+
     fn spend_allowance(env: &Env, from: &Address, spender: &Address, amount: i128) {
         let allowance = Self::read_allowance(env, from, spender);
         if allowance.amount < amount {
             panic_with_error!(env, Error::InsufficientAllowance);
         }
-        env.storage().temporary().set(
-            &DataKey::Allowance(from.clone(), spender.clone()),
-            &AllowanceValue {
-                amount: allowance.amount - amount,
-                expiration_ledger: allowance.expiration_ledger,
-            },
+        Self::write_allowance(
+            env,
+            from,
+            spender,
+            allowance.amount - amount,
+            allowance.expiration_ledger,
         );
     }
 
@@ -596,7 +698,9 @@ mod test {
         f.client.mint(&f.alice, &(100 * WAD));
 
         f.sy.set_exchange_rate(&f.admin, &RATE_1_10);
-        let claimable = f.client.settle_and_consume(&f.alice);
+        // Pre-maturity, the tokenizer would settle at the live SY rate; pass it.
+        // `settle` banks and reports the owed total without zeroing the ledger.
+        let claimable = f.client.settle(&f.alice, &RATE_1_10);
 
         // owed = 100 * (1/1.05 - 1/1.10) * WAD = 100 * 0.0432900 = 4.329 SY.
         // A naive (r-c)/WAD form would wrongly bank 100*0.05 = 5.0 SY.
@@ -608,13 +712,47 @@ mod test {
             claimable
         );
         assert_eq!(f.client.checkpoint(&f.alice), RATE_1_10);
+        // The ledger still holds the banked total: settle does not consume it.
+        assert_eq!(f.client.accrued_yield(&f.alice), claimable);
+    }
+
+    #[test]
+    fn consume_removes_only_the_requested_amount() {
+        let f = fixture(NOW);
+        f.sy.set_exchange_rate(&f.admin, &RATE_1_05);
+        f.client.mint(&f.alice, &(100 * WAD));
+        f.sy.set_exchange_rate(&f.admin, &RATE_1_10);
+
+        let banked = f.client.settle(&f.alice, &RATE_1_10);
+        assert!(banked > 0);
+
+        // Consume half; the remainder must stay banked and claimable later.
+        let part = banked / 2;
+        f.client.consume(&f.alice, &part);
+        assert_eq!(f.client.accrued_yield(&f.alice), banked - part);
+
+        // A second settle at the same rate adds nothing (checkpoint held), so the
+        // remainder is still exactly what was left.
+        let still = f.client.settle(&f.alice, &RATE_1_10);
+        assert_eq!(still, banked - part);
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Contract, #11)")]
+    fn consume_more_than_banked_is_rejected() {
+        let f = fixture(NOW);
+        f.sy.set_exchange_rate(&f.admin, &RATE_1_05);
+        f.client.mint(&f.alice, &(100 * WAD));
+        f.sy.set_exchange_rate(&f.admin, &RATE_1_10);
+        let banked = f.client.settle(&f.alice, &RATE_1_10);
+        f.client.consume(&f.alice, &(banked + 1));
     }
 
     #[test]
     fn first_claim_at_mint_rate_accrues_nothing() {
         let f = fixture(NOW);
         f.client.mint(&f.alice, &(100 * WAD)); // minted at rate 1.00
-        let claimable = f.client.settle_and_consume(&f.alice);
+        let claimable = f.client.settle(&f.alice, &RATE_1_00);
         assert_eq!(claimable, 0);
         assert_eq!(f.client.checkpoint(&f.alice), RATE_1_00);
     }
@@ -685,12 +823,68 @@ mod test {
         let f = fixture(NOW);
         f.client.mint(&f.alice, &1_000);
         f.client
-            .approve(&f.alice, &f.bob, &500, &(NOW as u32 + 1_000));
+            .approve(&f.alice, &f.bob, &500, &1_000);
         f.client
             .transfer_from(&f.bob, &f.alice, &f.bob, &300);
         assert_eq!(f.client.balance(&f.alice), 700);
         assert_eq!(f.client.balance(&f.bob), 300);
         assert_eq!(f.client.allowance(&f.alice, &f.bob), 200);
+    }
+
+    #[test]
+    fn allowance_entry_ttl_covers_requested_expiration() {
+        use soroban_sdk::testutils::storage::Temporary as _;
+
+        let f = fixture(NOW);
+        f.client.mint(&f.alice, &1_000);
+
+        // Model mainnet-like conditions: the network minimum temporary-entry
+        // TTL is far shorter than the requested allowance lifetime.
+        const START_SEQ: u32 = 1_000;
+        const MIN_TEMP_TTL: u32 = 1_600;
+        const EXPIRATION: u32 = START_SEQ + 500_000;
+        f.env.ledger().set_sequence_number(START_SEQ);
+        f.env.ledger().set_min_temp_entry_ttl(MIN_TEMP_TTL);
+
+        f.client.approve(&f.alice, &f.bob, &500, &EXPIRATION);
+
+        // The test host never archives entries on a sequence jump, so reading
+        // the allowance back after a jump would pass even without the fix.
+        // Assert the entry's own TTL instead: it must cover the requested
+        // expiration ledger, not just the minimum it gets at creation.
+        let key = DataKey::Allowance(f.alice.clone(), f.bob.clone());
+        let ttl = f.env.as_contract(&f.client.address, || {
+            f.env.storage().temporary().get_ttl(&key)
+        });
+        assert!(
+            START_SEQ + ttl >= EXPIRATION,
+            "allowance TTL {} from sequence {} must cover expiration {}",
+            ttl,
+            START_SEQ,
+            EXPIRATION
+        );
+
+        // Jump well past the minimum temporary TTL but before expiration; the
+        // allowance must still be readable and spendable.
+        const JUMPED: u32 = START_SEQ + MIN_TEMP_TTL + 100_000;
+        f.env.ledger().set_sequence_number(JUMPED);
+        assert_eq!(f.client.allowance(&f.alice, &f.bob), 500);
+        f.client.transfer_from(&f.bob, &f.alice, &f.bob, &300);
+        assert_eq!(f.client.allowance(&f.alice, &f.bob), 200);
+        assert_eq!(f.client.balance(&f.bob), 300);
+
+        // The reduced allowance written back by transfer_from must also keep
+        // a TTL covering the stored expiration ledger.
+        let ttl = f.env.as_contract(&f.client.address, || {
+            f.env.storage().temporary().get_ttl(&key)
+        });
+        assert!(
+            JUMPED + ttl >= EXPIRATION,
+            "post-spend allowance TTL {} from sequence {} must cover expiration {}",
+            ttl,
+            JUMPED,
+            EXPIRATION
+        );
     }
 
     #[test]

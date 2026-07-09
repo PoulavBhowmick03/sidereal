@@ -192,7 +192,7 @@ fn amm_wires_to_the_same_market() {
     let sy = token::TokenClient::new(&env, &m.sy);
 
     let liquidity = 1_000_000_000_000_i128;
-    amm.add_liquidity(&m.user, &liquidity, &liquidity);
+    amm.add_liquidity(&m.user, &liquidity, &liquidity, &0);
     assert_eq!(pt.balance(&m.amm), liquidity);
     assert_eq!(sy.balance(&m.amm), liquidity);
     let out = amm.quote_sy_for_pt(&100_000_000_i128);
@@ -208,7 +208,7 @@ fn amm_swap_round_trip_charges_fees() {
     let sy = token::TokenClient::new(&env, &m.sy);
 
     let liquidity = 1_000_000_000_000_i128;
-    amm.add_liquidity(&m.user, &liquidity, &liquidity);
+    amm.add_liquidity(&m.user, &liquidity, &liquidity, &0);
 
     let sy_in = 1_000_000_000_i128;
     let user_pt_before = pt.balance(&m.user);
@@ -247,7 +247,7 @@ fn yt_flash_route_round_trips_through_the_tokenizer() {
     // Seed AMM liquidity: deposit SY, split to obtain PT, add PT + SY.
     sy.deposit(&m.user, &2_000_000_000_i128);
     tokenizer.split(&m.user, &1_000_000_000_i128);
-    amm.add_liquidity(&m.user, &800_000_000_i128, &800_000_000_i128);
+    amm.add_liquidity(&m.user, &800_000_000_i128, &800_000_000_i128, &0);
 
     // Buy YT with SY through the flash route. The position is leveraged, so the
     // YT received exceeds the SY paid, and it is minted to the buyer's balance.
@@ -263,5 +263,73 @@ fn yt_flash_route_round_trips_through_the_tokenizer() {
     assert!(
         sy_out > 0 && sy_out < yt_out,
         "selling YT returns less than face"
+    );
+}
+
+/// The flash route ceils `shares_to_split`, which can over-mint a sub-share
+/// face unit of PT and YT beyond the quoted `yt_out` (KNOWN LIMITATION, not
+/// fixed: an in-call recombine of that dust was tried and reverted, because
+/// the dust is by construction worth less than one SY share and the
+/// tokenizer's `recombine` rejects a zero SY-equivalent with `InvalidAmount`;
+/// see the AMM audit notes for the failed-fix writeup). The accepted behavior
+/// this test locks in: the dust stays in the pool as a MATCHED PT+YT pair
+/// (never handed to the trader, so it cannot be farmed), and the swap itself
+/// never panics because of it. The standing YT balance can accrue yield that
+/// banks to the pool address and is unclaimable (no entrypoint lets the pool
+/// claim its own yield), but that is bounded per-swap and does not put user
+/// funds at risk. Sweeps several rates because dust only occurs in a narrow
+/// window of the ceil's fractional remainder; most quotes produce none.
+#[test]
+fn flash_route_over_mint_dust_stays_a_matched_pair_and_never_panics() {
+    let mut saw_dust = false;
+    for rate_bump in [40, 55, 60, 65, 75, 90, 110, 130] {
+        let env = Env::default();
+        let m = deploy(&env);
+        env.mock_all_auths_allowing_non_root_auth();
+        let sy = SyWrapperClient::new(&env, &m.sy);
+        let tokenizer = TokenizerClient::new(&env, &m.tokenizer);
+        let amm = AmmMarketClient::new(&env, &m.amm);
+        let yt = token::TokenClient::new(&env, &m.yt);
+
+        sy.deposit(&m.user, &2_000_000_000_i128);
+        tokenizer.split(&m.user, &1_000_000_000_i128);
+        amm.add_liquidity(&m.user, &800_000_000_i128, &800_000_000_i128, &0);
+
+        // rate = 1.0 + rate_bump/1000, e.g. 1.040, 1.055, ... a spread chosen
+        // to land in different fractional-remainder windows of the ceil.
+        let rate: i128 = WAD + WAD * rate_bump / 1000;
+        sy.set_exchange_rate(&m.admin, &rate);
+
+        let yt_before = yt.balance(&m.user);
+        let sy_in = 1_000_000_i128;
+        // Must not panic: this is the core regression check. A prior in-call
+        // recombine attempt panicked with InvalidAmount exactly when this
+        // swap produced dust.
+        let yt_out = amm.swap_sy_for_yt(&m.user, &sy_in, &1);
+
+        assert_eq!(
+            yt.balance(&m.user),
+            yt_before + yt_out,
+            "buyer receives exactly yt_out regardless of dust"
+        );
+
+        let pool_yt = yt.balance(&m.amm);
+        if pool_yt > 0 {
+            saw_dust = true;
+            // The dust is matched by construction: flash_split always mints
+            // equal PT and YT (a tokenizer invariant proven elsewhere), so the
+            // pool's extra PT from this call equals its extra YT (`pool_yt`)
+            // exactly. What we check directly here is that reserves stay
+            // reconciled to actual SY custody even with the standing dust.
+            assert_eq!(
+                amm.reserve_sy(),
+                sy.balance(&m.amm),
+                "reserves stay reconciled to actual SY balance even with standing dust"
+            );
+        }
+    }
+    assert!(
+        saw_dust,
+        "the rate sweep must hit at least one dust-producing window, or this test proves nothing"
     );
 }

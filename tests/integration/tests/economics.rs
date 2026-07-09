@@ -299,6 +299,100 @@ fn redemption_uses_frozen_maturity_rate() {
     );
 }
 
+/// Cross-contract maturity-rate consistency: the split-brain fix.
+///
+/// A matured market whose SY rate keeps drifting after maturity (idle
+/// mock-custody mode, admin rate setter). PT redemption and YT yield must both
+/// settle against the tokenizer's single canonical frozen rate, so the outcome
+/// is identical whether PT is redeemed first or YT is claimed first.
+///
+/// Under the old split-brain, each contract froze its own rate on its own first
+/// post-maturity call, so whichever action ran second pinned a later, different
+/// rate. With PT-redeem-first that left the escrow unable to cover the (larger)
+/// YT claim computed at the higher rate, which trapped; with YT-claim-first it
+/// silently paid PT at the wrong rate. This test would fail (panic or mismatch)
+/// on the old code and passes now that both read the one frozen rate.
+#[test]
+fn pt_redeem_and_yt_claim_use_one_frozen_rate_regardless_of_order() {
+    const RATE_1_15: i128 = 1_150_000_000_000_000_000;
+    const RATE_1_20: i128 = 1_200_000_000_000_000_000;
+
+    // YT yield in SY shares for `bal` held from rate `c` to rate `r`, matching
+    // the contract's telescoping form (floor division).
+    fn owed(bal: i128, c: i128, r: i128) -> i128 {
+        (bal * (r - c) / c) * WAD / r
+    }
+
+    // Runs one ordering and returns
+    // (pt_redeem_sy, yt_claim_sy, escrow_left, tokenizer_frozen_rate).
+    fn run(redeem_first: bool) -> (i128, i128, i128, i128) {
+        let m = deploy();
+        let alice = m.fund(100 * UNIT);
+        m.deposit(&alice, 100 * UNIT);
+        m.split(&alice, 100 * UNIT); // 100 UNIT PT + YT, checkpoint at rate 1.00
+
+        // Rate climbs to 1.10 by maturity, so YT has real accrued yield to claim.
+        m.set_rate(RATE_1_10);
+        m.env.ledger().set_timestamp(MATURITY + 1);
+
+        // The SY rate is still drifting after maturity: it is 1.15 when the first
+        // post-maturity action fires, and is bumped to 1.20 before the second.
+        // The frozen rate must be the 1.15 pinned by the first action, for both
+        // PT and YT, regardless of which acts first.
+        m.set_rate(RATE_1_15);
+
+        let pt = m.pt_balance(&alice);
+        let redeem_sy;
+        let claim_sy;
+        if redeem_first {
+            redeem_sy = m.redeem_pt(&alice, pt);
+            m.set_rate(RATE_1_20);
+            claim_sy = m.claim(&alice);
+        } else {
+            claim_sy = m.claim(&alice);
+            m.set_rate(RATE_1_20);
+            redeem_sy = m.redeem_pt(&alice, pt);
+        }
+        (redeem_sy, claim_sy, m.escrow_shares(), m.maturity_rate())
+    }
+
+    let a = run(true); // PT redeem first, then YT claim
+    let b = run(false); // YT claim first, then PT redeem
+
+    // Both orderings freeze the SAME canonical rate: the 1.15 that was live when
+    // the first post-maturity action fired, never the later 1.20.
+    assert_eq!(a.3, RATE_1_15, "PT-first must freeze the rate at the first action");
+    assert_eq!(b.3, RATE_1_15, "YT-first must freeze the rate at the first action");
+
+    // Identical economic outcome regardless of order.
+    assert_eq!(a.0, b.0, "PT redemption SY must not depend on order");
+    assert_eq!(a.1, b.1, "YT claim SY must not depend on order");
+    assert_eq!(a.0 + a.1, b.0 + b.1, "total SY paid out must not depend on order");
+    assert_eq!(a.2, b.2, "escrow left must not depend on order");
+
+    // The rate both contracts used equals the tokenizer's frozen maturity_rate:
+    // cross-check the amounts against a 1.15 computation, and confirm 1.20 would
+    // differ, so the test would fail if either contract used its own later snapshot.
+    let expected_redeem = 100 * UNIT * WAD / RATE_1_15;
+    let expected_claim = owed(100 * UNIT, WAD, RATE_1_15);
+    assert!(
+        (a.0 - expected_redeem).abs() <= 4,
+        "PT must redeem at the frozen 1.15: {} vs {}",
+        a.0,
+        expected_redeem
+    );
+    assert!(
+        (a.1 - expected_claim).abs() <= 4,
+        "YT must claim at the frozen 1.15: {} vs {}",
+        a.1,
+        expected_claim
+    );
+    assert!(
+        (100 * UNIT * WAD / RATE_1_20 - expected_redeem).abs() > 4,
+        "1.20 must differ from 1.15, else the ordering test proves nothing"
+    );
+}
+
 #[test]
 fn redeem_allowed_at_exact_maturity() {
     let m = deploy();
@@ -430,7 +524,7 @@ fn claim_yield_survives_a_sub_stroop_rate_regression() {
     // scale (WAD minus 1e8) hits the same way, any dip below 1.00 did it.
     m.set_rate(WAD - 1);
 
-    let previewed = TokenizerClient::new(&m.env, &m.tokenizer).preview_claim_yield(&alice);
+    let previewed = YtTokenClient::new(&m.env, &m.yt).preview_claim_yield(&alice);
     assert_eq!(previewed, 0, "preview must report zero, not trap");
 
     let claimed = m.claim(&alice); // previously panicked with Error(Contract, #9)
@@ -443,11 +537,19 @@ fn claim_yield_survives_a_sub_stroop_rate_regression() {
     );
 }
 
-// Updated: this test used to assert the claim reverted Insolvent (#9); that gate
-// is gone (Fix 1 completed), so banked yield now pays out and the PT shortfall
-// is priced pro-rata at redemption instead.
+/// SY shares needed to redeem all outstanding PT at `rate`, rounded up the same
+/// way the tokenizer's PT-senior cap reserves escrow. Kept local to the test so
+/// the assertions recompute the reservation independently of the contract.
+fn pt_face_reservation(pt_supply: i128, rate: i128) -> i128 {
+    (pt_supply * WAD + rate - 1) / rate
+}
+
+/// PT is senior. When the escrow cannot even cover outstanding PT principal,
+/// there is no surplus, so a YT claim pays zero. The unpaid yield is not
+/// forfeited: it stays banked and claimable once coverage returns
+/// (banked_yield_becomes_claimable_after_the_rate_recovers proves the recovery).
 #[test]
-fn yt_claim_pays_banked_yield_even_when_pt_is_under_covered() {
+fn yt_claim_is_subordinated_when_pt_is_under_covered() {
     let m = deploy();
     let alice = m.fund(100 * UNIT);
     let bob = m.account();
@@ -455,19 +557,122 @@ fn yt_claim_pays_banked_yield_even_when_pt_is_under_covered() {
     m.split(&alice, 100 * UNIT);
 
     // Rate rises; Alice banks her yield by moving 1 unit of YT (which settles
-    // her), then the yield source crashes below PT coverage.
+    // her at 1.10), then the yield source crashes below PT coverage.
     m.set_rate(RATE_1_10);
     m.transfer_yt(&alice, &bob, UNIT);
+    let yt = YtTokenClient::new(&m.env, &m.yt);
+    let owed_before = yt.preview_claim_yield(&alice);
+    assert!(owed_before > 0, "Alice has banked yield to claim");
+
     let rate_0_90: i128 = 900_000_000_000_000_000;
     m.set_rate(rate_0_90);
 
-    // Escrow (100 shares) is now worth 90 < 100 of PT principal. Alice's banked
-    // yield is still owed and still payable: claims never freeze on coverage.
-    // The remaining escrow shortfall lands on PT redemption, which caps payouts
-    // pro-rata (covered by redemption_is_capped_when_rate_regresses).
-    let claimed = m.claim(&alice); // previously panicked with Error(Contract, #9)
-    assert!(claimed > 0, "banked yield must pay out under a shortfall");
+    // Escrow (100 shares) at rate 0.90 covers only ~90 asset units of the 100
+    // PT face, so the PT reservation exceeds the whole escrow: surplus is zero.
+    assert!(
+        pt_face_reservation(m.pt_supply(), rate_0_90) > m.escrow_shares(),
+        "precondition: PT is under-covered, so there is no YT surplus"
+    );
+
+    let claimed = m.claim(&alice);
+    assert_eq!(claimed, 0, "YT is subordinate to PT: no surplus, no payout");
+    assert_eq!(m.sy_balance(&alice), 0, "nothing is paid out");
+    assert_eq!(
+        yt.preview_claim_yield(&alice),
+        owed_before,
+        "the unpaid yield stays banked, not forfeited"
+    );
+}
+
+/// PT is senior but fully covered, leaving a surplus smaller than the YT's
+/// banked yield. The claim takes exactly that surplus and no more, draining the
+/// escrow down to the PT reservation. The remainder stays banked.
+#[test]
+fn yt_claim_takes_only_the_surplus_over_pt_reservation() {
+    let m = deploy();
+    let alice = m.fund(100 * UNIT);
+    let bob = m.account();
+    m.deposit(&alice, 100 * UNIT);
+    m.split(&alice, 100 * UNIT);
+
+    m.set_rate(RATE_1_10);
+    m.transfer_yt(&alice, &bob, UNIT);
+    let yt = YtTokenClient::new(&m.env, &m.yt);
+    let owed_before = yt.preview_claim_yield(&alice);
+
+    // Rate dips to 1.05. PT still fully coverable (~95.2 of 100 shares), leaving
+    // a ~4.76-share surplus, below Alice's ~9.09 banked yield.
+    let rate_1_05: i128 = 1_050_000_000_000_000_000;
+    m.set_rate(rate_1_05);
+
+    let escrow_before = m.escrow_shares();
+    let reservation = pt_face_reservation(m.pt_supply(), rate_1_05);
+    let surplus = escrow_before - reservation;
+    assert!(
+        surplus > 0 && surplus < owed_before,
+        "precondition: partial surplus, less than owed ({} of {})",
+        surplus,
+        owed_before
+    );
+
+    let claimed = m.claim(&alice);
+    assert_eq!(
+        claimed, surplus,
+        "the claim pays exactly the surplus over the PT reservation"
+    );
+    assert_eq!(
+        m.escrow_shares(),
+        reservation,
+        "escrow is drained down to the PT reservation, so PT stays fully covered"
+    );
+    assert_eq!(
+        yt.preview_claim_yield(&alice),
+        owed_before - claimed,
+        "the unpaid remainder stays banked"
+    );
+}
+
+/// The transient-dip case the surplus cap must not punish: a claim during a dip
+/// pays nothing, but once the rate recovers the previously-unpaid yield becomes
+/// claimable in full. Conservation: Alice collects exactly what she was owed
+/// across the dip and recovery, with no phantom yield from the round trip (the
+/// checkpoint is a high-water mark, so the dip does not re-open accrual).
+#[test]
+fn banked_yield_becomes_claimable_after_the_rate_recovers() {
+    let m = deploy();
+    let alice = m.fund(100 * UNIT);
+    let bob = m.account();
+    m.deposit(&alice, 100 * UNIT);
+    m.split(&alice, 100 * UNIT);
+
+    m.set_rate(RATE_1_10);
+    m.transfer_yt(&alice, &bob, UNIT);
+    let yt = YtTokenClient::new(&m.env, &m.yt);
+    let owed = yt.preview_claim_yield(&alice);
+    assert!(owed > 0);
+
+    // Deep dip: no surplus, so the claim pays nothing and banks the whole owed.
+    m.set_rate(900_000_000_000_000_000);
+    assert_eq!(m.claim(&alice), 0, "no surplus during the dip");
+    assert_eq!(
+        yt.preview_claim_yield(&alice),
+        owed,
+        "the full entitlement is still banked"
+    );
+
+    // Recovery restores the surplus; the banked yield is now claimable in full.
+    m.set_rate(RATE_1_10);
+    let claimed = m.claim(&alice);
+    assert_eq!(
+        claimed, owed,
+        "the recovered payout equals the originally banked entitlement, no phantom yield"
+    );
     assert_eq!(m.sy_balance(&alice), claimed);
+    assert_eq!(
+        yt.preview_claim_yield(&alice),
+        0,
+        "nothing left banked after the full payout"
+    );
 }
 
 #[test]

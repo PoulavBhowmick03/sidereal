@@ -172,6 +172,14 @@ export interface AddLiquidityArgs {
   ptIn: bigint;
   /** SY to deposit into the pool, in base units. */
   syIn: bigint;
+  /**
+   * Minimum LP tokens to mint, in base units (slippage guard). The AMM panics
+   * with SlippageExceeded and reverts the whole invocation (transfers included)
+   * if the actual LP minted is below this. Callers must pass a slippage-adjusted
+   * bound derived from a preview; the SDK does not default it, so passing 0 opts
+   * out of protection entirely.
+   */
+  minLpOut: bigint;
 }
 
 export interface RemoveLiquidityArgs {
@@ -179,6 +187,17 @@ export interface RemoveLiquidityArgs {
   from: string;
   /** LP tokens to burn, in base units. */
   lpIn: bigint;
+  /**
+   * Minimum PT to receive, in base units (slippage guard). The AMM panics with
+   * SlippageExceeded and reverts everything if the actual PT out is below this.
+   * Caller-supplied from a slippage-adjusted preview; 0 opts out of protection.
+   */
+  minPtOut: bigint;
+  /**
+   * Minimum SY to receive, in base units (slippage guard). Same revert semantics
+   * as minPtOut; a violation on either leg reverts the whole invocation.
+   */
+  minSyOut: bigint;
 }
 
 export interface BlendWithdrawArgs {

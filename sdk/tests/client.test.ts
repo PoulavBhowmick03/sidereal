@@ -250,15 +250,19 @@ describe("getPosition", () => {
     expect(preview?.args).toHaveLength(1);
   });
 
-  it("skips the yield preview when YT balance is zero", async () => {
+  it("reports banked yield even when the YT balance is zero", async () => {
+    // A holder who banked yield then moved all their YT away still has zero YT
+    // balance but positive banked yield. getPosition must surface it, so the
+    // read is unconditional (no YT-balance short-circuit).
     state().returns = {
       share_balance: 0n,
       position: { pt_balance: 0n, yt_balance: 0n },
       lp_balance: 0n,
+      preview_claim_yield: 4n,
     };
     const p = await newClient().getPosition("G1", "mkt");
-    expect(p.claimableYield).toBe(0n);
-    expect(state().calls.some((c) => c.method === "preview_claim_yield")).toBe(false);
+    expect(p.claimableYield).toBe(4n);
+    expect(state().calls.some((c) => c.method === "preview_claim_yield")).toBe(true);
   });
 });
 
@@ -403,8 +407,21 @@ describe("transaction builders", () => {
   });
 
   it("buildClaimYield targets the tokenizer claim_yield entrypoint", async () => {
+    // The guard reads preview_claim_yield first; a positive preview lets it build.
+    state().returns = { preview_claim_yield: 7n };
     const env = await newClient().buildClaimYield({ marketId: "mkt", from: "G1" });
     expect(env.xdr).toBe("PREPARED:claim_yield");
+    const preview = state().calls.find((c) => c.method === "preview_claim_yield");
+    expect(preview).toBeDefined();
+  });
+
+  it("buildClaimYield refuses to build a zero-value (fee-burning) claim", async () => {
+    state().returns = { preview_claim_yield: 0n };
+    await expect(
+      newClient().buildClaimYield({ marketId: "mkt", from: "G1" }),
+    ).rejects.toThrow(/nothing to claim/);
+    // It must not fall through to building the tokenizer op.
+    expect(state().calls.some((c) => c.method === "claim_yield")).toBe(false);
   });
 
   it("buildRedeemSy targets the SY wrapper redeem entrypoint", async () => {
@@ -417,11 +434,53 @@ describe("transaction builders", () => {
   });
 
   it("buildAddLiquidity and buildRemoveLiquidity hit the Market methods", async () => {
-    const add = await newClient().buildAddLiquidity({ marketId: "mkt", from: "G1", ptIn: 10n, syIn: 10n });
+    const add = await newClient().buildAddLiquidity({
+      marketId: "mkt",
+      from: "G1",
+      ptIn: 10n,
+      syIn: 10n,
+      minLpOut: 9n,
+    });
     expect(add.xdr).toBe("PREPARED:add_liquidity");
 
-    const remove = await newClient().buildRemoveLiquidity({ marketId: "mkt", from: "G1", lpIn: 5n });
+    const remove = await newClient().buildRemoveLiquidity({
+      marketId: "mkt",
+      from: "G1",
+      lpIn: 5n,
+      minPtOut: 4n,
+      minSyOut: 4n,
+    });
     expect(remove.xdr).toBe("PREPARED:remove_liquidity");
+  });
+
+  it("passes the LP slippage bounds in the contract's positional order", async () => {
+    await newClient().buildAddLiquidity({
+      marketId: "mkt",
+      from: "G1",
+      ptIn: 10n,
+      syIn: 20n,
+      minLpOut: 9n,
+    });
+    // add_liquidity(from, pt_in, sy_in, min_lp_out)
+    const add = state().calls.find((c) => c.method === "add_liquidity");
+    expect(add?.args).toHaveLength(4);
+    expect((add!.args[1] as { __sc: unknown }).__sc).toBe(10n);
+    expect((add!.args[2] as { __sc: unknown }).__sc).toBe(20n);
+    expect((add!.args[3] as { __sc: unknown }).__sc).toBe(9n);
+
+    await newClient().buildRemoveLiquidity({
+      marketId: "mkt",
+      from: "G1",
+      lpIn: 5n,
+      minPtOut: 4n,
+      minSyOut: 7n,
+    });
+    // remove_liquidity(from, lp_in, min_pt_out, min_sy_out)
+    const remove = state().calls.find((c) => c.method === "remove_liquidity");
+    expect(remove?.args).toHaveLength(4);
+    expect((remove!.args[1] as { __sc: unknown }).__sc).toBe(5n);
+    expect((remove!.args[2] as { __sc: unknown }).__sc).toBe(4n);
+    expect((remove!.args[3] as { __sc: unknown }).__sc).toBe(7n);
   });
 
   it("rejects non-positive amounts before building", async () => {

@@ -4,7 +4,7 @@
 
 use soroban_sdk::{
     auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
-    contract, contracterror, contractimpl, contracttype, token, vec, Address, Env, IntoVal,
+    contract, contracterror, contractimpl, contracttype, token, vec, Address, Env, I256, IntoVal,
     MuxedAddress, Symbol, Val, Vec,
 };
 
@@ -137,7 +137,7 @@ impl Tokenizer {
         let config = Self::read_config(&env)?;
 
         let rate = current_rate(&env, &config.sy_token);
-        let face = mul_div_floor(sy_amount, rate, WAD)?;
+        let face = mul_div_floor(&env, sy_amount, rate, WAD)?;
         Ok((face, face))
     }
 
@@ -155,7 +155,7 @@ impl Tokenizer {
 
         let config = Self::read_config(&env)?;
         let rate = current_rate(&env, &config.sy_token);
-        mul_div_floor(pt_amount, WAD, rate)
+        mul_div_floor(&env, pt_amount, WAD, rate)
     }
 
     /// PT and YT balances the holder currently owns, read from the token
@@ -191,7 +191,7 @@ impl Tokenizer {
         Self::bump_instance_ttl(&env);
 
         let rate = current_rate(&env, &config.sy_token);
-        let face = mul_div_floor(sy_amount, rate, WAD)?;
+        let face = mul_div_floor(&env, sy_amount, rate, WAD)?;
         Self::require_positive_amount(face)?;
 
         pull_token(&env, &config.sy_token, &from, sy_amount);
@@ -234,7 +234,7 @@ impl Tokenizer {
         let config = Self::read_config(&env)?;
         Self::bump_instance_ttl(&env);
         let rate = current_rate(&env, &config.sy_token);
-        let full = mul_div_floor(pt_amount, WAD, rate)?;
+        let full = mul_div_floor(&env, pt_amount, WAD, rate)?;
 
         // Cap the principal returned to the holder's pro-rata share of escrow, the
         // same guard `redeem_at_maturity` uses. When escrow fully covers PT this is
@@ -248,7 +248,7 @@ impl Tokenizer {
         let escrow_shares =
             token_balance(&env, &config.sy_token, &env.current_contract_address());
         let pt_supply = pt_total_supply(&env, &config.pt_token);
-        let pro_rata = mul_div_floor(escrow_shares, pt_amount, pt_supply)?;
+        let pro_rata = mul_div_floor(&env, escrow_shares, pt_amount, pt_supply)?;
         let sy_equivalent = if full < pro_rata { full } else { pro_rata };
         Self::require_positive_amount(sy_equivalent)?;
 
@@ -281,12 +281,12 @@ impl Tokenizer {
         Self::bump_instance_ttl(&env);
 
         let rate = effective_rate(&env, &config);
-        let full = mul_div_floor(pt_amount, WAD, rate)?;
+        let full = mul_div_floor(&env, pt_amount, WAD, rate)?;
 
         let escrow_shares =
             token_balance(&env, &config.sy_token, &env.current_contract_address());
         let pt_supply = pt_total_supply(&env, &config.pt_token);
-        let pro_rata = mul_div_floor(escrow_shares, pt_amount, pt_supply)?;
+        let pro_rata = mul_div_floor(&env, escrow_shares, pt_amount, pt_supply)?;
         let sy_to_pay = if full < pro_rata { full } else { pro_rata };
         Self::require_positive_amount(sy_to_pay)?;
 
@@ -296,45 +296,81 @@ impl Tokenizer {
         Ok(sy_to_pay)
     }
 
-    /// Pays `holder` their accrued YT yield in SY out of escrow, and returns the
-    /// SY amount paid. The YT contract settles the holder and reports the owed
-    /// SY shares (consuming its banked ledger); the tokenizer, which custodies
-    /// the escrow, transfers that SY. Allowed any time, including after maturity,
-    /// so a holder can always collect yield earned over the term.
+    /// Pays `holder` their accrued YT yield in SY out of escrow, capped so PT
+    /// principal is always senior to banked YT yield, and returns the SY amount
+    /// paid. Allowed any time, including after maturity, so a holder can always
+    /// collect yield earned over the term.
+    ///
+    /// PT-senior surplus cap. The YT contract settles the holder and reports the
+    /// banked total `owed` WITHOUT zeroing it (`settle`). The tokenizer then pays
+    /// only `min(owed, surplus)`, where
+    ///   `surplus = max(0, escrow_shares - pt_face_reservation)`
+    /// and `pt_face_reservation = ceil(pt_supply * WAD / rate)` is the SY escrow
+    /// needed to redeem every outstanding PT at its face at `rate`. The
+    /// reservation is rounded UP, so PT is never shorted by a rounding notch and
+    /// the surplus is the conservative (smaller) amount. It then `consume`s
+    /// exactly `pay` from the YT ledger and pushes `pay` SY. Anything owed beyond
+    /// `pay` stays banked in the YT ledger, claimable later once the rate
+    /// recovers (a transient sub-stroop dip) or, under a permanent slash, capped
+    /// there forever by the short escrow: never overpaid, never lost.
+    ///
+    /// This makes already-banked YT yield JUNIOR to PT principal, correcting the
+    /// prior first-come behavior where a YT holder could drain escrow in full
+    /// while PT redemption was capped pro-rata, effectively senioring YT over PT.
     pub fn claim_yield(env: Env, holder: Address) -> Result<i128, Error> {
         holder.require_auth();
         let config = Self::read_config(&env)?;
         Self::bump_instance_ttl(&env);
 
-        let owed = settle_and_consume_yt(&env, &config.yt_token, &holder);
-        if owed > 0 {
-            push_token(&env, &config.sy_token, &holder, owed);
+        // Establish the canonical rate here, in the tokenizer, and hand it to
+        // the YT contract. Before maturity this is the live SY rate; after
+        // maturity `effective_rate` snapshots the frozen `MaturityRate` (or
+        // reuses the existing snapshot), the same single value PT redemption
+        // uses. YT cannot fetch it itself on this path: the tokenizer is already
+        // on the call stack, so a callback into it would re-enter (prohibited).
+        // Passing it down also fixes the ordering trap where a YT claim is the
+        // first post-maturity action: the freeze happens here, before the YT
+        // settle, so both sides settle against the same rate regardless of order.
+        let rate = effective_rate(&env, &config);
+
+        // Settle to learn what the holder is owed (their full banked total) at
+        // this rate. `settle` banks and returns; it does not zero the ledger, so
+        // if the surplus cannot cover all of it the remainder is left banked.
+        let owed = settle_yt(&env, &config.yt_token, &holder, rate);
+
+        // PT-senior surplus. Reserve enough escrow to redeem all outstanding PT
+        // face at `rate` (rounded UP so PT is never shorted), and pay YT only out
+        // of the remainder. `escrow_shares` and `pt_supply` are read the same way
+        // `redeem_at_maturity` reads them.
+        let escrow_shares =
+            token_balance(&env, &config.sy_token, &env.current_contract_address());
+        let pt_supply = pt_total_supply(&env, &config.pt_token);
+        let pt_face_reservation = mul_div_ceil(&env, pt_supply, WAD, rate)?;
+        let surplus = if escrow_shares > pt_face_reservation {
+            escrow_shares - pt_face_reservation
+        } else {
+            0
+        };
+        let pay = if owed < surplus { owed } else { surplus };
+
+        // Consume exactly what we pay, then push it. The remainder (owed - pay)
+        // stays banked automatically because `settle` never zeroed it. Neither
+        // `consume` (YT) nor `push_token` (SY) calls back into the tokenizer, so
+        // the re-entrancy model is intact: the rate was computed and frozen above
+        // and handed down, never fetched by a callee.
+        if pay > 0 {
+            consume_yt(&env, &config.yt_token, &holder, pay);
+            push_token(&env, &config.sy_token, &holder, pay);
         }
 
-        // No solvency gate here either. With a Blend-derived rate the escrow has
-        // zero coverage slack at mint (split floors the face), and a redeem can
-        // tick the rate down by a sub-stroop rounding notch because Blend's
-        // bToken burn rounds in the pool's favor. Gating claims on coverage
-        // turned that dust regression into a frozen market: every claim reverted
-        // Insolvent, even ones that owed nothing. Regression safety lives in the
-        // YT settle math, which pays zero when the rate has not risen past the
-        // holder's checkpoint, and in the pro-rata caps on `recombine` and
-        // `redeem_at_maturity`, which price a genuine shortfall instead of
-        // blocking it.
-        Ok(owed)
+        Ok(pay)
     }
 
-    /// SY shares `holder` could claim right now, for display. Reads through to
-    /// the YT contract, which reads the SY rate itself.
-    pub fn preview_claim_yield(env: Env, holder: Address) -> Result<i128, Error> {
-        let config = Self::read_config(&env)?;
-        let args: Vec<Val> = vec![&env, holder.into_val(&env)];
-        Ok(env.invoke_contract(
-            &config.yt_token,
-            &Symbol::new(&env, "preview_claim_yield"),
-            args,
-        ))
-    }
+    // Note: there is deliberately no `preview_claim_yield` wrapper here. YT's
+    // `preview_claim_yield` is read directly (the SDK already calls it on the YT
+    // contract). Wrapping it in the tokenizer would re-enter: post-maturity YT's
+    // preview reads the canonical rate back from the tokenizer's `maturity_rate`,
+    // and a tokenizer -> YT -> tokenizer hop is prohibited re-entry.
 
     fn read_config(env: &Env) -> Result<Config, Error> {
         env.storage()
@@ -386,20 +422,58 @@ fn current_rate(env: &Env, sy_token: &Address) -> i128 {
     env.invoke_contract(sy_token, &Symbol::new(env, "exchange_rate"), args)
 }
 
-/// `a * b / c`, rounded down, with checked arithmetic.
-fn mul_div_floor(a: i128, b: i128, c: i128) -> Result<i128, Error> {
-    a.checked_mul(b)
-        .and_then(|v| v.checked_div(c))
+/// `a * b / c`, rounded down (toward zero).
+///
+/// The product `a * b` is computed through a 256-bit intermediate, so it cannot
+/// overflow before the divide even when the final quotient fits i128. The audit
+/// flagged that the old i128 `checked_mul` path could spuriously revert on
+/// reservation math (`pt_supply * WAD`) whose quotient is small but whose product
+/// exceeds i128. Any i128 * i128 product fits in i256 (max ~5.79e76 > ~2.89e76),
+/// so `mul` never overflows here; `MathOverflow` is returned only when the true
+/// quotient does not fit i128. Callers pass strictly positive `a`, `b`, `c`, so
+/// truncation toward zero equals floor.
+fn mul_div_floor(env: &Env, a: i128, b: i128, c: i128) -> Result<i128, Error> {
+    let prod = I256::from_i128(env, a).mul(&I256::from_i128(env, b));
+    prod.div(&I256::from_i128(env, c))
+        .to_i128()
         .ok_or(Error::MathOverflow)
 }
 
-/// Settles `holder` on the YT contract and consumes their banked yield, returning
-/// the SY shares owed. Authorizes the call as the tokenizer, since YT gates
-/// `settle_and_consume` on the tokenizer's address.
-fn settle_and_consume_yt(env: &Env, yt_token: &Address, holder: &Address) -> i128 {
-    let args: Vec<Val> = vec![env, holder.into_val(env)];
-    authorize_self_call(env, yt_token, "settle_and_consume", args.clone());
-    env.invoke_contract(yt_token, &Symbol::new(env, "settle_and_consume"), args)
+/// `a * b / c`, rounded up (ceil), for non-negative product and positive divisor.
+///
+/// Uses `(a * b + c - 1) / c`, computed through the same 256-bit intermediate as
+/// `mul_div_floor` so neither the product nor the `+ c - 1` bump can overflow
+/// before the divide. Used only for the PT face reservation, where rounding up
+/// reserves at least enough escrow to cover all outstanding PT and so can never
+/// short a PT holder by a rounding notch. Callers pass strictly positive `a`,
+/// `b`, `c`.
+fn mul_div_ceil(env: &Env, a: i128, b: i128, c: i128) -> Result<i128, Error> {
+    let c256 = I256::from_i128(env, c);
+    let prod = I256::from_i128(env, a).mul(&I256::from_i128(env, b));
+    let numerator = prod.add(&c256).sub(&I256::from_i128(env, 1));
+    numerator
+        .div(&c256)
+        .to_i128()
+        .ok_or(Error::MathOverflow)
+}
+
+/// Settles `holder` on the YT contract at `rate` and returns their banked total
+/// in SY shares WITHOUT consuming it. Authorizes the call as the tokenizer, since
+/// YT gates `settle` on the tokenizer's address.
+fn settle_yt(env: &Env, yt_token: &Address, holder: &Address, rate: i128) -> i128 {
+    let args: Vec<Val> = vec![env, holder.into_val(env), rate.into_val(env)];
+    authorize_self_call(env, yt_token, "settle", args.clone());
+    env.invoke_contract(yt_token, &Symbol::new(env, "settle"), args)
+}
+
+/// Consumes exactly `amount` SY shares from `holder`'s banked YT ledger (YT
+/// asserts `amount <= banked`). Moves no tokens; the tokenizer pushes the SY out
+/// of escrow separately. Authorizes the call as the tokenizer, since YT gates
+/// `consume` on the tokenizer's address.
+fn consume_yt(env: &Env, yt_token: &Address, holder: &Address, amount: i128) {
+    let args: Vec<Val> = vec![env, holder.into_val(env), amount.into_val(env)];
+    authorize_self_call(env, yt_token, "consume", args.clone());
+    env.invoke_contract::<()>(yt_token, &Symbol::new(env, "consume"), args);
 }
 
 /// Outstanding PT supply (asset units) read from the PT contract.

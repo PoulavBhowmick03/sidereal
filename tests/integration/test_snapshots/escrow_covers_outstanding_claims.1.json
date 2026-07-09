@@ -1330,18 +1330,6 @@
                       "key": {
                         "vec": [
                           {
-                            "symbol": "MaturityRate"
-                          }
-                        ]
-                      },
-                      "val": {
-                        "i128": "1100000000000000000"
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
                             "symbol": "TotalSupply"
                           }
                         ]

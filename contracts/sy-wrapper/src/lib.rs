@@ -9,8 +9,8 @@ use sidereal_blend_adapter::{
 use sidereal_shared_types::StandardizedYield;
 use soroban_sdk::{
     auth::{ContractContext, InvokerContractAuthEntry, SubContractInvocation},
-    contract, contracterror, contractimpl, contracttype, panic_with_error, token, vec, Address,
-    Env, IntoVal, MuxedAddress, String, Symbol,
+    contract, contracterror, contractevent, contractimpl, contracttype, panic_with_error, token,
+    vec, Address, Env, IntoVal, MuxedAddress, String, Symbol,
 };
 
 const WAD: i128 = 1_000_000_000_000_000_000;
@@ -67,6 +67,17 @@ pub enum Error {
     InvalidExpiration = 8,
     ReadOnlyExchangeRate = 9,
     InvalidBlendReserve = 10,
+    BlendWithdrawalFailed = 11,
+}
+
+/// Emitted when an admin re-syncs the stored Blend reserve index after the pool
+/// reindexed the underlying. Both indices are carried so integrators can audit
+/// the move.
+#[contractevent]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReserveMigrated {
+    pub old_index: u32,
+    pub new_index: u32,
 }
 
 #[contract]
@@ -147,6 +158,70 @@ impl SyWrapper {
         Ok(())
     }
 
+    /// Recovers from a Blend reserve reindex.
+    ///
+    /// `config.reserve_index` is fixed at init and the rate path traps with
+    /// `InvalidBlendReserve` whenever Blend has since moved the underlying to a
+    /// different reserve slot. That fail-closed trap is correct (pricing the
+    /// wrong reserve would be worse), but on its own it is unrecoverable: every
+    /// rate read, and therefore every deposit/redeem/split/recombine, stays
+    /// bricked for the life of the market. This admin entrypoint re-syncs the
+    /// stored index to wherever the pool now keeps this wrapper's underlying.
+    ///
+    /// It does NOT trust a caller-supplied index. It re-derives the index the
+    /// same way `initialize_blend` does: it finds the underlying's position in
+    /// the pool's reserve list and cross-checks that against the pool's own
+    /// `get_reserve(underlying).config.index`, and requires the reserve decimals
+    /// to still match. The new index is accepted only if the asset actually
+    /// sitting there is `config.underlying`. So the strongest thing an admin can
+    /// do here is re-point the wrapper at the same underlying under its new slot;
+    /// the admin cannot aim the rate at a different (e.g. more valuable) asset,
+    /// which is the property that keeps this from being a mispricing or theft
+    /// lever. Returns the new reserve index.
+    pub fn migrate_reserve_index(env: Env, admin: Address) -> Result<u32, Error> {
+        let mut config = Self::read_config(&env)?;
+        admin.require_auth();
+        if admin != config.admin {
+            return Err(Error::NotInitialized);
+        }
+        // Only a Blend-backed wrapper has a reserve index to migrate.
+        let pool = match &config.pool {
+            Some(pool) => pool.clone(),
+            None => return Err(Error::InvalidBlendReserve),
+        };
+
+        let pool_client = BlendPoolClient::new(&env, &pool);
+        let reserves = pool_client.get_reserve_list();
+        let mut new_index = None;
+        for (index, asset) in reserves.iter().enumerate() {
+            if asset == config.underlying {
+                new_index = Some(index as u32);
+                break;
+            }
+        }
+        let new_index = new_index.ok_or(Error::InvalidBlendReserve)?;
+        // Cross-check the list position against the pool's authoritative reserve
+        // record. Both must agree that `config.underlying` lives at `new_index`,
+        // and the decimals must still match, or we refuse the migration.
+        let reserve = pool_client.get_reserve(&config.underlying);
+        if reserve.config.index != new_index || reserve.config.decimals != DECIMALS {
+            return Err(Error::InvalidBlendReserve);
+        }
+
+        let old_index = config.reserve_index;
+        config.reserve_index = new_index;
+        Self::bump_instance_ttl(&env);
+        env.storage().instance().set(&DataKey::Config, &config);
+
+        ReserveMigrated {
+            old_index,
+            new_index,
+        }
+        .publish(&env);
+
+        Ok(new_index)
+    }
+
     pub fn share_balance(env: Env, holder: Address) -> Result<i128, Error> {
         Self::read_config(&env)?;
         Ok(Self::read_balance(&env, &holder))
@@ -198,13 +273,7 @@ impl SyWrapper {
             panic_with_error!(&env, Error::InvalidExpiration);
         }
         Self::bump_instance_ttl(&env);
-        env.storage().temporary().set(
-            &DataKey::Allowance(from, spender),
-            &AllowanceValue {
-                amount,
-                expiration_ledger,
-            },
-        );
+        Self::write_allowance(&env, &from, &spender, amount, expiration_ledger);
     }
 
     pub fn transfer(env: Env, from: Address, to: Address, amount: i128) {
@@ -366,17 +435,49 @@ impl SyWrapper {
         }
     }
 
+    /// Writes the allowance and, when the allowance is live (amount > 0),
+    /// extends the temporary entry's own TTL so it survives until
+    /// `expiration_ledger`. A freshly created temporary entry only lives for
+    /// the network minimum temporary TTL; bumping the instance TTL does not
+    /// keep per-entry temporary storage alive, so without this extension the
+    /// allowance archives long before the requested expiration.
+    fn write_allowance(
+        env: &Env,
+        from: &Address,
+        spender: &Address,
+        amount: i128,
+        expiration_ledger: u32,
+    ) {
+        let key = DataKey::Allowance(from.clone(), spender.clone());
+        env.storage().temporary().set(
+            &key,
+            &AllowanceValue {
+                amount,
+                expiration_ledger,
+            },
+        );
+        if amount > 0 {
+            // Callers guarantee expiration_ledger >= the current sequence
+            // whenever amount > 0 (approve validates it; spend_allowance only
+            // reaches here through a live, unexpired allowance).
+            let live_for = expiration_ledger - env.ledger().sequence();
+            env.storage()
+                .temporary()
+                .extend_ttl(&key, live_for, live_for);
+        }
+    }
+
     fn spend_allowance(env: &Env, from: &Address, spender: &Address, amount: i128) {
         let allowance = Self::read_allowance(env, from, spender);
         if allowance.amount < amount {
             panic_with_error!(env, Error::InsufficientAllowance);
         }
-        env.storage().temporary().set(
-            &DataKey::Allowance(from.clone(), spender.clone()),
-            &AllowanceValue {
-                amount: allowance.amount - amount,
-                expiration_ledger: allowance.expiration_ledger,
-            },
+        Self::write_allowance(
+            env,
+            from,
+            spender,
+            allowance.amount - amount,
+            allowance.expiration_ledger,
         );
     }
 }
@@ -458,13 +559,21 @@ impl StandardizedYield for SyWrapper {
         let requested_underlying = mul_div_or_panic(env, sy_amount, exchange_rate, WAD);
         let (shares_to_burn, underlying_out) = if config.pool.is_some() {
             let before = underlying_balance(env, &config.underlying);
+            // The withdraw is tolerated (try_submit) so a transient Blend
+            // failure cannot leak Blend's raw panic and, more importantly, so
+            // this path can bail out BEFORE burning any shares: a failed
+            // withdraw must never consume the holder's SY. We still surface the
+            // failure explicitly instead of returning a silent zero, so callers
+            // and integrators see a typed error and can retry. Nothing has been
+            // mutated at this point, so the trap simply reverts and the holder's
+            // funds are untouched.
             if !blend_submit(env, &config, REQUEST_WITHDRAW, requested_underlying, true) {
-                return 0;
+                panic_with_error!(env, Error::BlendWithdrawalFailed);
             }
             let after = underlying_balance(env, &config.underlying);
             let received = sub_or_panic(env, after, before);
             if received <= 0 {
-                return 0;
+                panic_with_error!(env, Error::BlendWithdrawalFailed);
             }
             let burn = if received >= requested_underlying {
                 sy_amount
@@ -834,6 +943,74 @@ mod test {
             .transfer(&fixture.alice, &fixture.bob, &(40 * WAD));
         assert_eq!(fixture.client.balance(&fixture.alice), 60 * WAD);
         assert_eq!(fixture.client.balance(&fixture.bob), 40 * WAD);
+    }
+
+    #[test]
+    fn allowance_entry_ttl_covers_requested_expiration() {
+        use soroban_sdk::testutils::storage::Temporary as _;
+        use soroban_sdk::testutils::Ledger as _;
+
+        let fixture = fixture();
+        initialize(&fixture);
+        fixture.client.deposit(&fixture.alice, &(100 * WAD));
+
+        // Model mainnet-like conditions: the network minimum temporary-entry
+        // TTL is far shorter than the requested allowance lifetime.
+        const START_SEQ: u32 = 1_000;
+        const MIN_TEMP_TTL: u32 = 1_600;
+        const EXPIRATION: u32 = START_SEQ + 500_000;
+        fixture.env.ledger().set_sequence_number(START_SEQ);
+        fixture.env.ledger().set_min_temp_entry_ttl(MIN_TEMP_TTL);
+
+        fixture
+            .client
+            .approve(&fixture.alice, &fixture.bob, &(40 * WAD), &EXPIRATION);
+
+        // The test host never archives entries on a sequence jump, so reading
+        // the allowance back after a jump would pass even without the fix.
+        // Assert the entry's own TTL instead: it must cover the requested
+        // expiration ledger, not just the minimum it gets at creation.
+        let key = DataKey::Allowance(fixture.alice.clone(), fixture.bob.clone());
+        let ttl = fixture.env.as_contract(&fixture.client.address, || {
+            fixture.env.storage().temporary().get_ttl(&key)
+        });
+        assert!(
+            START_SEQ + ttl >= EXPIRATION,
+            "allowance TTL {} from sequence {} must cover expiration {}",
+            ttl,
+            START_SEQ,
+            EXPIRATION
+        );
+
+        // Jump well past the minimum temporary TTL but before expiration; the
+        // allowance must still be readable and spendable.
+        const JUMPED: u32 = START_SEQ + MIN_TEMP_TTL + 100_000;
+        fixture.env.ledger().set_sequence_number(JUMPED);
+        assert_eq!(
+            fixture.client.allowance(&fixture.alice, &fixture.bob),
+            40 * WAD
+        );
+        fixture
+            .client
+            .transfer_from(&fixture.bob, &fixture.alice, &fixture.bob, &(30 * WAD));
+        assert_eq!(
+            fixture.client.allowance(&fixture.alice, &fixture.bob),
+            10 * WAD
+        );
+        assert_eq!(fixture.client.balance(&fixture.bob), 30 * WAD);
+
+        // The reduced allowance written back by transfer_from must also keep
+        // a TTL covering the stored expiration ledger.
+        let ttl = fixture.env.as_contract(&fixture.client.address, || {
+            fixture.env.storage().temporary().get_ttl(&key)
+        });
+        assert!(
+            JUMPED + ttl >= EXPIRATION,
+            "post-spend allowance TTL {} from sequence {} must cover expiration {}",
+            ttl,
+            JUMPED,
+            EXPIRATION
+        );
     }
 
     #[test]
