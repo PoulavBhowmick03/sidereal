@@ -1,0 +1,60 @@
+# Sidereal mainnet deployment manifest.
+# Public deployment metadata only. Do not add private keys.
+# Deployed 2026-07-10 from clean source commit 67151f8 (contract source; the
+# working tree had only non-source files dirty — testnet manifests and docs).
+# All five wasm hashes were verified equal to the on-chain code hashes.
+
+network = "mainnet"
+network_passphrase = "Public Global Stellar Network ; September 2015"
+source_repo = "https://github.com/PoulavBhowmick03/sidereal"
+source_commit = "67151f8a35a9684f89bef1ade915e850d23b5163"
+deployer_public_key = "GDQX3RT7YJYPKCB3Z2BG3EYBRBI62DWGGZYW54U6KLVRYVUYIUUVYRG3"
+admin_public_key = "GDQX3RT7YJYPKCB3Z2BG3EYBRBI62DWGGZYW54U6KLVRYVUYIUUVYRG3"
+deployed_at = "2026-07-10"
+maturity = 1786289992
+token_decimals = 7
+yield_source = "blend"
+blend_pool = "CAJJZSGMMM3PD7N33TAPHGBUGTB43OC73HVIK2L2G6BNGGGYOSSYBXBD" # Blend v2 FixedV2
+reserve_index = 1
+underlying_asset = "USDC:GA5ZSEJYB37JRC5AVCIA5MOP4RHTM335X2KGX3IHOJAPP5RE34K4KZVN"
+
+[build]
+rust_toolchain = "1.96.0"
+rustc = "rustc 1.96.0 (ac68faa20 2026-05-25)"
+stellar_cli = "stellar 27.0.0 (5a7c5fe76530bf4248477ac812fc757146b98cc4)"
+soroban_sdk = "=26.1.0"
+wasm_target = "wasm32v1-none"
+optimizer = "stellar contract build (bundled wasm-opt)"
+
+[curve]
+scalar_root = "2000000000000000000"
+initial_anchor = "1006345613662022528" # 1.0063 WAD, ~8% implied APY at 30-day term
+fee_bps = 10
+twap_window = 1800
+
+[contracts]
+underlying = "CCW67TSZV3SSS2HXMBQ5JFGCKJNXKZM7UQUWUZPUTHXSTZLEO7SJMI75" # Circle USDC SAC
+sy_wrapper = "CCLFK26PU5GNMCUAGBBBGKVXE6GWYA2PB3RFTC7Y5HRVPPBRGWYUZKUU"
+pt_token = "CDZ2M6DWIVY6KFJSFEA5KWIDQUDEGFEDQ5XMJPITAVBYLNGFEYLBRMSX"
+yt_token = "CDJIC6JKQ7J5G3KUNRPFXQYNFWVTADCDFWHROSMCI36TVN2ATGIIYFRJ"
+tokenizer = "CBMB52N4XDAFRQRQ4MYGRPFUS3DDREWYY45VWWXEJSPITE5XH7DXEHBX"
+amm = "CDA4HVNGSQ52DCGRYQIE5JKSNWCFTH4FEANHPLWB2U32EXGP36DGZVJK"
+
+[wasm_hashes]
+sy_wrapper = "8c51e655921047d90375c2f822a53991fe04ee577e6aa648074f6a5bf1ab9eb9"
+pt_token = "101ff0dbe44202f35bec5b2a93c63e44710cb1bb83230f76593308216fe960dd"
+yt_token = "755211d95479113cc13cc1ef6d043ac3403bc4a65ad3cbb4f1c6d458e39df509"
+tokenizer = "9a8eb38e99807dcc0c0fb35977c40e62391a77576674cb12ecfed2d89f5a0af8"
+amm = "1546eec842a3c777f5f6f87191760242d09459206312fcccf4c5ae262fd709a4"
+
+# on-chain code hashes were read back and equal the wasm_hashes above (verified 2026-07-10)
+[onchain_hashes]
+sy_wrapper = "8c51e655921047d90375c2f822a53991fe04ee577e6aa648074f6a5bf1ab9eb9"
+pt_token = "101ff0dbe44202f35bec5b2a93c63e44710cb1bb83230f76593308216fe960dd"
+yt_token = "755211d95479113cc13cc1ef6d043ac3403bc4a65ad3cbb4f1c6d458e39df509"
+tokenizer = "9a8eb38e99807dcc0c0fb35977c40e62391a77576674cb12ecfed2d89f5a0af8"
+amm = "1546eec842a3c777f5f6f87191760242d09459206312fcccf4c5ae262fd709a4"
+
+[notes]
+admin_custody = "single key = the deployer key (in the local stellar-cli keystore). Only lever is the constrained migrate_reserve_index. Can be imported into a mobile wallet."
+maturity_ttl = "contract code/instance entries provisioned at the mainnet minimum persistent TTL (120 days), which covers the 30-day market plus redemption grace; no renewal needed for a one-shot cycle."
