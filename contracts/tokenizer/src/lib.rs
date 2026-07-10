@@ -280,7 +280,12 @@ impl Tokenizer {
         Self::require_positive_amount(sy_equivalent)?;
 
         burn_token(&env, &config.pt_token, &from, pt_amount);
-        burn_token(&env, &config.yt_token, &from, yt_amount);
+        // YT burns through the tokenizer-gated `burn_settled` with the rate
+        // observed above: yt cannot call back into this contract for a rate
+        // while it is on the stack, and handing the same observation down
+        // keeps the yield banked by the settle consistent with what the
+        // maturity freeze has on record.
+        burn_settled_yt(&env, &config.yt_token, &from, yt_amount, rate);
         push_token(&env, &config.sy_token, &from, sy_equivalent);
 
         Ok(sy_equivalent)
@@ -498,6 +503,20 @@ fn consume_yt(env: &Env, yt_token: &Address, holder: &Address, amount: i128) {
     let args: Vec<Val> = vec![env, holder.into_val(env), amount.into_val(env)];
     authorize_self_call(env, yt_token, "consume", args.clone());
     env.invoke_contract::<()>(yt_token, &Symbol::new(env, "consume"), args);
+}
+
+/// Burns `amount` YT from `from` via the tokenizer-gated `burn_settled`,
+/// handing down `rate` so the settle inside the burn banks yield at the same
+/// rate this contract observed (yt cannot call back in for one mid-call).
+fn burn_settled_yt(env: &Env, yt_token: &Address, from: &Address, amount: i128, rate: i128) {
+    let args: Vec<Val> = vec![
+        env,
+        from.into_val(env),
+        amount.into_val(env),
+        rate.into_val(env),
+    ];
+    authorize_self_call(env, yt_token, "burn_settled", args.clone());
+    env.invoke_contract::<()>(yt_token, &Symbol::new(env, "burn_settled"), args);
 }
 
 /// Outstanding PT supply (asset units) read from the PT contract.

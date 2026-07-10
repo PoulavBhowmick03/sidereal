@@ -49,7 +49,8 @@ pub enum Error {
     NotInitialized = 2,
     InvalidMaturity = 3,
     InvalidAmount = 4,
-    LiveMarket = 5,
+    // 5 was LiveMarket, retired with the redeemable_sy helper; discriminants
+    // are explicit so the remaining codes are unchanged.
     InsufficientBalance = 6,
     InsufficientAllowance = 7,
     MathOverflow = 8,
@@ -217,15 +218,6 @@ impl PtToken {
             Ok(config) => config,
             Err(error) => panic_with_error!(env, error),
         }
-    }
-
-
-    fn require_positive_amount(amount: i128) -> Result<(), Error> {
-        if amount <= 0 {
-            return Err(Error::InvalidAmount);
-        }
-
-        Ok(())
     }
 
     fn require_amount_or_panic(env: &Env, amount: i128) {

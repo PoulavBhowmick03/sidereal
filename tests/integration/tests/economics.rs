@@ -100,6 +100,12 @@ impl Market {
         YtTokenClient::new(&self.env, &self.yt).transfer(from, to, &amount);
     }
 
+    /// A holder burning their own YT directly on the YT contract (not through
+    /// the tokenizer's recombine).
+    fn burn_yt(&self, from: &Address, amount: i128) {
+        YtTokenClient::new(&self.env, &self.yt).burn(from, &amount);
+    }
+
     fn recombine(&self, who: &Address, amount: i128) -> i128 {
         TokenizerClient::new(&self.env, &self.tokenizer).recombine(who, &amount, &amount)
     }
@@ -344,6 +350,87 @@ fn freeze_ignores_post_maturity_accrual_even_on_late_first_touch() {
         "redeemed at the observed 1.05, not the drifted 1.10: {} vs {}",
         sy_out,
         expected
+    );
+}
+
+/// The audit gap in the first freeze cut: direct YT operations (transfer,
+/// burn) settle yield at a rate the tokenizer never saw, because they read SY
+/// directly. YT's ledger could then recognize yield at 1.10 while the freeze
+/// later pinned 1.00, starving YT of already-banked yield and over-crediting
+/// PT. Direct YT paths now resolve their rate THROUGH the tokenizer's
+/// observe_rate, so any rate YT banks at is on record for the freeze.
+#[test]
+fn direct_yt_transfer_is_observed_by_the_maturity_freeze() {
+    let m = deploy();
+    let alice = m.fund(100 * UNIT);
+    let bob = m.account();
+    m.deposit(&alice, 100 * UNIT);
+    m.split(&alice, 100 * UNIT); // tokenizer observes 1.00
+
+    // Rate accrues to 1.10; the ONLY subsequent pre-maturity action is a
+    // direct YT transfer. No tokenizer operation, no explicit poke. The
+    // transfer settles Alice at 1.10, banking her yield, and must leave that
+    // 1.10 on record for the freeze.
+    m.set_rate(RATE_1_10);
+    m.transfer_yt(&alice, &bob, UNIT);
+    let yt = YtTokenClient::new(&m.env, &m.yt);
+    let banked = yt.preview_claim_yield(&alice);
+    assert!(banked > 0, "the transfer banked Alice's accrued yield at 1.10");
+
+    m.env.ledger().set_timestamp(MATURITY + 1);
+
+    // First post-maturity touch freezes the 1.10 the transfer observed, not
+    // the older 1.00 from the split.
+    let pt = m.pt_balance(&alice);
+    let sy_out = m.redeem_pt(&alice, pt);
+    assert_eq!(
+        m.maturity_rate(),
+        RATE_1_10,
+        "the direct transfer's rate must be the frozen observation"
+    );
+    let expected = pt * WAD / RATE_1_10;
+    assert!(
+        (sy_out - expected).abs() <= 4,
+        "PT redeems at the transfer-observed 1.10: {} vs {}",
+        sy_out,
+        expected
+    );
+
+    // And the yield the transfer banked is actually payable: at a frozen 1.10
+    // the escrow holds a surplus over the PT reservation equal to the yield,
+    // so Alice collects what her ledger recognized. Under the old gap (frozen
+    // 1.00) the reservation would swallow the whole escrow and pay her zero.
+    let claimed = m.claim(&alice);
+    assert!(
+        (banked - claimed).abs() <= 2,
+        "banked yield is payable because the freeze saw the same rate it was banked at: banked {} vs claimed {}",
+        banked,
+        claimed
+    );
+}
+
+/// Same gap, burn flavor: a holder burning their own YT directly settles
+/// first, and that settle's rate must reach the freeze. The tokenizer-driven
+/// burn (recombine) needs no observation of its own because recombine records
+/// one in the same transaction; this covers the holder-direct path.
+#[test]
+fn direct_yt_burn_is_observed_by_the_maturity_freeze() {
+    let m = deploy();
+    let alice = m.fund(100 * UNIT);
+    m.deposit(&alice, 100 * UNIT);
+    m.split(&alice, 100 * UNIT); // tokenizer observes 1.00
+
+    let rate_1_08: i128 = 1_080_000_000_000_000_000;
+    m.set_rate(rate_1_08);
+    m.burn_yt(&alice, UNIT); // direct burn, the only action at 1.08
+
+    m.env.ledger().set_timestamp(MATURITY + 1);
+    let pt = m.pt_balance(&alice);
+    m.redeem_pt(&alice, pt);
+    assert_eq!(
+        m.maturity_rate(),
+        rate_1_08,
+        "the direct burn's settle rate must be the frozen observation"
     );
 }
 

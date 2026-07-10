@@ -200,10 +200,13 @@ impl YtToken {
         Self::require_amount_or_panic(&env, amount);
         Self::bump_instance_ttl(&env);
 
-        // Mint is only reached through the tokenizer's `split`, which is gated
-        // pre-maturity, so `committing_rate` always takes its live-rate branch
-        // here and never calls back into the tokenizer (which would re-enter).
-        let rate = Self::committing_rate(&env, &config);
+        // Mint is only reached through the tokenizer's `split`, which runs
+        // pre-maturity with the tokenizer on the call stack, so this cannot
+        // route through `committing_rate` (calling back into the tokenizer
+        // would re-enter). A plain live read is equivalent here: `split`
+        // observed this same rate itself in this same transaction, so the
+        // freeze already has it on record.
+        let rate = Self::current_rate(&env, &config);
         Self::settle_into_ledger(&env, &to, rate);
 
         let balance = Self::read_balance(&env, &to);
@@ -282,9 +285,12 @@ impl YtToken {
         Self::move_balance(&env, &from, &to, amount);
     }
 
-    /// Burns `amount` YT from `from`. The tokenizer burns YT on recombine;
-    /// holders may also burn their own balance. The holder is settled first so
-    /// their accrued yield is banked before the balance shrinks.
+    /// Burns `amount` YT from `from`, on a holder's own direct call. The
+    /// holder is settled first so their accrued yield is banked before the
+    /// balance shrinks, at a rate observed through the tokenizer. The
+    /// tokenizer's recombine burns through `burn_settled` instead, passing the
+    /// rate down, because it is on the call stack here and cannot be called
+    /// back into.
     pub fn burn(env: Env, from: Address, amount: i128) {
         from.require_auth();
         Self::require_amount_or_panic(&env, amount);
@@ -293,6 +299,25 @@ impl YtToken {
         let rate = Self::committing_rate(&env, &config);
         Self::settle_into_ledger(&env, &from, rate);
         Self::burn_balance(&env, &from, amount);
+    }
+
+    /// Burns `amount` YT from `from`, settling them first at the `rate`
+    /// supplied by the tokenizer. Restricted to the tokenizer, which calls
+    /// this from `recombine` while it is on the call stack: yt cannot call
+    /// back into it to observe a rate, so the tokenizer hands down the same
+    /// rate it observed in that transaction. Trusting the argument is safe
+    /// because of the auth gate, the same model as `settle` and `consume`.
+    /// The holder's own authorization is enforced by `recombine` itself.
+    pub fn burn_settled(env: Env, from: Address, amount: i128, rate: i128) -> Result<(), Error> {
+        let config = Self::read_config(&env)?;
+        config.tokenizer.require_auth();
+        if amount <= 0 {
+            return Err(Error::InvalidAmount);
+        }
+        Self::bump_instance_ttl(&env);
+        Self::settle_into_ledger(&env, &from, rate);
+        Self::burn_balance(&env, &from, amount);
+        Ok(())
     }
 
     pub fn burn_from(env: Env, spender: Address, from: Address, amount: i128) {
@@ -316,25 +341,35 @@ impl YtToken {
         env.invoke_contract(&config.sy_token, &Symbol::new(env, "exchange_rate"), args)
     }
 
-    /// The rate a state-committing settle uses on a path yt is entered directly
-    /// (transfer, burn, mint). Before maturity it is the live SY rate. After
-    /// maturity it is the tokenizer's single canonical frozen rate: yt pokes the
-    /// tokenizer's permissionless `freeze_maturity_rate`, which snapshots the SY
-    /// rate on the first post-maturity call and returns that same value on every
-    /// later call. yt keeps no maturity snapshot of its own, so YT yield and PT
-    /// redemption can never settle against different post-maturity rates.
+    /// The rate a state-committing settle uses on a path yt is entered
+    /// DIRECTLY by a holder (transfer, transfer_from, burn, burn_from). Both
+    /// branches go through the tokenizer, never a raw SY read, so every rate
+    /// this contract banks yield at is also on record for the maturity freeze:
+    ///
+    /// - Before maturity: the tokenizer's permissionless `observe_rate`, which
+    ///   reads the live SY rate, records it as the freeze's latest
+    ///   pre-maturity observation, and returns it. Without this, a direct YT
+    ///   transfer could bank yield at a rate the freeze never saw, and the
+    ///   first post-maturity touch could then freeze an older, lower rate,
+    ///   starving YT of yield its ledger already recognized.
+    /// - After maturity: the tokenizer's `freeze_maturity_rate`, the single
+    ///   canonical frozen rate. yt keeps no maturity snapshot of its own.
     ///
     /// This must never run while the tokenizer is on the call stack, or the
-    /// cross-contract call would re-enter it (prohibited). It is safe here: the
-    /// callers are entered directly by a holder or (for mint) only pre-maturity,
-    /// where the live-rate branch is taken and the tokenizer is never called.
-    /// The one path where the tokenizer calls yt post-maturity, `settle`,
-    /// receives the rate as an argument instead.
+    /// cross-contract call would re-enter it (prohibited). The callers here
+    /// are entered directly by a holder, never by the tokenizer: the
+    /// tokenizer-driven paths receive the rate as an argument instead
+    /// (`settle`, `consume`, `burn_settled`) or take a plain live read that
+    /// the tokenizer observed itself in the same transaction (`mint`).
     fn committing_rate(env: &Env, config: &Config) -> i128 {
-        if env.ledger().timestamp() < config.maturity {
-            return Self::current_rate(env, config);
-        }
         let args: soroban_sdk::Vec<Val> = vec![env];
+        if env.ledger().timestamp() < config.maturity {
+            return env.invoke_contract(
+                &config.tokenizer,
+                &Symbol::new(env, "observe_rate"),
+                args,
+            );
+        }
         env.invoke_contract(
             &config.tokenizer,
             &Symbol::new(env, "freeze_maturity_rate"),
@@ -613,6 +648,7 @@ extern crate std;
 mod test {
     use super::*;
     use sidereal_sy_wrapper::{SyWrapper, SyWrapperClient};
+    use sidereal_tokenizer::{Tokenizer, TokenizerClient};
     use soroban_sdk::testutils::{Address as _, Ledger};
 
     const NOW: u64 = 1_770_000_000;
@@ -636,7 +672,6 @@ mod test {
         env.mock_all_auths();
 
         let admin = Address::generate(&env);
-        let tokenizer = Address::generate(&env);
         let alice = Address::generate(&env);
         let bob = Address::generate(&env);
 
@@ -646,9 +681,23 @@ mod test {
         let underlying = Address::generate(&env);
         sy.initialize(&admin, &underlying);
 
+        // A real tokenizer too: direct holder paths (transfer, burn) resolve
+        // their settle rate through the tokenizer's observe_rate and
+        // freeze_maturity_rate, so a placeholder address cannot serve. The PT
+        // address it records is a placeholder; the rate paths never touch PT.
+        let tokenizer_id = env.register(Tokenizer, ());
+        let pt_placeholder = Address::generate(&env);
+
         let contract_id = env.register(YtToken, ());
         let client = YtTokenClient::new(&env, &contract_id);
-        client.initialize(&admin, &tokenizer, &sy_id, &MATURITY);
+        client.initialize(&admin, &tokenizer_id, &sy_id, &MATURITY);
+        TokenizerClient::new(&env, &tokenizer_id).initialize(
+            &admin,
+            &sy_id,
+            &pt_placeholder,
+            &contract_id,
+            &MATURITY,
+        );
 
         Fixture {
             env,
@@ -894,5 +943,24 @@ mod test {
         f.client.burn(&f.alice, &400);
         assert_eq!(f.client.balance(&f.alice), 600);
         assert_eq!(f.client.total_supply(), 600);
+    }
+
+    /// burn_settled trusts its rate argument, so it must be callable by the
+    /// tokenizer alone. With auth enforcement on and no tokenizer signature,
+    /// the call must fail rather than let an arbitrary caller settle a holder
+    /// at a rate of their choosing and burn their balance.
+    #[test]
+    fn burn_settled_is_gated_on_the_tokenizer() {
+        let f = fixture(NOW);
+        f.client.mint(&f.alice, &1_000);
+        // Switch from mock-all to enforcing mode with no authorizations.
+        f.env.set_auths(&[]);
+        let result = f.client.try_burn_settled(&f.alice, &400, &WAD);
+        assert!(
+            result.is_err(),
+            "burn_settled without the tokenizer's authorization must fail"
+        );
+        f.env.mock_all_auths();
+        assert_eq!(f.client.balance(&f.alice), 1_000, "nothing was burned");
     }
 }

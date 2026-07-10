@@ -1545,6 +1545,7 @@ name = "sidereal-yt-token"
 version = "0.1.0"
 dependencies = [
  "sidereal-sy-wrapper",
+ "sidereal-tokenizer",
  "soroban-sdk",
 ]
 
