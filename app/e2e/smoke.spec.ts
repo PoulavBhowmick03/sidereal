@@ -5,6 +5,9 @@ import { test, expect } from "@playwright/test";
 // Smoke coverage that runs without a deployed market: the app boots, routes
 // render, navigation works, and the wallet entry point is present.
 
+const PUBLIC_PASSPHRASE = "Public Global Stellar Network ; September 2015";
+const isPublicProfile = process.env.NEXT_PUBLIC_NETWORK_PASSPHRASE === PUBLIC_PASSPHRASE;
+
 test("landing page renders the protocol pitch and a launch CTA", async ({ page }) => {
   await page.goto("/");
   // Marketing hero: editorial headline, the PT+YT=SY invariant, and a Launch App CTA.
@@ -82,6 +85,12 @@ test("pool page exposes liquidity actions and live stats shell", async ({ page }
 test("demo page exposes the automated proof runner without starting it", async ({ page }) => {
   await page.goto("/demo?manual=1");
   await expect(page.getByRole("heading", { name: "Demo", exact: true })).toBeVisible();
+  if (isPublicProfile) {
+    await expect(page.getByText(/automation disabled/i)).toBeVisible();
+    await expect(page.getByLabel("Maturity date")).toHaveCount(0);
+    await expect(page.getByText("No output yet.")).toHaveCount(0);
+    return;
+  }
   await expect(page.getByRole("button", { name: /run full demo|run locally/i })).toBeVisible();
   await expect(page.getByLabel("Maturity date")).toBeVisible();
   for (const label of ["Auth invariant", "Live AMM proof"]) {
@@ -101,18 +110,14 @@ test("demo page guides the manual Blend walkthrough on a blend market", async ({
   await expect(
     main.getByText("Manual walkthrough: tokenize a real Blend deposit"),
   ).toBeVisible();
-  for (const label of [
-    "Connect a wallet",
-    "Get Blend testnet USDC",
-    "Supply USDC on Blend",
-    "Tokenize on the mint page",
-  ]) {
+  for (const label of isPublicProfile
+    ? ["Connect a wallet", "Bring Circle USDC", "Supply USDC on Blend", "Tokenize on the mint page"]
+    : ["Connect a wallet", "Get Blend testnet USDC", "Supply USDC on Blend", "Tokenize on the mint page"]) {
     await expect(main.getByText(label, { exact: true })).toBeVisible();
   }
-  await expect(page.getByRole("link", { name: "Open Blend testnet" })).toHaveAttribute(
-    "href",
-    "https://testnet.blend.capital",
-  );
+  await expect(
+    page.getByRole("link", { name: isPublicProfile ? "Open Blend" : "Open Blend testnet" }),
+  ).toHaveAttribute("href", isPublicProfile ? "https://blend.capital" : "https://testnet.blend.capital");
   await expect(page.getByRole("link", { name: "Go to mint" })).toHaveAttribute("href", "/mint");
 });
 

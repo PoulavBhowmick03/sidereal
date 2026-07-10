@@ -1,8 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 
-const TESTNET_HORIZON_TRANSACTIONS =
-  "https://horizon-testnet.stellar.org/transactions";
-
 type FaucetResponse = string | { error?: string };
 
 export type FaucetResult =
@@ -52,7 +49,7 @@ export async function fetchBlendFaucetTransaction(
   return { kind: "transaction", xdr: body };
 }
 
-/** Funds an unfunded G-account on Stellar testnet. */
+/** Funds an unfunded G-account through the configured Friendbot endpoint. */
 export async function fundWithFriendbot(friendbotUrl: string, address: string): Promise<void> {
   const url = new URL(friendbotUrl);
   url.searchParams.set("addr", address);
@@ -63,9 +60,12 @@ export async function fundWithFriendbot(friendbotUrl: string, address: string): 
   }
 }
 
-/** Submits a signed classic transaction envelope to testnet Horizon. */
-export async function submitClassicTransaction(signedXdr: string): Promise<string> {
-  const response = await fetch(TESTNET_HORIZON_TRANSACTIONS, {
+/** Submits a signed classic transaction envelope to the configured Horizon. */
+export async function submitClassicTransaction(
+  signedXdr: string,
+  horizonUrl: string,
+): Promise<string> {
+  const response = await fetch(new URL("/transactions", horizonUrl).toString(), {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ tx: signedXdr }),

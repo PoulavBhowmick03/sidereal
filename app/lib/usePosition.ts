@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import type { Position } from "@sidereal/sdk";
 import { appConfig } from "./config";
-import { makeClient } from "./sdk";
+import { readPosition } from "./sdk";
 
 /**
  * Fetches the connected holder's position. Pass a changing `refreshKey` (for
@@ -22,8 +22,7 @@ export function usePosition(address: string | null, refreshKey: unknown = 0): Po
     }
     let cancelled = false;
     const cfg = appConfig();
-    makeClient(cfg, address)
-      .getPosition(address, cfg.marketId)
+    readPosition(address, cfg.marketId, cfg, address)
       .then((p) => !cancelled && setPosition(p))
       .catch(() => !cancelled && setPosition(null));
     return () => {

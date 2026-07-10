@@ -51,12 +51,78 @@ import {
 type Operation = ReturnType<Contract["call"]>;
 type SourceAccount = Awaited<ReturnType<rpc.Server["getAccount"]>>;
 type SubmittedTransaction = ReturnType<typeof TransactionBuilder.fromXDR>;
+type GetTransactionResponse = Awaited<ReturnType<rpc.Server["getTransaction"]>>;
+
+interface RpcProvider {
+  url: string;
+  server: rpc.Server;
+}
+
+interface RpcFailure {
+  url: string;
+  error: unknown;
+}
+
+const TX_RESULT_POLL_INTERVAL_MS = 1_000;
+const TX_RESULT_DEADLINE_MS = 30_000;
+const SEQUENCE_POLL_INTERVAL_MS = 500;
+const SEQUENCE_DEADLINE_MS = 30_000;
 
 /** Fails fast on a non-positive amount so we never build a doomed transaction. */
 function requirePositive(label: string, value: bigint): void {
   if (value <= 0n) {
     throw new Error(`${label} must be a positive amount`);
   }
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function normalizeRpcUrls(urls: string[]): string[] {
+  return Array.from(new Set(urls.map((url) => url.trim()).filter(Boolean)));
+}
+
+function errorText(error: unknown): string {
+  if (error instanceof Error) {
+    return `${error.name} ${error.message} ${error.stack ?? ""}`;
+  }
+  if (typeof error === "string") return error;
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function retryableRpcError(error: unknown): boolean {
+  const normalized = errorText(error).toLowerCase();
+  return (
+    normalized.includes("timeout") ||
+    normalized.includes("timed out") ||
+    normalized.includes("fetch failed") ||
+    normalized.includes("networkerror") ||
+    normalized.includes("network error") ||
+    normalized.includes("socket hang up") ||
+    normalized.includes("429") ||
+    normalized.includes("503") ||
+    normalized.includes("504") ||
+    normalized.includes("rate limit") ||
+    normalized.includes("too many requests") ||
+    normalized.includes("temporarily unavailable") ||
+    normalized.includes("service unavailable") ||
+    normalized.includes("tryagainlater")
+  );
+}
+
+function rpcFailureSummary(action: string, failures: RpcFailure[]): Error {
+  if (failures.length === 0) {
+    return new Error(`${action} failed: no Soroban RPC providers are configured`);
+  }
+  const details = failures
+    .map(({ url, error }) => `${url}: ${errorText(error).split("\n")[0]}`)
+    .join(" | ");
+  return new Error(`${action} failed across ${failures.length} Soroban RPC provider(s): ${details}`);
 }
 
 /**
@@ -67,16 +133,22 @@ function requirePositive(label: string, value: bigint): void {
  * never signs and never holds keys.
  */
 export class StellarYT {
-  private readonly server: rpc.Server;
+  private readonly providers: RpcProvider[];
   private readonly networkPassphrase: string;
   private readonly simulationSourceAccount: string;
   private readonly contracts: ContractAddresses;
+  private readonly sourceAccountPromises = new Map<string, Promise<SourceAccount>>();
   private static readonly sequenceFloorBySource = new Map<string, bigint>();
 
   constructor(opts: StellarYTOptions) {
-    this.server = new rpc.Server(opts.rpcUrl, {
-      allowHttp: opts.rpcUrl.startsWith("http://"),
-    });
+    const rpcUrls = normalizeRpcUrls([opts.rpcUrl, ...(opts.rpcFallbackUrls ?? [])]);
+    if (rpcUrls.length === 0) {
+      throw new Error("StellarYT requires at least one Soroban RPC URL");
+    }
+    this.providers = rpcUrls.map((url) => ({
+      url,
+      server: new rpc.Server(url, { allowHttp: url.startsWith("http://") }),
+    }));
     this.networkPassphrase = opts.networkPassphrase;
     this.simulationSourceAccount = opts.simulationSourceAccount;
     this.contracts = opts.contracts;
@@ -520,23 +592,10 @@ export class StellarYT {
    */
   async submit(signedXdr: string): Promise<{ hash: string; status: string }> {
     const tx = TransactionBuilder.fromXDR(signedXdr, this.networkPassphrase);
-    const sent = await this.server.sendTransaction(tx);
-    if (sent.status === "ERROR") {
-      throw new Error(`submit rejected: ${JSON.stringify(sent.errorResult)}`);
-    }
-
-    let result = await this.server.getTransaction(sent.hash);
-    const deadline = Date.now() + 30_000;
-    while (
-      result.status === rpc.Api.GetTransactionStatus.NOT_FOUND &&
-      Date.now() < deadline
-    ) {
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-      result = await this.server.getTransaction(sent.hash);
-    }
-
+    const { hash, acceptedBy, result: initialResult } = await this.sendSignedTransaction(tx);
+    const result = initialResult ?? (await this.pollTransaction(hash, acceptedBy));
     if (result.status !== rpc.Api.GetTransactionStatus.SUCCESS) {
-      throw new Error(`transaction ${sent.hash} did not succeed: ${result.status}`);
+      throw new Error(`transaction ${hash} did not succeed: ${result.status}`);
     }
 
     // The transaction-result store can report SUCCESS before the account-state
@@ -557,9 +616,9 @@ export class StellarYT {
       consumed.sequence ?? consumed._sequence ?? StellarYT.envelopeSequence(tx);
     StellarYT.rememberSequence(consumedSource, consumedSequence);
     StellarYT.rememberSequence(envelopeSource, consumedSequence);
-    await this.waitForSequence(envelopeSource ?? consumedSource, consumedSequence);
+    await this.waitForSequence(envelopeSource ?? consumedSource, consumedSequence, acceptedBy);
 
-    return { hash: sent.hash, status: result.status };
+    return { hash, status: result.status };
   }
 
   /**
@@ -568,20 +627,27 @@ export class StellarYT {
    * returns once the sequence is observed or a short deadline passes, so a
    * lagging RPC view cannot make the next sequential build reuse a stale number.
    */
-  private async waitForSequence(source?: string, sequence?: string): Promise<void> {
+  private async waitForSequence(
+    source?: string,
+    sequence?: string,
+    preferredUrl?: string,
+  ): Promise<void> {
     if (!source || !sequence) return;
     const target = BigInt(sequence);
-    const deadline = Date.now() + 30_000;
+    const deadline = Date.now() + SEQUENCE_DEADLINE_MS;
     let observed = 0;
     while (Date.now() < deadline) {
-      const account = await this.server.getAccount(source).catch(() => null);
-      if (account !== null && BigInt(account.sequenceNumber()) >= target) {
-        observed += 1;
-        if (observed >= 2) return;
-      } else {
-        observed = 0;
+      let reachedTarget = false;
+      for (const provider of this.providersFor(preferredUrl)) {
+        const account = await provider.server.getAccount(source).catch(() => null);
+        if (account !== null && BigInt(account.sequenceNumber()) >= target) {
+          reachedTarget = true;
+          break;
+        }
       }
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      observed = reachedTarget ? observed + 1 : 0;
+      if (observed >= 2) return;
+      await sleep(SEQUENCE_POLL_INTERVAL_MS);
     }
   }
 
@@ -636,34 +702,35 @@ export class StellarYT {
 
   /** Simulates a read-only call and decodes the ScVal result to a JS value. */
   private async simulateRead<T>(op: Operation): Promise<T> {
-    // Soroban simulations require a funded G-account for the transaction
-    // source. A contract C-address is not an account and RPC rejects it. The
-    // caller supplies the connected wallet when available, or a public funded
-    // fallback account for reads before a wallet is connected. This address is
-    // never used to sign or submit a transaction.
-    const source = await this.server.getAccount(this.simulationSourceAccount).catch(() => null);
-    if (source === null) {
-      throw new Error(
-        `cannot simulate: source account not found on RPC: ${this.simulationSourceAccount}`,
-      );
-    }
-    const tx = new TransactionBuilder(source, {
-      fee: "0",
-      networkPassphrase: this.networkPassphrase,
-    })
-      .addOperation(op)
-      .setTimeout(30)
-      .build();
+    return this.withProviderFailover<T>(
+      "simulate read",
+      async (provider) => {
+        // Soroban simulations require a funded G-account for the transaction
+        // source. A contract C-address is not an account and RPC rejects it.
+        // The caller supplies the connected wallet when available, or a public
+        // funded fallback account for reads before a wallet is connected. This
+        // address is never used to sign or submit a transaction.
+        const source = await this.loadSimulationSourceAccount(provider);
+        const tx = new TransactionBuilder(source, {
+          fee: "0",
+          networkPassphrase: this.networkPassphrase,
+        })
+          .addOperation(op)
+          .setTimeout(30)
+          .build();
 
-    const sim = await this.server.simulateTransaction(tx);
-    if (rpc.Api.isSimulationError(sim)) {
-      throw new ContractError(sim.error, parseContractErrorCode(sim.error));
-    }
-    const retval = sim.result?.retval;
-    if (retval === undefined) {
-      throw new Error("simulation returned no value");
-    }
-    return scValToNative(retval) as T;
+        const sim = await provider.server.simulateTransaction(tx);
+        if (rpc.Api.isSimulationError(sim)) {
+          throw new ContractError(sim.error, parseContractErrorCode(sim.error));
+        }
+        const retval = sim.result?.retval;
+        if (retval === undefined) {
+          throw new Error("simulation returned no value");
+        }
+        return scValToNative(retval) as T;
+      },
+      (error) => !(error instanceof ContractError),
+    );
   }
 
   /** Assembles an unsigned, simulation-prepared transaction envelope. */
@@ -671,21 +738,162 @@ export class StellarYT {
     sourceAccount: string,
     ops: Operation[],
   ): Promise<TransactionEnvelope> {
-    const source = await this.server.getAccount(sourceAccount);
-    StellarYT.applySequenceFloor(source);
-    const builder = new TransactionBuilder(source, {
-      fee: "1000000",
-      networkPassphrase: this.networkPassphrase,
-    }).setTimeout(120);
-    for (const op of ops) {
-      builder.addOperation(op);
-    }
-    const tx = builder.build();
+    return this.withProviderFailover("build transaction", async (provider) => {
+      const source = await provider.server.getAccount(sourceAccount);
+      StellarYT.applySequenceFloor(source);
+      const builder = new TransactionBuilder(source, {
+        fee: "1000000",
+        networkPassphrase: this.networkPassphrase,
+      }).setTimeout(120);
+      for (const op of ops) {
+        builder.addOperation(op);
+      }
+      const tx = builder.build();
 
-    const prepared = await this.server.prepareTransaction(tx);
-    return {
-      xdr: prepared.toXDR(),
-      networkPassphrase: this.networkPassphrase,
-    };
+      const prepared = await provider.server.prepareTransaction(tx);
+      return {
+        xdr: prepared.toXDR(),
+        networkPassphrase: this.networkPassphrase,
+      };
+    });
+  }
+
+  private providersFor(preferredUrl?: string): RpcProvider[] {
+    if (!preferredUrl) return this.providers;
+    const preferred = this.providers.find((provider) => provider.url === preferredUrl);
+    if (preferred === undefined) return this.providers;
+    return [preferred, ...this.providers.filter((provider) => provider.url !== preferredUrl)];
+  }
+
+  private async withProviderFailover<T>(
+    action: string,
+    attempt: (provider: RpcProvider) => Promise<T>,
+    shouldContinue: (error: unknown) => boolean = (error) => !(error instanceof ContractError),
+  ): Promise<T> {
+    const failures: RpcFailure[] = [];
+    for (const provider of this.providers) {
+      try {
+        return await attempt(provider);
+      } catch (error) {
+        if (!shouldContinue(error)) {
+          throw error;
+        }
+        failures.push({ url: provider.url, error });
+      }
+    }
+    throw rpcFailureSummary(action, failures);
+  }
+
+  private async loadSimulationSourceAccount(provider: RpcProvider): Promise<SourceAccount> {
+    let promise = this.sourceAccountPromises.get(provider.url);
+    if (promise === undefined) {
+      promise = provider.server.getAccount(this.simulationSourceAccount).catch((error) => {
+        this.sourceAccountPromises.delete(provider.url);
+        throw error;
+      });
+      this.sourceAccountPromises.set(provider.url, promise);
+    }
+    const source = await promise.catch(() => null);
+    if (source === null) {
+      throw new Error(
+        `cannot simulate on ${provider.url}: source account not found: ${this.simulationSourceAccount}`,
+      );
+    }
+    return source;
+  }
+
+  private async sendSignedTransaction(tx: SubmittedTransaction): Promise<{
+    hash: string;
+    acceptedBy?: string;
+    result?: GetTransactionResponse;
+  }> {
+    const failures: RpcFailure[] = [];
+    const txHash = StellarYT.transactionHash(tx);
+
+    for (const provider of this.providers) {
+      try {
+        const sent = await provider.server.sendTransaction(tx);
+        if (sent.status === "ERROR") {
+          throw new Error(`submit rejected: ${JSON.stringify(sent.errorResult)}`);
+        }
+        if (sent.status === "PENDING" || sent.status === "DUPLICATE") {
+          return { hash: sent.hash, acceptedBy: provider.url };
+        }
+        failures.push({
+          url: provider.url,
+          error: new Error(`sendTransaction returned ${sent.status}`),
+        });
+      } catch (error) {
+        if (!retryableRpcError(error)) {
+          throw error;
+        }
+        failures.push({ url: provider.url, error });
+      }
+    }
+
+    if (txHash !== undefined) {
+      const result = await this.pollTransaction(txHash, undefined, { allowTimeoutNotFound: true });
+      if (result.status !== rpc.Api.GetTransactionStatus.NOT_FOUND) {
+        return { hash: txHash, result };
+      }
+    }
+
+    throw rpcFailureSummary(
+      txHash === undefined ? "submit transaction" : `submit transaction ${txHash}`,
+      failures,
+    );
+  }
+
+  private async pollTransaction(
+    hash: string,
+    preferredUrl?: string,
+    opts: { allowTimeoutNotFound?: boolean } = {},
+  ): Promise<GetTransactionResponse> {
+    const deadline = Date.now() + TX_RESULT_DEADLINE_MS;
+    let sawNotFound = false;
+    let lastError: unknown = null;
+
+    while (Date.now() < deadline) {
+      for (const provider of this.providersFor(preferredUrl)) {
+        try {
+          const result = await provider.server.getTransaction(hash);
+          if (result.status === rpc.Api.GetTransactionStatus.SUCCESS) {
+            return result;
+          }
+          if (result.status === rpc.Api.GetTransactionStatus.FAILED) {
+            return result;
+          }
+          sawNotFound = true;
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      await sleep(TX_RESULT_POLL_INTERVAL_MS);
+    }
+
+    if (sawNotFound) {
+      return {
+        status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+      } as GetTransactionResponse;
+    }
+    if (lastError !== null) {
+      throw lastError;
+    }
+    if (opts.allowTimeoutNotFound) {
+      return {
+        status: rpc.Api.GetTransactionStatus.NOT_FOUND,
+      } as GetTransactionResponse;
+    }
+    throw new Error(`transaction ${hash} did not surface on any configured Soroban RPC`);
+  }
+
+  private static transactionHash(tx: SubmittedTransaction): string | undefined {
+    try {
+      return Array.from(tx.hash())
+        .map((byte) => byte.toString(16).padStart(2, "0"))
+        .join("");
+    } catch {
+      return undefined;
+    }
   }
 }

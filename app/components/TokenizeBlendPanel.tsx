@@ -14,6 +14,7 @@ import {
 import type { AppConfig } from "@/lib/config";
 import type { TxPhase } from "@/lib/tx";
 import { bpsToPercent, formatTokenAmount } from "@/lib/format";
+import { readQuote } from "@/lib/sdk";
 import { applySlippage, DEFAULT_SLIPPAGE_BPS } from "@/lib/slippage";
 import {
   buildTokenizeBlendSteps,
@@ -81,15 +82,18 @@ export function TokenizeBlendPanel({
     let cancelled = false;
     setSaleQuote(null);
     setSaleQuoteUnavailable(false);
-    client
-      .quoteSwap({
+    readQuote(
+      {
         marketId: cfg.marketId,
         from: address ?? cfg.simulationSourceAccount,
         assetIn: "YT",
         assetOut: "SY",
         amountIn: estimated.faceAmount,
         minAmountOut: 0n,
-      })
+      },
+      cfg,
+      address ?? cfg.simulationSourceAccount,
+    )
       .then((quote) => {
         if (!cancelled) setSaleQuote(quote);
       })
@@ -100,7 +104,7 @@ export function TokenizeBlendPanel({
     return () => {
       cancelled = true;
     };
-  }, [address, cfg.marketId, cfg.simulationSourceAccount, client, estimated.faceAmount, market, mode]);
+  }, [address, cfg, estimated.faceAmount, market, mode]);
 
   if (
     !isEligible ||

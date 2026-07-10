@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 
 // Mobile-first: the default project emulates a phone viewport. Run with
@@ -9,6 +10,9 @@ import { defineConfig, devices } from "@playwright/test";
 // Next app on :3000 (yours or another project's).
 const PORT = process.env.E2E_PORT ?? "3100";
 const baseURL = process.env.E2E_BASE_URL ?? `http://localhost:${PORT}`;
+const appDir = __dirname;
+
+process.loadEnvFile(path.join(appDir, ".env.local"));
 
 export default defineConfig({
   testDir: "./e2e",

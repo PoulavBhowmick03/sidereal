@@ -28,6 +28,7 @@ import { SubmitButton } from "@/components/SubmitButton";
 import { TxStatus } from "@/components/TxStatus";
 import { MaturityBadge } from "@/components/MaturityBadge";
 import { YieldSourceCard } from "@/components/YieldSourceCard";
+import { readQuote } from "@/lib/sdk";
 
 // Only the four routes the single PT/SY pool exposes (YT via flash route).
 const DIRECTIONS = [
@@ -91,14 +92,18 @@ export default function TradePage() {
     const handle = setTimeout(async () => {
       try {
         const amountIn = parseTokenAmount(amount, cfg.decimals);
-        const q = await client.quoteSwap({
+        const q = await readQuote(
+          {
           marketId: cfg.marketId,
           from: address,
           assetIn: direction.assetIn,
           assetOut: direction.assetOut,
           amountIn,
           minAmountOut: 0n,
-        });
+          },
+          cfg,
+          address,
+        );
         if (!cancelled) setQuote(q);
       } catch (err) {
         if (!cancelled) setQuoteError(err);

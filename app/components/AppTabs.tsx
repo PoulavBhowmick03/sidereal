@@ -2,8 +2,10 @@
 
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { appConfig } from "@/lib/config";
 import { useSlideRect } from "@/lib/useSlideRect";
 
 const TABS = [
@@ -21,6 +23,10 @@ const TABS = [
  *  static underline so nothing is missing. */
 export function AppTabs() {
   const pathname = usePathname();
+  const tabs = useMemo(
+    () => (appConfig().network === "testnet" ? TABS : TABS.filter((tab) => tab.href !== "/demo")),
+    [],
+  );
   const { containerRef, rect } = useSlideRect<HTMLUListElement>('[aria-current="page"]', pathname);
 
   return (
@@ -28,7 +34,7 @@ export function AppTabs() {
       ref={containerRef}
       className="relative flex flex-1 flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:gap-x-10"
     >
-      {TABS.map((tab) => {
+      {tabs.map((tab) => {
         const active = pathname === tab.href;
         return (
           <li key={tab.href}>

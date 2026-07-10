@@ -21,7 +21,7 @@ test.describe("end-to-end protocol flow", () => {
     // 2. Mint with split: deposit USDC, receive PT + YT.
     await page.getByPlaceholder("0.0").fill("100");
     await expect(page.getByText(/you will receive/i)).toBeVisible();
-    await page.getByRole("button", { name: /deposit and split/i }).click();
+    await page.getByRole("button", { name: /deposit, then split/i }).click();
     await expect(page.getByText(/confirmed/i)).toBeVisible({ timeout: 60_000 });
 
     // 3. Swap PT for SY on the trade page.

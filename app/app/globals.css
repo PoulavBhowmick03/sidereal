@@ -6,6 +6,7 @@
 
 :root {
   color-scheme: dark;
+  --font-inter: "Avenir Next", "Helvetica Neue", "Arial Nova";
 }
 
 /* The functional app canvas is the dark carbon/ink darkroom. The marketing

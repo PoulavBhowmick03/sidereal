@@ -3,6 +3,7 @@
 import { spawn } from "node:child_process";
 import path from "node:path";
 import { NextResponse } from "next/server";
+import { appConfig } from "@/lib/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -62,7 +63,16 @@ function repoRoot(): string {
 }
 
 function demoApiEnabled(): boolean {
-  return process.env.NODE_ENV !== "production" || process.env.SIDEREAL_ENABLE_DEMO_API === "1";
+  return (
+    appConfig().network === "testnet" &&
+    (process.env.NODE_ENV !== "production" || process.env.SIDEREAL_ENABLE_DEMO_API === "1")
+  );
+}
+
+function demoApiDisabledMessage(): string {
+  return appConfig().network === "testnet"
+    ? "Demo automation API is disabled in production"
+    : "Demo automation API is disabled on the configured network";
 }
 
 function demoRunnerEndpoint(): string | null {
@@ -284,15 +294,15 @@ async function executeTask(
 }
 
 export async function POST(request: Request) {
-  const proxied = await proxyDemoRequest(request);
-  if (proxied) return proxied;
-
   if (!demoApiEnabled()) {
     return noStoreJson(
-      { ok: false, error: "Demo automation API is disabled in production" },
+      { ok: false, error: demoApiDisabledMessage() },
       { status: 403 },
     );
   }
+
+  const proxied = await proxyDemoRequest(request);
+  if (proxied) return proxied;
   if (!authorizedRunnerRequest(request)) {
     return noStoreJson({ ok: false, error: "Unauthorized demo runner request" }, { status: 401 });
   }
@@ -380,15 +390,15 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const proxied = await proxyDemoRequest(request);
-  if (proxied) return proxied;
-
   if (!demoApiEnabled()) {
     return noStoreJson(
-      { active: false, error: "Demo automation API is disabled in production" },
+      { active: false, error: demoApiDisabledMessage() },
       { status: 403 },
     );
   }
+
+  const proxied = await proxyDemoRequest(request);
+  if (proxied) return proxied;
   if (!authorizedRunnerRequest(request)) {
     return noStoreJson({ active: false, error: "Unauthorized demo runner request" }, { status: 401 });
   }

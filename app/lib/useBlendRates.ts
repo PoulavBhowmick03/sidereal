@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import type { BlendRates } from "@sidereal/sdk";
 import { appConfig } from "./config";
-import { makeClient } from "./sdk";
+import { readBlendRates } from "./sdk";
 
 /**
  * Reads the configured Blend reserve's live rate curve once on mount. Returns
@@ -19,11 +19,13 @@ export function useBlendRates(): BlendRates | null {
   useEffect(() => {
     const cfg = appConfig();
     const { kind, poolAddress, reserveAddress } = cfg.yieldSource;
-    if (kind !== "blend" || !poolAddress || !reserveAddress) return;
+    if (kind !== "blend" || !poolAddress || !reserveAddress) {
+      setRates(null);
+      return;
+    }
 
     let cancelled = false;
-    makeClient(cfg)
-      .getBlendRates(poolAddress, reserveAddress)
+    readBlendRates(poolAddress, reserveAddress, cfg)
       .then((r) => !cancelled && setRates(r))
       .catch(() => !cancelled && setRates(null));
     return () => {

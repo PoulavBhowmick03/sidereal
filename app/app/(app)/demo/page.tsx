@@ -4,6 +4,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BlendWalkthrough } from "@/components/BlendWalkthrough";
+import { appConfig } from "@/lib/config";
+import { stellarExpertAccountUrl, stellarExpertContractUrl } from "@/lib/explorer";
 
 type DemoTaskId = "auth" | "amm-routes";
 type DemoStatus = "idle" | "running" | "passed" | "failed";
@@ -92,7 +94,6 @@ const TASK_TIMEOUT_MS: Record<DemoTaskId, number> = {
   auth: 6 * 60_000,
   "amm-routes": 25 * 60_000,
 };
-const STELLAR_EXPERT_TESTNET = "https://stellar.expert/explorer/testnet";
 const DEFAULT_TERM_SECONDS = 90 * 24 * 60 * 60;
 
 function duration(ms?: number): string {
@@ -119,9 +120,9 @@ function cleanOutput(value: string): string {
   return value.replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, "");
 }
 
-function explorerUrl(address: string): string | null {
-  if (address.startsWith("C")) return `${STELLAR_EXPERT_TESTNET}/contract/${address}`;
-  if (address.startsWith("G")) return `${STELLAR_EXPERT_TESTNET}/account/${address}`;
+function explorerUrl(address: string, networkPassphrase: string): string | null {
+  if (address.startsWith("C")) return stellarExpertContractUrl(address, networkPassphrase);
+  if (address.startsWith("G")) return stellarExpertAccountUrl(address, networkPassphrase);
   return null;
 }
 
@@ -231,6 +232,8 @@ function failedStartResult(step: DemoStep, response: Response, value: Partial<De
 }
 
 export default function DemoPage() {
+  const cfg = useMemo(() => appConfig(), []);
+  const automationEnabled = cfg.network === "testnet";
   const started = useRef(false);
   const logId = useRef(0);
   const streamOffsets = useRef<OutputOffsets>(initialOffsets());
@@ -250,6 +253,10 @@ export default function DemoPage() {
   const [maturityInput, setMaturityInput] = useState("");
 
   useEffect(() => {
+    if (!automationEnabled) {
+      setRunnerAvailability("unavailable");
+      return;
+    }
     let mounted = true;
     void detectDemoRunnerAvailable().then((available) => {
       if (mounted) setRunnerAvailability(available ? "available" : "unavailable");
@@ -257,7 +264,7 @@ export default function DemoPage() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [automationEnabled]);
 
   useEffect(() => {
     setMaturityInput(defaultMaturityInput());
@@ -523,9 +530,36 @@ export default function DemoPage() {
     return {
       ...row,
       value,
-      url: value ? explorerUrl(value) : null,
+      url: value ? explorerUrl(value, cfg.networkPassphrase) : null,
     };
   });
+
+  if (!automationEnabled) {
+    return (
+      <div className="space-y-10">
+        <header className="space-y-3">
+          <h1 className="text-5xl font-light tracking-tight sm:text-6xl">Demo</h1>
+          <p className="max-w-2xl text-smoke">
+            Demo automation stays disabled on mainnet. The backend runner shells out to local repo
+            scripts and testnet transactions, so this route is manual-only on the configured public
+            market.
+          </p>
+        </header>
+
+        <section className="panel-subtle p-5">
+          <p className="label-data">Automation disabled</p>
+          <p className="mt-3 max-w-3xl text-sm leading-relaxed text-smoke">
+            The live market is already deployed on Stellar mainnet. Use the walkthrough below to
+            connect a wallet, bring the correct USDC reserve asset, supply it on Blend, and
+            tokenize the position through Sidereal. The server-side demo runner remains testnet-only
+            by design.
+          </p>
+        </section>
+
+        <BlendWalkthrough />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-10">

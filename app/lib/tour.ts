@@ -62,15 +62,16 @@ export function resolveTourStep(state: TourState): TourStep | null {
   const hasPosition = hasProtocolPosition(state);
 
   if (state.address === null) {
-    return {
-      id: "connect",
-      index: 1,
-      total: TOTAL_STEPS,
-      title: "Connect a wallet",
-      instruction: "Start with a testnet wallet so Sidereal can read your Blend and protocol balances.",
-      target: "wallet",
-    };
-  }
+      return {
+        id: "connect",
+        index: 1,
+        total: TOTAL_STEPS,
+        title: "Connect a wallet",
+        instruction:
+          "Start with a wallet on this market's network so Sidereal can read your Blend and protocol balances.",
+        target: "wallet",
+      };
+    }
 
   if (!hasPosition && pathname !== "/mint") {
     return {

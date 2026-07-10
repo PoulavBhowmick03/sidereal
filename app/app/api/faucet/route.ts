@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { NextResponse } from "next/server";
+import { appConfig } from "@/lib/config";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -14,6 +15,13 @@ const DEFAULT_UPSTREAM_URL =
 const STELLAR_ADDRESS = /^G[A-Z2-7]{55}$/;
 
 export async function GET(request: Request) {
+  if (appConfig().network !== "testnet") {
+    return NextResponse.json(
+      { error: "Blend faucet is disabled outside testnet" },
+      { status: 403, headers: { "cache-control": "no-store" } },
+    );
+  }
+
   const userId = new URL(request.url).searchParams.get("userId");
   if (userId === null || !STELLAR_ADDRESS.test(userId)) {
     return NextResponse.json(

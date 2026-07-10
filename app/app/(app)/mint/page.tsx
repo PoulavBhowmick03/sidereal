@@ -16,7 +16,8 @@ import {
   fundWithFriendbot,
   submitClassicTransaction,
 } from "@/lib/blendFaucet";
-import { TESTNET_PASSPHRASE } from "@/lib/config";
+import { networkLabel } from "@/lib/config";
+import { readTokenBalance } from "@/lib/sdk";
 import { usePosition } from "@/lib/usePosition";
 import { useSidereal } from "@/lib/useSidereal";
 import { useWallet } from "@/lib/wallet";
@@ -39,7 +40,7 @@ const MINT_MODES = [
 ] as const;
 
 const BLEND_USDC_TRUSTLINE_ERROR =
-  "trustline missing for Blend testnet USDC";
+  "trustline missing for this market's USDC";
 
 type FaucetPhase =
   | { kind: "idle" }
@@ -51,8 +52,6 @@ const wait = (milliseconds: number) =>
   new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
 function walletTokenBalanceError(error: unknown, isBlendMarket: boolean): string {
-  if (isBlendMarket) return BLEND_USDC_TRUSTLINE_ERROR;
-
   const text =
     error instanceof Error
       ? `${error.name} ${error.message} ${error.stack ?? ""}`
@@ -67,7 +66,9 @@ function walletTokenBalanceError(error: unknown, isBlendMarket: boolean): string
   ) {
     return BLEND_USDC_TRUSTLINE_ERROR;
   }
-  return "unable to read wallet USDC balance";
+  return isBlendMarket
+    ? "unable to read the wallet balance for this market's USDC"
+    : "unable to read wallet USDC balance";
 }
 
 export default function MintPage() {
@@ -88,7 +89,8 @@ export default function MintPage() {
   const position = usePosition(address, refreshKey);
   const blendPosition = useBlendPosition(address, refreshKey);
   const split = mode === "split";
-  const isTestnet = cfg.networkPassphrase === TESTNET_PASSPHRASE;
+  const isTestnet = cfg.network === "testnet";
+  const networkName = networkLabel(cfg.networkPassphrase);
 
   // Preview the deposit and split using the contract's own math:
   //   SY minted on deposit  = amount * WAD / rate   (SY wrapper)
@@ -121,21 +123,22 @@ export default function MintPage() {
     let cancelled = false;
     setUnderlyingBalance(null);
     setUnderlyingBalanceError(null);
-    client
-      .getTokenBalance(market.underlying, address)
+    readTokenBalance(market.underlying, address, cfg, address)
       .then((balance) => {
         if (!cancelled) setUnderlyingBalance(balance);
       })
       .catch((error) => {
         if (cancelled) return;
         setUnderlyingBalance(0n);
-        setUnderlyingBalanceError(walletTokenBalanceError(error, cfg.yieldSource.kind === "blend"));
+        setUnderlyingBalanceError(
+          walletTokenBalanceError(error, cfg.yieldSource.kind === "blend"),
+        );
       });
 
     return () => {
       cancelled = true;
     };
-  }, [address, client, market, cfg.yieldSource.kind, faucetRefresh]);
+  }, [address, cfg, market, faucetRefresh]);
 
   const amtError =
     underlyingBalanceError ?? amountError(amount, cfg.decimals, underlyingBalance ?? undefined);
@@ -178,7 +181,7 @@ export default function MintPage() {
       setFaucetPhase({ kind: "working", step: "Awaiting signature" });
       const signedXdr = await signTransaction(faucet.xdr);
       setFaucetPhase({ kind: "working", step: "Submitting faucet transaction" });
-      const hash = await submitClassicTransaction(signedXdr);
+      const hash = await submitClassicTransaction(signedXdr, cfg.horizonUrl);
 
       // Horizon confirms inclusion, but the Soroban RPC that serves balance
       // reads can lag a ledger; poll briefly so the form unlocks on success.
@@ -187,7 +190,7 @@ export default function MintPage() {
       let granted = 0n;
       while (granted === 0n && Date.now() < deadline) {
         await wait(1_000);
-        granted = await client.getTokenBalance(market.underlying, address).catch(() => 0n);
+        granted = await readTokenBalance(market.underlying, address, cfg, address).catch(() => 0n);
       }
       setFaucetRefresh((key) => key + 1);
       setFaucetPhase({ kind: "done", hash });
@@ -236,17 +239,19 @@ export default function MintPage() {
               Getting started
             </h2>
             <span className="rounded-pill border border-white/15 px-2.5 py-1 text-[13px] uppercase tracking-[0.1em] text-smoke">
-              Testnet
+              {networkName}
             </span>
           </div>
           <ol className="grid gap-2 text-xs leading-relaxed text-smoke sm:grid-cols-2">
             <li>
-              <span className="text-paper">Connect:</span> a Stellar testnet wallet in your
+              <span className="text-paper">Connect:</span> a Stellar {networkLabel(cfg.networkPassphrase, "lower")} wallet in your
               browser. All transactions are signed by you.
             </li>
             <li>
-              <span className="text-paper">Fund:</span> if your wallet holds no Blend USDC, a
-              faucet option appears below to get testnet USDC.
+              <span className="text-paper">Fund:</span>{" "}
+              {isTestnet
+                ? "if your wallet holds no Blend reserve USDC, a faucet option appears below to fund the exact asset."
+                : "bring the configured Circle USDC reserve asset to this wallet before minting."}
             </li>
             <li>
               <span className="text-paper">Mint:</span> deposit USDC to receive SY, and
@@ -313,9 +318,9 @@ export default function MintPage() {
             </p>
             {cfg.yieldSource.kind === "blend" ? (
               <p className="text-xs leading-relaxed text-ash">
-                Expected asset: {cfg.yieldSource.reserveAsset || "Blend testnet USDC"} via{" "}
-                {cfg.yieldSource.reserveAddress}. Circle faucet USDC on another issuer will not
-                appear here.
+                Expected asset: {cfg.yieldSource.reserveAsset || "the market reserve asset"} via{" "}
+                {cfg.yieldSource.reserveAddress}. USDC on another issuer or wrapper will not appear
+                here.
               </p>
             ) : null}
 

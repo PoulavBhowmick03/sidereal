@@ -1,14 +1,14 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, expect, it } from "vitest";
-import { TESTNET_PASSPHRASE } from "../lib/config";
+import { PUBLIC_PASSPHRASE, TESTNET_PASSPHRASE } from "../lib/config";
 import {
   stellarExpertAccountUrl,
+  stellarExpertContractUrl,
   stellarExpertNetwork,
   stellarExpertTxUrl,
 } from "../lib/explorer";
 
-const PUBLIC_PASSPHRASE = "Public Global Stellar Network ; September 2015";
 const HASH = "d4cecc93e0ba947ff4d913b30bf230315995e25abb056ab710bda073a3004583";
 
 describe("stellarExpertNetwork", () => {
@@ -44,6 +44,13 @@ describe("stellarExpertAccountUrl", () => {
     const g = "GBGHELMOABS7WCYOMJTWQRGQ6VZYLYXXMLE7JJAHJ6I4WW7FMJSDERN3";
     expect(stellarExpertAccountUrl(g, TESTNET_PASSPHRASE)).toBe(
       `https://stellar.expert/explorer/testnet/account/${g}`,
+    );
+  });
+
+  it("builds a public contract link", () => {
+    const c = "CCLFK26PU5GNMCUAGBBBGKVXE6GWYA2PB3RFTC7Y5HRVPPBRGWYUZKUU";
+    expect(stellarExpertContractUrl(c, PUBLIC_PASSPHRASE)).toBe(
+      `https://stellar.expert/explorer/public/contract/${c}`,
     );
   });
 });

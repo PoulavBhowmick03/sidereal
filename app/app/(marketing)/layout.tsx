@@ -8,11 +8,14 @@ import { Atmosphere } from "@/components/Atmosphere";
 import { Grain } from "@/components/Grain";
 import { RollingLink } from "@/components/RollingLink";
 import { SmoothScroll } from "@/components/SmoothScroll";
+import { appConfig, networkLabel } from "@/lib/config";
 
 // Marketing chrome for the "cinematic darkroom" landing: a fixed atmospheric
 // canvas, a quiet top bar that inverts on scroll, and the existing reveal
 // footer. The primary action is "Launch App", which opens the app at /trade.
 export default function MarketingLayout({ children }: { children: React.ReactNode }) {
+  const cfg = appConfig();
+
   return (
     <div className="flex min-h-screen flex-col text-paper">
       <SmoothScroll />
@@ -42,7 +45,7 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
               >
                 Docs
               </RollingLink>
-              <span className="label-data">Blend USDC · Testnet</span>
+              <span className="label-data">Blend USDC · {networkLabel(cfg.networkPassphrase)}</span>
             </div>
           </div>
           <p className="border-t border-white/10 pt-6 text-[13px] text-ash">

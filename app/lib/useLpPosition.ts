@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import type { LpPosition } from "@sidereal/sdk";
 import { appConfig } from "./config";
-import { makeClient } from "./sdk";
+import { readLpPosition } from "./sdk";
 
 /**
  * Fetches the connected holder's AMM LP position. Pass a changing refresh key
@@ -21,8 +21,7 @@ export function useLpPosition(address: string | null, refreshKey: unknown = 0): 
     }
     let cancelled = false;
     const cfg = appConfig();
-    makeClient(cfg, address)
-      .getLpPosition(address, cfg.marketId)
+    readLpPosition(address, cfg.marketId, cfg, address)
       .then((p) => !cancelled && setPosition(p))
       .catch(() => !cancelled && setPosition(null));
     return () => {

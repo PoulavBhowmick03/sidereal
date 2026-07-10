@@ -8,6 +8,7 @@ import { appConfig, isDeployed } from "@/lib/config";
 import { useWallet } from "@/lib/wallet";
 import { useBlendPosition } from "@/lib/useBlendPosition";
 import { usePosition } from "@/lib/usePosition";
+import { layoutCalloutBox, type CalloutBox } from "@/lib/tourOverlayLayout";
 import {
   TOUR_REPLAY_EVENT,
   TOUR_VISIBILITY_EVENT,
@@ -22,10 +23,6 @@ import {
 
 const REFRESH_MS = 15_000;
 const MEASURE_MS = 500;
-const CALLOUT_WIDTH = 320;
-const CALLOUT_HEIGHT = 176;
-const GAP = 18;
-const EDGE = 16;
 
 interface TargetBox {
   left: number;
@@ -33,18 +30,6 @@ interface TargetBox {
   width: number;
   height: number;
   radius: string;
-}
-
-interface CalloutBox {
-  left: number;
-  top: number;
-  width: number;
-  arrowLeft: number;
-  placement: "above" | "below";
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.max(min, Math.min(max, value));
 }
 
 function targetSelector(key: string): string {
@@ -66,6 +51,7 @@ function measureTarget(step: TourStep): { target: TargetBox; callout: CalloutBox
 
   const rect = element.getBoundingClientRect();
   if (rect.width <= 0 || rect.height <= 0) return null;
+  const headerBottom = element.closest("header")?.getBoundingClientRect().bottom ?? null;
 
   const target: TargetBox = {
     left: rect.left - 6,
@@ -75,24 +61,9 @@ function measureTarget(step: TourStep): { target: TargetBox; callout: CalloutBox
     radius: window.getComputedStyle(element).borderRadius || "9999px",
   };
 
-  const width = Math.min(CALLOUT_WIDTH, window.innerWidth - EDGE * 2);
-  const center = rect.left + rect.width / 2;
-  const left = clamp(center - width / 2, EDGE, window.innerWidth - width - EDGE);
-  const belowTop = rect.bottom + GAP;
-  const fitsBelow = belowTop + CALLOUT_HEIGHT <= window.innerHeight - EDGE;
-  const top = fitsBelow
-    ? belowTop
-    : clamp(rect.top - CALLOUT_HEIGHT - GAP, EDGE, window.innerHeight - CALLOUT_HEIGHT - EDGE);
-
   return {
     target,
-    callout: {
-      left,
-      top,
-      width,
-      arrowLeft: clamp(center - left - 6, 22, width - 22),
-      placement: fitsBelow ? "below" : "above",
-    },
+    callout: layoutCalloutBox(rect, { width: window.innerWidth, height: window.innerHeight }, headerBottom),
   };
 }
 

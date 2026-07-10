@@ -18,8 +18,8 @@ export function DeploymentBanner() {
     <div className="border-b border-white/10 bg-carbon">
       <p className="mx-auto max-w-[1280px] px-6 py-2.5 text-xs text-smoke">
         No market is configured yet. Pool stats and actions stay inert until contracts are deployed
-        (run <code className="font-mono text-paper">make deploy</code> to wire testnet
-        addresses into <code className="font-mono text-paper">app/.env.local</code>).
+        (wire the deployed addresses into <code className="font-mono text-paper">app/.env.local</code>{" "}
+        for the network you want to run locally).
       </p>
     </div>
   );

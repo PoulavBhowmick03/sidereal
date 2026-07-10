@@ -3,14 +3,14 @@
 "use client";
 
 import { useMemo } from "react";
-import { appConfig, TESTNET_PASSPHRASE } from "../lib/config";
+import { appConfig, networkLabel } from "../lib/config";
 import { useWallet } from "../lib/wallet";
 
 /** Warns when the connected wallet is on a different network than the app. */
 export function NetworkBanner() {
   const { networkMismatch } = useWallet();
   const expected = useMemo(
-    () => (appConfig().networkPassphrase === TESTNET_PASSPHRASE ? "testnet" : "the configured network"),
+    () => networkLabel(appConfig().networkPassphrase, "lower"),
     [],
   );
   if (!networkMismatch) return null;

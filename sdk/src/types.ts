@@ -36,6 +36,8 @@ export interface ContractAddresses {
 export interface StellarYTOptions {
   /** Soroban RPC endpoint, e.g. https://soroban-testnet.stellar.org. */
   rpcUrl: string;
+  /** Additional RPC endpoints tried in order when the primary is unavailable. */
+  rpcFallbackUrls?: string[];
   /** Network passphrase, e.g. "Test SDF Network ; September 2015". */
   networkPassphrase: string;
   /** Funded G-account used only as the source for read simulations. */

@@ -15,6 +15,7 @@ import { Spotlight } from "@/components/Spotlight";
 import { TickerBand } from "@/components/TickerBand";
 import { Term } from "@/components/Term";
 import { WordReveal } from "@/components/WordReveal";
+import { appConfig, networkLabel } from "@/lib/config";
 // The token legs live in InvariantBand, defined in the protocol's own terms.
 // No invented financial figures anywhere on this page.
 // Token names in the copy carry the mono Term voice so they read as objects.
@@ -67,6 +68,8 @@ const FACTS = [
 ];
 
 export default function LandingPage() {
+  const cfg = appConfig();
+
   return (
     <>
       {/* Hero: clean ink editorial frame, no atmospheric render. The headline
@@ -88,7 +91,7 @@ export default function LandingPage() {
               Launch App
             </Link>
             <span className="font-mono text-sm tracking-[0.2em] text-ash">
-              Blend USDC · 3-month maturity
+              Blend USDC · fixed-term market
             </span>
           </div>
         </Parallax>
@@ -149,7 +152,7 @@ export default function LandingPage() {
             <h2 className="text-4xl font-light tracking-tight sm:text-5xl">
               <WordReveal brightWords={[0]}>Protocol overview</WordReveal>
             </h2>
-            <p className="glow-signal label-data text-amber">Live · Testnet</p>
+            <p className="glow-signal label-data text-amber">Live · {networkLabel(cfg.networkPassphrase)}</p>
           </div>
           <div className="mt-12 grid grid-cols-2 border border-white/10 lg:grid-cols-4">
             {FACTS.map((fact, i) => (

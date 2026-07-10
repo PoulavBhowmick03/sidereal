@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import type { BlendPosition } from "@sidereal/sdk";
 import { appConfig } from "./config";
-import { makeClient } from "./sdk";
+import { readBlendPosition } from "./sdk";
 
 /**
  * Reads the connected wallet's existing deposit in the configured Blend
@@ -28,8 +28,7 @@ export function useBlendPosition(
     }
 
     let cancelled = false;
-    makeClient(cfg, address)
-      .getBlendPosition(poolAddress, reserveAddress, address)
+    readBlendPosition(poolAddress, reserveAddress, address, cfg, address)
       .then((p) => !cancelled && setPosition(p))
       .catch(() => !cancelled && setPosition(null));
     return () => {

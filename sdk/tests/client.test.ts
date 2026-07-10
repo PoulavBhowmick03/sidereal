@@ -7,15 +7,31 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 // which contract call the client made. State lives on globalThis so tests can
 // drive it without import gymnastics through the hoisted factory.
 vi.mock("@stellar/stellar-sdk", () => {
+  const fromUrl = <T>(map: Record<string, T>, url: string, fallback: T): T =>
+    Object.prototype.hasOwnProperty.call(map, url) ? map[url]! : fallback;
+
   const state = {
     returns: {} as Record<string, unknown>,
+    returnsByUrl: {} as Record<string, Record<string, unknown>>,
     simulationError: null as string | null,
+    simulationErrorByUrl: {} as Record<string, string | null>,
+    simulateThrowByUrl: {} as Record<string, string>,
     accountExists: true,
+    accountExistsByUrl: {} as Record<string, boolean>,
+    accountSequenceByUrl: {} as Record<string, string>,
     sendStatus: "PENDING" as string,
+    sendStatusByUrl: {} as Record<string, string>,
     sendHash: "txhash123",
+    sendErrorByUrl: {} as Record<string, string>,
     getTxStatus: "SUCCESS" as string,
+    getTxStatusByUrl: {} as Record<string, string>,
+    getTxErrorByUrl: {} as Record<string, string>,
+    prepareErrorByUrl: {} as Record<string, string>,
     calls: [] as Array<{ method: string; args: unknown[] }>,
     accountRequests: [] as string[],
+    accountRequestLog: [] as Array<{ url: string; account: string }>,
+    sendRequests: [] as string[],
+    getTransactionRequests: [] as string[],
   };
   (globalThis as Record<string, unknown>).__sdkMock = state;
 
@@ -72,25 +88,57 @@ vi.mock("@stellar/stellar-sdk", () => {
     ) {}
     async getAccount(addr: string) {
       state.accountRequests.push(addr);
-      if (!state.accountExists) throw new Error("account not found");
-      return { accountId: () => addr, sequenceNumber: () => "1" };
+      state.accountRequestLog.push({ url: this.url, account: addr });
+      if (!fromUrl(state.accountExistsByUrl, this.url, state.accountExists)) {
+        throw new Error("account not found");
+      }
+      let sequence = fromUrl(state.accountSequenceByUrl, this.url, "1");
+      return {
+        accountId: () => addr,
+        sequenceNumber: () => sequence,
+        incrementSequenceNumber: () => {
+          sequence = (BigInt(sequence) + 1n).toString();
+        },
+      };
     }
     async simulateTransaction(tx: { ops: Array<{ method: string; args: unknown[] }> }) {
       const op = tx.ops[0]!;
       state.calls.push({ method: op.method, args: op.args });
-      if (state.simulationError) return { error: state.simulationError };
-      const value = state.returns[op.method];
+      const simulateThrow = state.simulateThrowByUrl[this.url];
+      if (simulateThrow) throw new Error(simulateThrow);
+      const simulationError = fromUrl(
+        state.simulationErrorByUrl,
+        this.url,
+        state.simulationError,
+      );
+      if (simulationError) return { error: simulationError };
+      const perUrlReturns = state.returnsByUrl[this.url] ?? {};
+      const value = Object.prototype.hasOwnProperty.call(perUrlReturns, op.method)
+        ? perUrlReturns[op.method]
+        : state.returns[op.method];
       return { result: { retval: Array.isArray(value) ? value.shift() : value } };
     }
     async prepareTransaction(tx: { ops: Array<{ method: string; args: unknown[] }> }) {
+      const prepareError = state.prepareErrorByUrl[this.url];
+      if (prepareError) throw new Error(prepareError);
       for (const op of tx.ops) state.calls.push({ method: op.method, args: op.args });
       return { toXDR: () => "PREPARED:" + tx.ops.map((o) => o.method).join("+") };
     }
     async sendTransaction() {
-      return { status: state.sendStatus, hash: state.sendHash, errorResult: { code: "x" } };
+      state.sendRequests.push(this.url);
+      const sendError = state.sendErrorByUrl[this.url];
+      if (sendError) throw new Error(sendError);
+      return {
+        status: fromUrl(state.sendStatusByUrl, this.url, state.sendStatus),
+        hash: state.sendHash,
+        errorResult: { code: "x" },
+      };
     }
     async getTransaction() {
-      return { status: state.getTxStatus };
+      state.getTransactionRequests.push(this.url);
+      const getTxError = state.getTxErrorByUrl[this.url];
+      if (getTxError) throw new Error(getTxError);
+      return { status: fromUrl(state.getTxStatusByUrl, this.url, state.getTxStatus) };
     }
   }
 
@@ -103,13 +151,26 @@ import { StellarYT } from "../src/index.js";
 
 type MockState = {
   returns: Record<string, unknown>;
+  returnsByUrl: Record<string, Record<string, unknown>>;
   simulationError: string | null;
+  simulationErrorByUrl: Record<string, string | null>;
+  simulateThrowByUrl: Record<string, string>;
   accountExists: boolean;
+  accountExistsByUrl: Record<string, boolean>;
+  accountSequenceByUrl: Record<string, string>;
   sendStatus: string;
+  sendStatusByUrl: Record<string, string>;
   sendHash: string;
+  sendErrorByUrl: Record<string, string>;
   getTxStatus: string;
+  getTxStatusByUrl: Record<string, string>;
+  getTxErrorByUrl: Record<string, string>;
+  prepareErrorByUrl: Record<string, string>;
   calls: Array<{ method: string; args: unknown[] }>;
   accountRequests: string[];
+  accountRequestLog: Array<{ url: string; account: string }>;
+  sendRequests: string[];
+  getTransactionRequests: string[];
 };
 
 const state = () => (globalThis as Record<string, unknown>).__sdkMock as MockState;
@@ -117,9 +178,15 @@ const state = () => (globalThis as Record<string, unknown>).__sdkMock as MockSta
 const contracts = { sy: "SY", pt: "PT", yt: "YT", tokenizer: "TK", market: "AMM" };
 const simulationSourceAccount = "GSIMULATIONSOURCE";
 
-function newClient() {
+function newClient(
+  overrides: Partial<{
+    rpcUrl: string;
+    rpcFallbackUrls: string[];
+  }> = {},
+) {
   return new StellarYT({
-    rpcUrl: "http://localhost:8000",
+    rpcUrl: overrides.rpcUrl ?? "http://localhost:8000",
+    rpcFallbackUrls: overrides.rpcFallbackUrls,
     networkPassphrase: "Test SDF Network ; September 2015",
     simulationSourceAccount,
     contracts,
@@ -129,12 +196,26 @@ function newClient() {
 beforeEach(() => {
   const s = state();
   s.returns = {};
+  s.returnsByUrl = {};
   s.simulationError = null;
+  s.simulationErrorByUrl = {};
+  s.simulateThrowByUrl = {};
   s.accountExists = true;
+  s.accountExistsByUrl = {};
+  s.accountSequenceByUrl = {};
   s.sendStatus = "PENDING";
+  s.sendStatusByUrl = {};
+  s.sendHash = "txhash123";
+  s.sendErrorByUrl = {};
   s.getTxStatus = "SUCCESS";
+  s.getTxStatusByUrl = {};
+  s.getTxErrorByUrl = {};
+  s.prepareErrorByUrl = {};
   s.calls = [];
   s.accountRequests = [];
+  s.accountRequestLog = [];
+  s.sendRequests = [];
+  s.getTransactionRequests = [];
 });
 
 describe("getMarket", () => {
@@ -193,8 +274,31 @@ describe("getMarket", () => {
     await newClient().getMarket("mkt");
 
     expect(state().accountRequests).not.toContain(contracts.market);
-    expect(state().accountRequests).toHaveLength(10);
+    expect(state().accountRequests).toHaveLength(1);
     expect(state().accountRequests.every((account) => account === simulationSourceAccount)).toBe(
+      true,
+    );
+  });
+
+  it("fails over to a secondary RPC when the primary cannot simulate", async () => {
+    state().simulateThrowByUrl["http://localhost:8000"] = "fetch failed";
+    state().returnsByUrl["http://localhost:8001"] = {
+      exchange_rate: 1_000_000_000_000_000_000n,
+      twap_apy: 860n,
+      spot_apy: 875n,
+      twap_warming_up: false,
+      maturity: 2_000_000_000n,
+      underlying: "USDC",
+      reserve_pt: 500n,
+      reserve_sy: 700n,
+      total_lp: 1_000n,
+      config: { fee_bps: 10n },
+    };
+
+    const market = await newClient({ rpcFallbackUrls: ["http://localhost:8001"] }).getMarket("mkt");
+
+    expect(market.underlying).toBe("USDC");
+    expect(state().accountRequestLog.some((entry) => entry.url === "http://localhost:8001")).toBe(
       true,
     );
   });
@@ -400,6 +504,21 @@ describe("transaction builders", () => {
     expect(env.networkPassphrase).toContain("Test SDF");
   });
 
+  it("buildDeposit falls back when the primary RPC cannot prepare the tx", async () => {
+    state().prepareErrorByUrl["http://localhost:8000"] = "503 service unavailable";
+
+    const env = await newClient({ rpcFallbackUrls: ["http://localhost:8001"] }).buildDeposit({
+      marketId: "mkt",
+      from: "G1",
+      underlyingAmount: 100n,
+    });
+
+    expect(env.xdr).toBe("PREPARED:deposit");
+    expect(state().accountRequestLog.some((entry) => entry.url === "http://localhost:8001")).toBe(
+      true,
+    );
+  });
+
   it("buildSplit builds a single split op", async () => {
     const env = await newClient().buildSplit({ from: "G1", syAmount: 100n });
     expect(env.xdr).toBe("PREPARED:split");
@@ -538,6 +657,39 @@ describe("submit", () => {
     // After confirmation it re-reads the signer account so a follow-up build
     // (e.g. split after deposit) cannot pick up a stale sequence (txBadSeq).
     expect(state().accountRequests).toContain("GSIGNERSOURCE");
+  });
+
+  it("submits on a fallback RPC when the primary send fails", async () => {
+    state().sendErrorByUrl["http://localhost:8000"] = "fetch failed";
+    state().sendStatusByUrl["http://localhost:8001"] = "PENDING";
+    state().getTxStatusByUrl["http://localhost:8001"] = "SUCCESS";
+
+    const res = await newClient({ rpcFallbackUrls: ["http://localhost:8001"] }).submit("SIGNEDXDR");
+
+    expect(res.hash).toBe("txhash123");
+    expect(state().sendRequests).toEqual(["http://localhost:8000", "http://localhost:8001"]);
+  });
+
+  it("polls other RPCs when the accepting provider has not indexed the tx yet", async () => {
+    state().sendStatusByUrl["http://localhost:8000"] = "PENDING";
+    state().getTxStatusByUrl["http://localhost:8000"] = "NOT_FOUND";
+    state().getTxStatusByUrl["http://localhost:8001"] = "SUCCESS";
+
+    const res = await newClient({ rpcFallbackUrls: ["http://localhost:8001"] }).submit("SIGNEDXDR");
+
+    expect(res.status).toBe("SUCCESS");
+    expect(state().getTransactionRequests).toContain("http://localhost:8001");
+  });
+
+  it("treats TRY_AGAIN_LATER as transient and accepts DUPLICATE on another RPC", async () => {
+    state().sendStatusByUrl["http://localhost:8000"] = "TRY_AGAIN_LATER";
+    state().sendStatusByUrl["http://localhost:8001"] = "DUPLICATE";
+    state().getTxStatusByUrl["http://localhost:8001"] = "SUCCESS";
+
+    const res = await newClient({ rpcFallbackUrls: ["http://localhost:8001"] }).submit("SIGNEDXDR");
+
+    expect(res.hash).toBe("txhash123");
+    expect(state().sendRequests).toEqual(["http://localhost:8000", "http://localhost:8001"]);
   });
 });
 

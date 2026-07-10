@@ -61,15 +61,17 @@ describe("Blend faucet", () => {
     expect(fetchMock).toHaveBeenCalledWith("https://friendbot.example/?addr=GUSER");
   });
 
-  it("submits signed XDR to testnet Horizon", async () => {
+  it("submits signed XDR to the configured Horizon", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ hash: "txhash" }), { status: 200 }),
     );
     vi.stubGlobal("fetch", fetchMock);
 
-    await expect(submitClassicTransaction("SIGNEDXDR")).resolves.toBe("txhash");
+    await expect(
+      submitClassicTransaction("SIGNEDXDR", "https://horizon.example"),
+    ).resolves.toBe("txhash");
     expect(fetchMock).toHaveBeenCalledWith(
-      "https://horizon-testnet.stellar.org/transactions",
+      "https://horizon.example/transactions",
       expect.objectContaining({
         method: "POST",
         body: new URLSearchParams({ tx: "SIGNEDXDR" }),
@@ -88,6 +90,8 @@ describe("Blend faucet", () => {
       ),
     );
 
-    await expect(submitClassicTransaction("SIGNEDXDR")).rejects.toThrow(/tx_bad_seq/);
+    await expect(
+      submitClassicTransaction("SIGNEDXDR", "https://horizon.example"),
+    ).rejects.toThrow(/tx_bad_seq/);
   });
 });

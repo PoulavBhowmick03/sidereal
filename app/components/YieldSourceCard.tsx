@@ -16,13 +16,13 @@ function sourceStatus(source: YieldSourceConfig): { label: string; body: string;
   if (source.kind === "circle") {
     return {
       label: "No external yield",
-      body: "This market wraps Circle testnet USDC directly. Tokenization works, but yield is not sourced from another protocol.",
+      body: "This market wraps Circle USDC directly. Tokenization works, but yield is not sourced from another protocol.",
       tone: "idle",
     };
   }
   return {
     label: "Simulated rate",
-    body: "This market uses the mock testnet rate path. It is useful for contract flows, not real protocol yield.",
+    body: "This market uses the mock rate path. It is useful for contract flows, not real protocol yield.",
     tone: "idle",
   };
 }
