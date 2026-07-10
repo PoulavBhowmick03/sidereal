@@ -131,8 +131,10 @@ impl YtToken {
     /// plus what a settle at the current SY rate would add. The contract reads
     /// the rate from the SY contract itself, so no caller can supply a fake one.
     ///
-    /// Point-in-time read of the live rate: the executed `claim_yield` amount
-    /// may differ if the rate moves between this quote and submission.
+    /// Before maturity this is a point-in-time read of the live rate, so the
+    /// executed `claim_yield` amount may differ if the rate moves between this
+    /// quote and submission. After maturity it uses the tokenizer's frozen
+    /// maturity rate (see `preview_rate`), so it no longer tracks live accrual.
     pub fn preview_claim_yield(env: Env, holder: Address) -> Result<i128, Error> {
         let config = Self::read_config(&env)?;
         let rate = Self::preview_rate(&env, &config);

@@ -148,10 +148,12 @@ rather than blocking or racing it:
   checkpoint, so a regressed rate pays nothing until it recovers. The holder
   keeps their banked ledger.
 
-**Previews are point-in-time.** `preview_recombine` and `preview_claim_yield`
-read the live Blend SY rate at call time; if the rate moves before the matching
-`recombine` or `claim_yield` submits, the executed SY-share amount can differ
-from the quote. This is benign for recombine: it returns `pt_face` of principal
+**Previews are point-in-time.** `preview_recombine` and, before maturity,
+`preview_claim_yield` read the live Blend SY rate at call time; if the rate
+moves before the matching `recombine` or `claim_yield` submits, the executed
+SY-share amount can differ from the quote. (After maturity, `preview_claim_yield`
+uses the tokenizer's frozen maturity rate, so it no longer tracks live accrual;
+`recombine` is pre-maturity only.) This is benign for recombine: it returns `pt_face` of principal
 in underlying terms regardless of rate, so a rate move changes the share count,
 not the redeemed value. Unlike the AMM entrypoints, `recombine` has no
 `min_sy_out` floor — by design, since nothing on-chain composes on an exact
