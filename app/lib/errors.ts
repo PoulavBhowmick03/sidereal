@@ -28,6 +28,7 @@ const MESSAGES: Record<ErrorContext, Record<number, string>> = {
     4: "Invalid exchange rate.",
     5: "Insufficient balance.",
     6: "Amount is too large.",
+    12: "Not authorized.",
   },
 };
 

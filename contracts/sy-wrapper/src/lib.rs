@@ -68,6 +68,7 @@ pub enum Error {
     ReadOnlyExchangeRate = 9,
     InvalidBlendReserve = 10,
     BlendWithdrawalFailed = 11,
+    NotAuthorized = 12,
 }
 
 /// Emitted when an admin re-syncs the stored Blend reserve index after the pool
@@ -143,7 +144,7 @@ impl SyWrapper {
         let config = Self::read_config(&env)?;
         admin.require_auth();
         if admin != config.admin {
-            return Err(Error::NotInitialized);
+            return Err(Error::NotAuthorized);
         }
         if config.pool.is_some() {
             return Err(Error::ReadOnlyExchangeRate);
@@ -182,7 +183,7 @@ impl SyWrapper {
         let mut config = Self::read_config(&env)?;
         admin.require_auth();
         if admin != config.admin {
-            return Err(Error::NotInitialized);
+            return Err(Error::NotAuthorized);
         }
         // Only a Blend-backed wrapper has a reserve index to migrate.
         let pool = match &config.pool {
@@ -1121,5 +1122,18 @@ mod test {
         fixture.client.deposit(&fixture.alice, &(1_000 * WAD));
         fixture.client.set_exchange_rate(&fixture.admin, &i128::MAX);
         fixture.client.redeem(&fixture.alice, &(1_000 * WAD));
+    }
+
+    // M4: a wrong-caller rejection on set_exchange_rate must surface as
+    // NotAuthorized (#12), not the misleading NotInitialized (#2) — the
+    // wrapper *is* initialized, the caller just isn't its admin.
+    #[test]
+    #[should_panic(expected = "Error(Contract, #12)")]
+    fn set_exchange_rate_rejects_non_admin_caller() {
+        let fixture = fixture();
+        initialize(&fixture);
+        fixture
+            .client
+            .set_exchange_rate(&fixture.bob, &1_100_000_000_000_000_000);
     }
 }

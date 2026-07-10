@@ -148,6 +148,16 @@ rather than blocking or racing it:
   checkpoint, so a regressed rate pays nothing until it recovers. The holder
   keeps their banked ledger.
 
+**Previews are point-in-time.** `preview_recombine` and `preview_claim_yield`
+read the live Blend SY rate at call time; if the rate moves before the matching
+`recombine` or `claim_yield` submits, the executed SY-share amount can differ
+from the quote. This is benign for recombine: it returns `pt_face` of principal
+in underlying terms regardless of rate, so a rate move changes the share count,
+not the redeemed value. Unlike the AMM entrypoints, `recombine` has no
+`min_sy_out` floor — by design, since nothing on-chain composes on an exact
+recombine share count today. A caller that needs one should compare
+`preview_recombine` to its bound client-side before submitting.
+
 **Maturity and post-maturity.** The tokenizer freezes the SY rate at maturity
 (snapshotted on the first post-maturity access, or via a permissionless
 `freeze_maturity_rate` poke). Redemption and the pro-rata cap use the frozen
@@ -326,6 +336,7 @@ YT is already implicitly an option on yield direction. Building an explicit opti
 | Archived LP balance entries (persistent-storage TTL lapses) | LP balances are persistent entries: on TTL lapse Soroban archives them (does not delete), and a `RestoreFootprintOp` restores them at the transaction layer, so funds are recoverable without any contract entrypoint. `bump_lp_ttl` plus the app keepalive keep live entries fresh; restore is the documented recovery for lapsed ones |
 | YT claimants race for the junior surplus first-come | Accepted v1 policy: PT seniority is enforced exactly (the reservation is capped before any YT payout); how the junior surplus splits among YT claimants during a shortfall is first-come rather than pro-rata. A pro-rata junior split needs an aggregate banked-yield ledger, deferred to v2 |
 | Reserve-index migration is admin-gated | Accepted v1 admin surface: the migration validates the new index's asset against `config.underlying` on the pool, so the admin can only re-point at the true reserve, never a different asset. The contracts have no upgrade entrypoint, so this is the only admin lever besides idle-mode rate setting, which production deploys assert dead (`record-deploy-provenance.sh` refuses non-Blend wrappers) |
+| Standalone YT `burn` breaks PT/YT total-supply parity | PT and YT total supplies are equal under split and recombine, but the SEP-41 `burn` on YT is holder-privileged and can burn a holder's own YT without touching PT, dropping YT supply below PT supply. This is economically inert: the tokenizer's economic paths — escrow coverage, PT-senior cap, and pro-rata — read only `pt_total_supply` (tokenizer/src/lib.rs:184,277,319,378), never YT supply, and per-holder recombine operates on the holder's own balances regardless of global supply. The burner forfeits only their own future yield to escrow, which favors PT seniority |
 
 ---
 

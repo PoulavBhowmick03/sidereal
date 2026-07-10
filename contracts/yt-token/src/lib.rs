@@ -130,6 +130,9 @@ impl YtToken {
     /// Total SY shares claimable by `holder` right now: already-banked yield
     /// plus what a settle at the current SY rate would add. The contract reads
     /// the rate from the SY contract itself, so no caller can supply a fake one.
+    ///
+    /// Point-in-time read of the live rate: the executed `claim_yield` amount
+    /// may differ if the rate moves between this quote and submission.
     pub fn preview_claim_yield(env: Env, holder: Address) -> Result<i128, Error> {
         let config = Self::read_config(&env)?;
         let rate = Self::preview_rate(&env, &config);
@@ -291,6 +294,10 @@ impl YtToken {
     /// tokenizer's recombine burns through `burn_settled` instead, passing the
     /// rate down, because it is on the call stack here and cannot be called
     /// back into.
+    ///
+    /// This can drop YT total_supply below PT total_supply by design — not a
+    /// bug. No economic path reads YT total_supply; the tokenizer's escrow,
+    /// PT-senior cap, and pro-rata math read only `pt_total_supply`.
     pub fn burn(env: Env, from: Address, amount: i128) {
         from.require_auth();
         Self::require_amount_or_panic(&env, amount);

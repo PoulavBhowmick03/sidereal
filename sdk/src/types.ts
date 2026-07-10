@@ -149,6 +149,12 @@ export interface RedeemArgs {
    * Before maturity: recombine `amount` PT + `amount` YT back into SY principal.
    * At/after maturity: redeem `amount` PT for its principal in SY
    * (`amount * WAD / maturity_rate`), capped pro-rata under insolvency.
+   *
+   * Pre-maturity preview (`preview_recombine`) is a point-in-time read of the
+   * live rate: the executed SY-share amount may differ if the rate moves
+   * before submission. Recombine has no on-chain slippage floor, so a caller
+   * needing an exact share count should check the preview against its bound
+   * before submitting.
    */
   amount: bigint;
 }

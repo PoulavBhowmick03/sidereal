@@ -404,6 +404,11 @@ export class StellarYT {
    * Builds a redeem transaction. After maturity, redeems `amount` PT 1:1 for SY
    * via redeem_at_maturity. Before maturity, recombines `amount` PT + `amount`
    * YT back into SY via recombine (the tokenizer requires pt == yt).
+   *
+   * `preview_recombine` is a point-in-time read of the live rate; the SY-share
+   * amount recombine actually executes may differ if the rate moves before
+   * submission. There is no on-chain slippage floor on recombine, so a caller
+   * needing one should check preview_recombine against its bound first.
    */
   async buildRedeem(args: RedeemArgs): Promise<TransactionEnvelope> {
     requirePositive("amount", args.amount);

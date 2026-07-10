@@ -168,6 +168,15 @@ impl Tokenizer {
     /// separately into the holder's claim ledger. Mirrors `recombine` exactly,
     /// including the pro-rata escrow cap, so the preview never overquotes
     /// during a rate-regression shortfall.
+    ///
+    /// Point-in-time read of the live Blend SY rate: if the rate moves between
+    /// this quote and submission, the executed `recombine` share count can
+    /// differ. The underlying value redeemed does not — `recombine` always
+    /// returns `pt_face` worth of principal regardless of rate, so a moved rate
+    /// changes the SY share count, not what it's worth. `recombine` has no
+    /// on-chain `min_sy_out` floor by design; a caller needing an exact share
+    /// count should compare this preview to its bound client-side before
+    /// submitting.
     pub fn preview_recombine(env: Env, pt_amount: i128, yt_amount: i128) -> Result<i128, Error> {
         let config = Self::read_config(&env)?;
         Self::require_live(&env, &config)?;
