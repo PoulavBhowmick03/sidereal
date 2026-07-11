@@ -1,5 +1,12 @@
 # Roadmap: three-week execution plan
 
+> **Superseded.** This was the pre-grant three-week plan. The AMM and YT
+> flash-route auth work it tracks as pending is done — proven on testnet and
+> now live on Stellar mainnet with real funds. See
+> [`../README.md#current-status`](../README.md#current-status) and
+> [`../findings.md`](../findings.md) for current status. Kept as project
+> history.
+
 Goal: land a credible real-settlement Sidereal core demo for Stellar Build
 Station / Instaward review. The product is locked (yield tokenization on
 Stellar). This plan is execution, not strategy.

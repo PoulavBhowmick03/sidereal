@@ -1,6 +1,11 @@
 # Security policy
 
-This is testnet-only, pre-audit software. Do not deposit real funds.
+Sidereal is live on Stellar mainnet but has not had a professional
+third-party audit. The contracts are immutable (no upgrade path), so a
+defect would be permanent. The mainnet deployment currently holds small,
+deliberately limited funds; do not treat it as audited or risk-free. See the
+[README's current-status section](./README.md#current-status) for what has
+and hasn't been verified.
 
 ## Reporting a vulnerability
 
@@ -26,5 +31,7 @@ private advisory until a fix ships, not in public issues or discussions.
 In scope: the Soroban contracts under `contracts/`, the SDK under `sdk/`, and
 the frontend under `app/`.
 
-Out of scope: the testnet deployment itself, third-party dependencies (report
-those upstream), and anything requiring a compromised user device or wallet.
+Out of scope: third-party dependencies (report those upstream, e.g. Blend or
+Soroban SDK issues) and anything requiring a compromised user device or
+wallet. A vulnerability affecting the live mainnet deployment is very much
+in scope — report it privately, not as a public issue.

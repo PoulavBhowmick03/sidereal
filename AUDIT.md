@@ -1,5 +1,11 @@
 Sidereal Product Audit
 
+> **Superseded.** This audit describes an early state (undeployable float-math
+> AMM, no working YT payout, no real yield source). All of it has since been
+> fixed, proven live on testnet, and deployed to Stellar mainnet with real
+> funds. For current status see [`README.md#current-status`](./README.md#current-status)
+> and [`findings.md`](./findings.md). Kept as project history.
+
 1. Executive summary
 
 Sidereal is a working skeleton with one genuinely working primitive inside it. The core tokenization lifecycle (deposit, split, recombine, PT redeem at maturity) moves real SEP-41 tokens and is correct and well tested. That part is real. Everything that makes it a yield product is not.
