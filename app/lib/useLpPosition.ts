@@ -21,7 +21,7 @@ export function useLpPosition(address: string | null, refreshKey: unknown = 0): 
     }
     let cancelled = false;
     const cfg = appConfig();
-    readLpPosition(address, cfg.marketId, cfg, address)
+    readLpPosition(address, cfg.marketId, cfg)
       .then((p) => !cancelled && setPosition(p))
       .catch(() => !cancelled && setPosition(null));
     return () => {

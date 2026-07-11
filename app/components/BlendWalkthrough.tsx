@@ -63,7 +63,7 @@ export function BlendWalkthrough() {
       return;
     }
     let cancelled = false;
-    readTokenBalance(reserve, address, cfg, address)
+    readTokenBalance(reserve, address, cfg)
       .then((b) => !cancelled && setUsdcBalance(b))
       .catch(() => !cancelled && setUsdcBalance(null));
     return () => {

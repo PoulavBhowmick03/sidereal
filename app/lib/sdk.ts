@@ -102,7 +102,7 @@ export function readPosition(
   holder: string,
   marketId: string,
   cfg: AppConfig = appConfig(),
-  simulationSourceAccount = holder,
+  simulationSourceAccount = cfg.simulationSourceAccount,
 ): Promise<Position> {
   return withReadClient(cfg, simulationSourceAccount, (client) =>
     client.getPosition(holder, marketId),
@@ -113,7 +113,7 @@ export function readLpPosition(
   holder: string,
   marketId: string,
   cfg: AppConfig = appConfig(),
-  simulationSourceAccount = holder,
+  simulationSourceAccount = cfg.simulationSourceAccount,
 ): Promise<LpPosition> {
   return withReadClient(cfg, simulationSourceAccount, (client) =>
     client.getLpPosition(holder, marketId),
@@ -124,7 +124,7 @@ export function readTokenBalance(
   tokenContract: string,
   holder: string,
   cfg: AppConfig = appConfig(),
-  simulationSourceAccount = holder,
+  simulationSourceAccount = cfg.simulationSourceAccount,
 ): Promise<bigint> {
   return withReadClient(cfg, simulationSourceAccount, (client) =>
     client.getTokenBalance(tokenContract, holder),
@@ -147,7 +147,7 @@ export function readBlendPosition(
   asset: string,
   holder: string,
   cfg: AppConfig = appConfig(),
-  simulationSourceAccount = holder,
+  simulationSourceAccount = cfg.simulationSourceAccount,
 ): Promise<BlendPosition> {
   return withReadClient(cfg, simulationSourceAccount, (client) =>
     client.getBlendPosition(pool, asset, holder),
@@ -157,7 +157,7 @@ export function readBlendPosition(
 export function readQuote(
   args: SwapArgs,
   cfg: AppConfig = appConfig(),
-  simulationSourceAccount = args.from,
+  simulationSourceAccount = cfg.simulationSourceAccount,
 ): Promise<Quote> {
   return withReadClient(cfg, simulationSourceAccount, (client) => client.quoteSwap(args));
 }

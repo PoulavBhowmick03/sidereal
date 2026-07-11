@@ -18,10 +18,14 @@ import { useTxFlow } from "./tx";
 export function useSidereal() {
   const cfg = useMemo(() => appConfig(), []);
   const { address, signTransaction } = useWallet();
-  const client = useMemo(
-    () => makeClient(cfg, address ?? cfg.simulationSourceAccount),
-    [cfg, address],
-  );
+  // The client's simulationSourceAccount only pays the phantom fee for
+  // read-only simulation (balance/position/quote reads); it is never used to
+  // build or sign the real transaction, which always sources from the
+  // explicit `from` passed to each buildX call. Using a stable, always-funded
+  // account here (never the connected wallet) means reads work even for a
+  // freshly connected wallet that has never received XLM and has no on-chain
+  // account yet.
+  const client = useMemo(() => makeClient(cfg), [cfg]);
   const { phase, run, runSequence } = useTxFlow();
 
   const submit = useCallback(

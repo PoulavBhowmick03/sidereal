@@ -102,7 +102,6 @@ export default function TradePage() {
           minAmountOut: 0n,
           },
           cfg,
-          address,
         );
         if (!cancelled) setQuote(q);
       } catch (err) {

@@ -3,7 +3,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { WAD } from "@sidereal/sdk";
+import { WAD, ContractError } from "@sidereal/sdk";
 import {
   amountError,
   formatMaturityDate,
@@ -52,18 +52,20 @@ const wait = (milliseconds: number) =>
   new Promise((resolve) => window.setTimeout(resolve, milliseconds));
 
 function walletTokenBalanceError(error: unknown, isBlendMarket: boolean): string {
+  // Code 13 is the standard Stellar Asset Contract "trustline entry is
+  // missing" error, checked structurally rather than by matching
+  // ContractError's rendered .message (which reads "contract call failed
+  // with error #13" and does not contain the raw diagnostic text).
+  if (error instanceof ContractError && error.code === 13) {
+    return BLEND_USDC_TRUSTLINE_ERROR;
+  }
   const text =
     error instanceof Error
-      ? `${error.name} ${error.message} ${error.stack ?? ""}`
+      ? `${error.name} ${error.message} ${(error as ContractError).raw ?? ""} ${error.stack ?? ""}`
       : typeof error === "string"
         ? error
         : JSON.stringify(error);
-  const normalized = text.toLowerCase();
-  if (
-    normalized.includes("trustline") ||
-    normalized.includes("contract, #13") ||
-    normalized.includes("contract #13")
-  ) {
+  if (text.toLowerCase().includes("trustline")) {
     return BLEND_USDC_TRUSTLINE_ERROR;
   }
   return isBlendMarket
@@ -123,7 +125,7 @@ export default function MintPage() {
     let cancelled = false;
     setUnderlyingBalance(null);
     setUnderlyingBalanceError(null);
-    readTokenBalance(market.underlying, address, cfg, address)
+    readTokenBalance(market.underlying, address, cfg)
       .then((balance) => {
         if (!cancelled) setUnderlyingBalance(balance);
       })
@@ -190,7 +192,7 @@ export default function MintPage() {
       let granted = 0n;
       while (granted === 0n && Date.now() < deadline) {
         await wait(1_000);
-        granted = await readTokenBalance(market.underlying, address, cfg, address).catch(() => 0n);
+        granted = await readTokenBalance(market.underlying, address, cfg).catch(() => 0n);
       }
       setFaucetRefresh((key) => key + 1);
       setFaucetPhase({ kind: "done", hash });

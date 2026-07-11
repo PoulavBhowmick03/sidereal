@@ -28,7 +28,7 @@ export function useBlendPosition(
     }
 
     let cancelled = false;
-    readBlendPosition(poolAddress, reserveAddress, address, cfg, address)
+    readBlendPosition(poolAddress, reserveAddress, address, cfg)
       .then((p) => !cancelled && setPosition(p))
       .catch(() => !cancelled && setPosition(null));
     return () => {

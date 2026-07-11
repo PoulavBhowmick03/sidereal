@@ -92,7 +92,6 @@ export function TokenizeBlendPanel({
         minAmountOut: 0n,
       },
       cfg,
-      address ?? cfg.simulationSourceAccount,
     )
       .then((quote) => {
         if (!cancelled) setSaleQuote(quote);
