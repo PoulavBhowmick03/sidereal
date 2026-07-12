@@ -570,3 +570,67 @@ body {
     display: none;
   }
 }
+
+/* ---- Docs prose ------------------------------------------------------------
+   Long-form reading voice for /docs. Same darkroom system: paper on ink,
+   hairline dividers, sharp panels, amber reserved for live signals (never
+   used decoratively here). Semantic HTML in, typography out, so docs pages
+   stay plain markup instead of restating classes on every element. */
+@layer components {
+  .docs-prose {
+    @apply text-[15px] leading-7 text-smoke;
+  }
+  .docs-prose > * + * {
+    @apply mt-5;
+  }
+  .docs-prose h2 {
+    @apply mt-12 border-t border-white/10 pt-8 text-xl font-semibold tracking-tight text-paper;
+  }
+  .docs-prose h2:first-child {
+    @apply mt-0 border-t-0 pt-0;
+  }
+  .docs-prose h3 {
+    @apply mt-8 text-base font-semibold text-paper;
+  }
+  .docs-prose strong {
+    @apply font-semibold text-paper;
+  }
+  .docs-prose a {
+    @apply text-paper underline decoration-white/30 underline-offset-4 transition hover:decoration-paper;
+  }
+  .docs-prose ul,
+  .docs-prose ol {
+    @apply space-y-2 pl-5;
+  }
+  .docs-prose ul {
+    @apply list-disc marker:text-graphite;
+  }
+  .docs-prose ol {
+    @apply list-decimal marker:text-graphite;
+  }
+  .docs-prose code {
+    @apply rounded-none border border-white/10 bg-white/[0.04] px-1.5 py-0.5 font-mono text-[13px] text-paper;
+  }
+  .docs-prose pre {
+    @apply overflow-x-auto border border-white/10 bg-carbon p-4 font-mono text-[13px] leading-6 text-smoke;
+  }
+  .docs-prose pre code {
+    @apply border-0 bg-transparent p-0 text-inherit;
+  }
+  .docs-prose table {
+    @apply w-full border-collapse text-[14px];
+  }
+  .docs-prose th {
+    @apply border-b border-white/15 py-2 pr-4 text-left align-top font-medium text-paper;
+  }
+  .docs-prose td {
+    @apply border-b border-white/10 py-2 pr-4 align-top;
+  }
+  .docs-prose hr {
+    @apply border-white/10;
+  }
+  /* Wide tables (contract addresses) scroll in place, never the page. */
+  .docs-table-scroll {
+    @apply overflow-x-auto;
+  }
+}

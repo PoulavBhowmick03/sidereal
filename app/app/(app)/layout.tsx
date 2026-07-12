@@ -43,12 +43,9 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
         <div className="mx-auto flex max-w-[1280px] flex-col items-start justify-between gap-3 px-6 py-8 sm:flex-row sm:items-center">
           <p className="label-data">© 2026 Sidereal Protocol</p>
           <div className="flex flex-wrap items-center gap-6">
-            <a
-              href="https://github.com/PoulavBhowmick03/sidereal/blob/main/docs/DEMO.md"
-              className="label-data transition hover:text-paper"
-            >
+            <Link href="/docs" className="label-data transition hover:text-paper">
               Docs
-            </a>
+            </Link>
             <a
               href="https://github.com/PoulavBhowmick03/sidereal"
               className="label-data transition hover:text-paper"

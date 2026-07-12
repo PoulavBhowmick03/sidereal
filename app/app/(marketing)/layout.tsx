@@ -39,10 +39,7 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
               >
                 GitHub
               </RollingLink>
-              <RollingLink
-                href="https://github.com/PoulavBhowmick03/sidereal/blob/main/docs/DEMO.md"
-                className="label-data transition hover:text-paper"
-              >
+              <RollingLink href="/docs" className="label-data transition hover:text-paper">
                 Docs
               </RollingLink>
               <span className="label-data">Blend USDC · {networkLabel(cfg.networkPassphrase)}</span>
