@@ -21,12 +21,12 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
     <div className="relative flex min-h-screen flex-col bg-ink text-paper">
       <AppBackground />
       <header className="sticky top-0 z-40 border-b border-white/10 bg-ink/90 backdrop-blur-xl">
-        <nav className="mx-auto flex max-w-[1280px] items-center justify-between gap-4 px-6 py-4">
+        <nav className="mx-auto grid max-w-[1280px] grid-cols-[auto_1fr_auto] items-center gap-x-3 gap-y-3 px-4 py-3 sm:flex sm:gap-4 sm:px-6 sm:py-4">
           <Link href="/" className="shrink-0" aria-label="Back to home">
             <Wordmark />
           </Link>
           <AppTabs />
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 justify-self-end sm:gap-3">
             <NetworkPill />
             <TourHelpButton />
             <WalletButton />

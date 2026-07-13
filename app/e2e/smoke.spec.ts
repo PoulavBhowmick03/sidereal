@@ -18,7 +18,7 @@ test("landing page renders the protocol pitch and a launch CTA", async ({ page }
   await expect(page.getByRole("link", { name: /launch app/i }).first()).toBeVisible();
 });
 
-test("nav reaches mint, trade, pool, and portfolio", async ({ page }) => {
+test("nav reaches strategy, mint, trade, pool, and portfolio", async ({ page }) => {
   // The in-app tabs live in the app shell, not on the marketing landing. Enter
   // the app first via Launch App, then exercise the header tabs.
   await page.goto("/");
@@ -27,6 +27,16 @@ test("nav reaches mint, trade, pool, and portfolio", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Trade" })).toBeVisible({ timeout: 15_000 });
 
   const nav = page.locator("header nav");
+
+  await nav.getByRole("link", { name: "Strategy" }).click();
+  await expect(page).toHaveURL(/\/strategy$/, { timeout: 15_000 });
+  await expect(page.getByRole("heading", { name: "Strategies" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Select a strategy" })).toBeVisible();
+  await page.getByRole("button", { name: /tokenized treasuries/i }).click();
+  await expect(page.getByRole("button", { name: "Not available yet" })).toBeVisible();
+  await expect(page.getByText("RWA vault / treasury strategy / isolated SY")).toBeVisible();
+  await page.getByRole("button", { name: /blend usdc supply/i }).click();
+  await expect(page.getByRole("link", { name: "Open market" })).toBeVisible();
 
   await nav.getByRole("link", { name: "Mint" }).click();
   await expect(page).toHaveURL(/\/mint$/, { timeout: 15_000 });

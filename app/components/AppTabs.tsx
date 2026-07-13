@@ -9,6 +9,7 @@ import { appConfig } from "@/lib/config";
 import { useSlideRect } from "@/lib/useSlideRect";
 
 const TABS = [
+  { href: "/strategy", label: "Strategy", tour: undefined },
   { href: "/mint", label: "Mint", tour: "nav-mint" },
   { href: "/trade", label: "Trade", tour: "nav-trade" },
   { href: "/pool", label: "Pool", tour: undefined },
@@ -32,7 +33,7 @@ export function AppTabs() {
   return (
     <ul
       ref={containerRef}
-      className="relative flex flex-1 flex-wrap items-center justify-center gap-x-4 gap-y-2 sm:gap-x-10"
+      className="relative col-span-3 row-start-2 flex w-full flex-nowrap items-center justify-start gap-x-5 overflow-x-auto pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:col-auto sm:row-auto sm:w-auto sm:flex-1 sm:justify-center sm:gap-x-10 sm:overflow-visible sm:pb-0"
     >
       {tabs.map((tab) => {
         const active = pathname === tab.href;

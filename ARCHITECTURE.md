@@ -42,6 +42,13 @@ Each layer is a separate Soroban contract. The dependency only flows downward â€
 
 **Per-underlying contracts.** One SY contract per underlying. For the MVP, exactly one: `SY-blendUSDC`. For each future underlying (deJTRSY, YLDS, etc.), deploy a new SY contract with a new wrapper logic. The tokenizer and AMM treat them identically because they all conform to the same trait.
 
+**Multi-strategy expansion.** The deployed Blend wrapper remains the immutable
+v1 market. New yield sources should use an isolated strategy contract behind a
+reusable SY v2 vault, with one strategy per SY market; they should not be pooled
+behind the existing SY token or swapped into a live market. The contract ABI,
+TTL ownership, market discovery, rollout gates, and adapter test requirements
+are specified in [`docs/plans/MULTI_STRATEGY.md`](./docs/plans/MULTI_STRATEGY.md).
+
 **Why not just use the Blend pool position directly?** Because Blend's bToken doesn't expose a clean ERC-4626-style interface. Wrapping it normalizes the API. It also lets us add a thin permissions layer later (KYB gating for institutional pools, for example) without changing the tokenizer.
 
 ---
