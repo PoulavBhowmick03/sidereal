@@ -457,7 +457,7 @@ fn migrate_reserve_index_rejects_non_admin() {
 
     assert!(matches!(
         f.sy_client.try_migrate_reserve_index(&f.alice),
-        Err(Ok(SyError::NotInitialized))
+        Err(Ok(SyError::NotAuthorized))
     ));
     // Still bricked: the rejected call left the stored index untouched.
     assert_eq!(f.sy_client.config().reserve_index, 0);
