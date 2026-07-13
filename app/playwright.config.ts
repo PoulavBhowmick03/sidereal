@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { defineConfig, devices } from "@playwright/test";
 
@@ -12,7 +13,12 @@ const PORT = process.env.E2E_PORT ?? "3100";
 const baseURL = process.env.E2E_BASE_URL ?? `http://localhost:${PORT}`;
 const appDir = __dirname;
 
-process.loadEnvFile(path.join(appDir, ".env.local"));
+// Local runs pick up the deployed-market env. CI has no .env.local (it is
+// gitignored), and loadEnvFile throws on a missing file, so guard it.
+const envFile = path.join(appDir, ".env.local");
+if (existsSync(envFile)) {
+  process.loadEnvFile(envFile);
+}
 
 export default defineConfig({
   testDir: "./e2e",
